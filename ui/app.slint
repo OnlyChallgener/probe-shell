@@ -526,6 +526,8 @@ export component AppWindow inherits Window {
 
     // --- Session list ------------------------------------------------------
     in property <[SessionInfo]> sessions;
+    in-out property <string> session-query;
+    in-out property <bool> privacy-mode: false;
 
     // --- Tabs --------------------------------------------------------------
     in property <[TabInfo]> tabs;
@@ -582,6 +584,8 @@ export component AppWindow inherits Window {
     callback move-session(string /* session-id */, string /* group */);
     callback toggle-group(string /* group */);
     callback remove-session(string /* session-id */);
+    callback search-sessions(string /* query */);
+    callback toggle-privacy-mode();
     callback session-dialog-submit(SessionDraft);
     callback session-dialog-cancel();
     callback session-dialog-pick-key();
@@ -810,6 +814,10 @@ export component AppWindow inherits Window {
                 compact: true;
                 sessions: root.sessions;
                 import-hint: root.ssh-import-hint;
+                session-query <=> root.session-query;
+                privacy-mode: root.privacy-mode;
+                search-changed(q) => { root.search-sessions(q); }
+                toggle-privacy => { root.toggle-privacy-mode(); }
                 collapse => {
                     root.welcome-collapsed = true;
                     root.set-welcome-collapsed(true);
@@ -1081,6 +1089,10 @@ export component AppWindow inherits Window {
                     height: parent.height;
                     sessions: root.sessions;
                     import-hint: root.ssh-import-hint;
+                    session-query <=> root.session-query;
+                    privacy-mode: root.privacy-mode;
+                    search-changed(q) => { root.search-sessions(q); }
+                    toggle-privacy => { root.toggle-privacy-mode(); }
                     new-session => { root.new-session-clicked(); }
                     import-ssh-config => { root.import-ssh-config(); }
                     connect-session(id) => { root.connect-session(id); }

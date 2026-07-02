@@ -8,6 +8,11 @@ export struct SessionInfo {
     host: string,
     port: int,
     user: string,
+    display-host: string,
+    display-user: string,
+    device-kind: string,
+    device-icon: string,
+    action-hint: string,
     auth: string,      // "password" | "key"
     last-used: string, // ISO timestamp or "never"
     group: string,        // folder/group name ("" = ungrouped)
@@ -27,7 +32,7 @@ component SessionRow inherits Rectangle {
     // "move to group" submenu can iterate it to list each group exactly once.
     in property <[SessionInfo]> all-sessions;
 
-    height: 36px;
+    height: 54px;
     border-radius: Theme.radius-sm;
     background: touch.has-hover ? Theme.bg-hover : transparent;
     animate background { duration: 120ms; }
@@ -161,42 +166,63 @@ component SessionRow inherits Rectangle {
         spacing: 12px;
 
         Rectangle {
-            width: 18px; height: 18px;
+            width: 30px; height: 30px;
             y: (parent.height - self.height) / 2;
-            border-radius: 3px;
+            border-radius: Theme.radius-sm;
             background: Theme.bg-elevated;
             Text {
-                text: "\u{E875}";   // Material Icons "dns" — server/host glyph
+                text: session.device-icon == "router" ? "\u{E328}"
+                    : session.device-icon == "storage" ? "\u{E1DB}"
+                    : session.device-icon == "cloud" ? "\u{E2BD}"
+                    : session.device-icon == "desktop_windows" ? "\u{E30C}"
+                    : session.device-icon == "settings_ethernet" ? "\u{E8BE}"
+                    : "\u{E875}";
                 font-family: "Material Icons";
-                color: Theme.text-secondary;
-                font-size: Theme.fs-sm;
+                color: Theme.accent;
+                font-size: Theme.fs-lg;
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
         }
 
-        Text {
-            text: session.name;
-            color: Theme.text-primary;
-            font-size: Theme.fs-md;
-            vertical-alignment: center;
-            width: 180px;
-            overflow: elide;
-        }
-        Text {
-            text: session.host + ":" + session.port;
-            color: Theme.text-secondary;
-            font-size: Theme.fs-sm;
-            vertical-alignment: center;
-            width: 180px;
-            overflow: elide;
-        }
-        Text {
-            text: session.user;
-            color: Theme.text-secondary;
-            font-size: Theme.fs-sm;
-            vertical-alignment: center;
+        VerticalLayout {
+            spacing: 3px;
             horizontal-stretch: 1;
+            HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    text: session.name;
+                    color: Theme.text-primary;
+                    font-size: Theme.fs-md;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                }
+                Rectangle {
+                    width: 72px;
+                    height: 20px;
+                    border-radius: 10px;
+                    background: Theme.bg-elevated;
+                    border-width: 1px;
+                    border-color: Theme.border-subtle;
+                    Text {
+                        text: session.device-kind;
+                        color: Theme.text-secondary;
+                        font-size: Theme.fs-xs;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+            }
+            Text {
+                text: session.display-host + ":" + session.port + "  ·  " + session.display-user + "  ·  " + session.action-hint;
+                color: Theme.text-secondary;
+                font-size: Theme.fs-xs;
+                vertical-alignment: center;
+                overflow: elide;
+            }
         }
     }
 }
@@ -205,6 +231,8 @@ component SessionRow inherits Rectangle {
 export component Welcome inherits Rectangle {
     in property <[SessionInfo]> sessions;
     in property <string> import-hint;        // result text after an import
+    in-out property <string> session-query;
+    in property <bool> privacy-mode: false;
     callback new-session();
     callback import-ssh-config();
     callback connect-session(string);
@@ -216,6 +244,8 @@ export component Welcome inherits Rectangle {
     callback edit-group(string /* current-name */);
     callback delete-group(string /* name */);
     callback remove-session(string);
+    callback search-changed(string);
+    callback toggle-privacy();
     // Compact mode (welcome-as-sidebar): drop the big title/tagline header and
     // tighten padding so the session list fits a narrow docked panel (#v0.5).
     in property <bool> compact;
@@ -289,6 +319,10 @@ export component Welcome inherits Rectangle {
                         font-size: Theme.fs-sm;
                         vertical-alignment: center;
                     }
+                    if !root.compact : GhostButton {
+                        text: root.privacy-mode ? @tr("Privacy on") : @tr("Privacy");
+                        clicked => { root.toggle-privacy(); }
+                    }
                     // Full page (wide) → the button sits inline on the header row.
                     if !root.compact : PrimaryButton {
                         text: @tr("+ New session");
@@ -301,6 +335,47 @@ export component Welcome inherits Rectangle {
                 if root.compact : PrimaryButton {
                     text: @tr("+ New session");
                     clicked => { root.new-session(); }
+                }
+
+                Rectangle {
+                    height: 32px;
+                    border-radius: Theme.radius-sm;
+                    border-width: 1px;
+                    border-color: search-input.has-focus ? Theme.accent : Theme.border-subtle;
+                    background: Theme.bg-root;
+                    clip: true;
+                    Text {
+                        x: 10px;
+                        y: 0px;
+                        height: parent.height;
+                        text: "\u{E8B6}";
+                        font-family: "Material Icons";
+                        color: Theme.text-muted;
+                        font-size: Theme.fs-sm;
+                        vertical-alignment: center;
+                    }
+                    search-input := TextInput {
+                        x: 32px;
+                        y: 0px;
+                        width: parent.width - 42px;
+                        height: parent.height;
+                        text <=> root.session-query;
+                        color: Theme.text-primary;
+                        font-family: Theme.ui-font-family;
+                        font-size: Theme.fs-md;
+                        vertical-alignment: center;
+                        single-line: true;
+                        edited => { root.search-changed(self.text); }
+                    }
+                    if root.session-query == "" : Text {
+                        x: 32px;
+                        y: 0px;
+                        height: parent.height;
+                        text: @tr("Search sessions, host, user...");
+                        color: Theme.text-muted;
+                        font-size: Theme.fs-sm;
+                        vertical-alignment: center;
+                    }
                 }
 
                 if sessions.length == 0 : Rectangle {

@@ -269,7 +269,7 @@ fn default_wallpaper() -> String {
 }
 
 /// Bump when `migrate_defaults` gains a new one-time default-layout change.
-pub const DEFAULTS_REV: u32 = 1;
+pub const DEFAULTS_REV: u32 = 2;
 
 /// A brand-new config (no file yet, or the old one was corrupt). Seeds the
 /// New-user default layout for Probe Shell: sci-fi tech wallpaper, welcome page
@@ -281,6 +281,8 @@ fn fresh_config() -> ConfigFile {
         welcome_as_sidebar: true,
         sidebar_dock: "right".to_string(),
         wallpaper_overlay: 0.48,
+        quick_commands: crate::quick_actions::starter_quick_commands(),
+        quick_groups: crate::quick_actions::starter_quick_groups(),
         defaults_rev: DEFAULTS_REV,
         ..ConfigFile::default()
     }
@@ -309,6 +311,19 @@ fn migrate_defaults(cfg: &mut ConfigFile) -> bool {
         // Never moved the resource panel (empty = the old left default) → right.
         if cfg.sidebar_dock.trim().is_empty() {
             cfg.sidebar_dock = "right".to_string();
+        }
+    }
+    // rev 2: seed a small one-click ops command library and keep it opt-in safe.
+    // Only seed when the user has no quick commands yet, so existing custom
+    // command bars are never polluted.
+    if cfg.defaults_rev < 2 {
+        if cfg.quick_commands.is_empty() {
+            cfg.quick_commands = crate::quick_actions::starter_quick_commands();
+            for group in crate::quick_actions::starter_quick_groups() {
+                if !cfg.quick_groups.iter().any(|g| g == &group) {
+                    cfg.quick_groups.push(group);
+                }
+            }
         }
     }
     cfg.defaults_rev = DEFAULTS_REV;
@@ -593,6 +608,10 @@ pub struct ConfigFile {
     /// it on stops the GitHub releases query and the banner.
     #[serde(default)]
     pub update_check_disabled: bool,
+    /// Privacy mode masks hostnames/IPs and usernames in the session list so
+    /// screenshots can be shared without exposing sensitive endpoints.
+    #[serde(default)]
+    pub privacy_mode: bool,
     /// One-time default-layout migration marker (#new-user-defaults). 0 = config
     /// predates the migration. `migrate_defaults` bumps it to `DEFAULTS_REV` after
     /// pushing the Probe Shell layout (tech wallpaper / welcome-as-sidebar /
@@ -1064,6 +1083,12 @@ impl ConfigStore {
     }
     pub fn set_update_check_enabled(&mut self, enabled: bool) {
         self.cache.update_check_disabled = !enabled;
+    }
+    pub fn privacy_mode(&self) -> bool {
+        self.cache.privacy_mode
+    }
+    pub fn set_privacy_mode(&mut self, enabled: bool) {
+        self.cache.privacy_mode = enabled;
     }
     pub fn wallpaper_overlay(&self) -> f32 {
         let a = self.cache.wallpaper_overlay;

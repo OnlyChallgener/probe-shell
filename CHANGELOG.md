@@ -3,6 +3,24 @@
 All notable changes are documented here. 本文件记录所有重要变更。
 中英对照（English first, 中文在后）.
 
+## [0.5.3-probe1] - 2026-07-02
+
+### Added / 新增
+
+- **Smart session cards / 智能会话卡片.** The welcome list now classifies sessions as OpenWrt, Router, NAS, Docker, Linux, Cloud, Windows, Serial or Telnet and shows a compact hint instead of a plain IP-only row.
+- **Session search / 会话搜索.** Added a compact search box for name / host / user / note / group without adding a heavy dashboard. Search hides empty groups to avoid visual clutter.
+- **Privacy mode / 隐私模式.** Added a one-click privacy toggle on the welcome page to mask IP/host and username in the session list for screenshots and demos.
+- **Starter quick ops / 默认一键运维命令.** Brand-new installs, and existing installs without quick commands, get a small System / OpenWrt / Docker command set. Existing custom command bars are not touched.
+- **Connection error hints / 连接错误解释.** Common disconnect reasons now append a short human-readable hint, e.g. auth failure, timeout, refused, unreachable or host-key issue.
+
+### Fixed / 修复
+
+- **AUR workflow validation / AUR 工作流校验.** `aur-publish.yml` no longer references `secrets.*` directly in `if:` expressions, avoiding the invalid workflow error.
+
+### Changed / 变更
+
+- Version bumped to `0.5.3` for the next Probe Shell innovation preview.
+- The new UI additions are deliberately compact: one search field, one privacy button and slightly taller session rows, with elided text to avoid overlap and clipping.
 
 ## [0.5.2-probe1] - 2026-07-02
 

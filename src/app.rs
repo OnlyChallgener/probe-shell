@@ -655,7 +655,32 @@ pub fn run() -> Result<()> {
 
     let sessions_model: Rc<VecModel<SessionInfo>> = Rc::new(VecModel::default());
     window.set_sessions(ModelRc::from(sessions_model.clone()));
+    window.set_privacy_mode(store.borrow().privacy_mode());
     sync_sessions_to_model(&store.borrow(), &sessions_model);
+    {
+        let store = store.clone();
+        let sessions_model = sessions_model.clone();
+        window.on_search_sessions(move |q| {
+            sync_sessions_to_model_filtered(&store.borrow(), &sessions_model, q.as_str());
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        let sessions_model = sessions_model.clone();
+        window.on_toggle_privacy_mode(move || {
+            let mut s = store.borrow_mut();
+            let next = !s.privacy_mode();
+            s.set_privacy_mode(next);
+            let _ = s.save();
+            drop(s);
+            if let Some(w) = weak.upgrade() {
+                w.set_privacy_mode(next);
+                let q = w.get_session_query().to_string();
+                sync_sessions_to_model_filtered(&store.borrow(), &sessions_model, &q);
+            }
+        });
+    }
 
     let tabs_model: Rc<VecModel<TabInfo>> = Rc::new(VecModel::default());
     tabs_model.push(TabInfo {
@@ -1617,17 +1642,48 @@ fn session_groups_model(store: &ConfigStore) -> ModelRc<SharedString> {
     )))
 }
 
+fn session_matches_query(s: &Session, query: &str) -> bool {
+    let q = query.trim().to_ascii_lowercase();
+    if q.is_empty() {
+        return true;
+    }
+    let hay = format!(
+        "{} {} {} {} {} {}",
+        s.name,
+        s.host,
+        s.user,
+        s.group,
+        s.note,
+        s.kind.as_str()
+    )
+    .to_ascii_lowercase();
+    hay.contains(&q)
+}
+
 fn sync_sessions_to_model(store: &ConfigStore, model: &VecModel<SessionInfo>) {
+    sync_sessions_to_model_filtered(store, model, "");
+}
+
+fn sync_sessions_to_model_filtered(
+    store: &ConfigStore,
+    model: &VecModel<SessionInfo>,
+    query: &str,
+) {
     // Group sessions by their `group` (named groups alphabetically, ungrouped
     // last), then by name within each group, and tag the first row of every
     // group with a header so the welcome list can render a folder heading (#41).
+    // `query` is applied before grouping so search never creates empty headers.
     let sessions = store.sessions();
+    let privacy = store.privacy_mode();
+    let query = query.trim();
 
     // Ordered list of display groups:
     //  - "default" only when there are ungrouped sessions (group == "")
     //  - named groups: explicit folders (incl. empty ones) ∪ sessions' groups,
     //    de-duplicated, alphabetical.
-    let has_default = sessions.iter().any(|s| s.group.is_empty());
+    let has_default = sessions
+        .iter()
+        .any(|s| s.group.is_empty() && session_matches_query(s, query));
     let mut named: Vec<String> = store
         .groups()
         .iter()
@@ -1635,7 +1691,7 @@ fn sync_sessions_to_model(store: &ConfigStore, model: &VecModel<SessionInfo>) {
         .chain(
             sessions
                 .iter()
-                .filter(|s| !s.group.is_empty())
+                .filter(|s| !s.group.is_empty() && session_matches_query(s, query))
                 .map(|s| s.group.clone()),
         )
         .collect();
@@ -1649,13 +1705,19 @@ fn sync_sessions_to_model(store: &ConfigStore, model: &VecModel<SessionInfo>) {
     display_groups.extend(named);
 
     // Placeholder row for an empty folder; id == "" marks it as a group header
-    // with no session (used by the UI to gate the "delete group" action).
+    // with no session (used by the UI to gate the "delete group" action). During
+    // search, empty groups are hidden so the list stays short and readable.
     let blank = |group: &str| SessionInfo {
         id: "".into(),
         name: "".into(),
         host: "".into(),
         port: 0,
         user: "".into(),
+        display_host: "".into(),
+        display_user: "".into(),
+        device_kind: "".into(),
+        device_icon: "dns".into(),
+        action_hint: "".into(),
         auth: "".into(),
         last_used: "".into(),
         group: group.into(),
@@ -1666,22 +1728,47 @@ fn sync_sessions_to_model(store: &ConfigStore, model: &VecModel<SessionInfo>) {
     let mut rows: Vec<SessionInfo> = Vec::new();
     for group in &display_groups {
         let mut gs: Vec<&Session> = if group == "default" {
-            sessions.iter().filter(|s| s.group.is_empty()).collect()
+            sessions
+                .iter()
+                .filter(|s| s.group.is_empty() && session_matches_query(s, query))
+                .collect()
         } else {
-            sessions.iter().filter(|s| &s.group == group).collect()
+            sessions
+                .iter()
+                .filter(|s| &s.group == group && session_matches_query(s, query))
+                .collect()
         };
         gs.sort_by_key(|s| s.name.to_lowercase());
 
         if gs.is_empty() {
-            rows.push(blank(group));
+            if query.is_empty() {
+                rows.push(blank(group));
+            }
         } else {
             for (i, s) in gs.iter().enumerate() {
+                let profile = crate::device_profile::classify(
+                    s.kind.as_str(),
+                    &s.name,
+                    &s.host,
+                    &s.user,
+                    &s.note,
+                );
+                let hint = if store.language() == "en" {
+                    profile.hint_en
+                } else {
+                    profile.hint_zh
+                };
                 rows.push(SessionInfo {
                     id: s.id.clone().into(),
                     name: s.name.clone().into(),
                     host: s.host.clone().into(),
                     port: s.port as i32,
                     user: s.user.clone().into(),
+                    display_host: crate::privacy::display_host(&s.host, privacy).into(),
+                    display_user: crate::privacy::display_user(&s.user, privacy).into(),
+                    device_kind: profile.label.into(),
+                    device_icon: profile.icon.into(),
+                    action_hint: hint.into(),
                     auth: s.auth.as_str().into(),
                     last_used: s
                         .last_used
@@ -3493,17 +3580,19 @@ fn apply_session_event_to_window(
             }
         }
         SessionEvent::Closed(reason) => {
+            let reason_with_hint = crate::error_hints::append_hint(&reason, win.get_lang_en());
             // Print the hint into the terminal itself (FinalShell-style), via a
             // synthetic Output event so it reuses the normal render path (#79).
             apply_session_event_to_window(
                 win,
                 tab_id,
                 SessionEvent::Output(format!(
-                    "\r\n\x1b[31m{}\x1b[0m\r\n",
+                    "\r\n\x1b[31m{}\x1b[0m\r\n{}\r\n",
                     crate::i18n::t(
                         "连接已断开,按 Enter 重新连接",
                         "Disconnected — press Enter to reconnect"
-                    )
+                    ),
+                    reason_with_hint
                 )),
                 bufs,
                 statuses,
@@ -3511,7 +3600,8 @@ fn apply_session_event_to_window(
                 local_net_hist,
             );
             update_tab(&|t| t.connected = false);
-            update_terminal(&|t| t.status = format!("{} — {reason}", crate::i18n::t("已断开", "Disconnected")).into());
+            let status_reason = reason_with_hint.lines().next().unwrap_or(reason.as_str());
+            update_terminal(&|t| t.status = format!("{} — {status_reason}", crate::i18n::t("已断开", "Disconnected")).into());
             if let Some(st) = statuses.lock().unwrap().get_mut(tab_id) {
                 st.state = 2;
             }

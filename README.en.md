@@ -73,6 +73,17 @@ open /Applications/probe-shell.app
 
 When reporting a crash, include both files if possible.
 
+
+## v0.5.3-probe1 innovation preview
+
+- Smart session cards: detects OpenWrt, Router, NAS, Docker, Linux, Cloud, Windows, Serial and Telnet from local session metadata.
+- Session search: a compact search box for name, host, user, note and group.
+- Privacy mode: masks host/IP and username in the session list for screenshots.
+- Starter quick ops: new installs get small System / OpenWrt / Docker command groups. Existing custom commands are not touched.
+- Connection error hints: common disconnect reasons get a short human-readable explanation.
+
+The UI changes are intentionally small: one search field, one privacy button and clearer session rows with elided text, to avoid overlap and clipping.
+
 ## Features
 
 ### Done
