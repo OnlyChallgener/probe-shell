@@ -5,20 +5,20 @@
 <dict>
     <!-- The executable inside Contents/MacOS/ -->
     <key>CFBundleExecutable</key>
-    <string>meatshell</string>
+    <string>probe-shell</string>
 
-    <!-- Points to Contents/Resources/meatshell.icns (no extension) -->
+    <!-- Points to Contents/Resources/probe-shell.icns (no extension) -->
     <key>CFBundleIconFile</key>
-    <string>meatshell</string>
+    <string>probe-shell</string>
 
     <key>CFBundleIdentifier</key>
-    <string>dev.meatshell.meatshell</string>
+    <string>dev.onlychallenger.probeshell</string>
 
     <key>CFBundleName</key>
-    <string>meatshell</string>
+    <string>Probe Shell</string>
 
     <key>CFBundleDisplayName</key>
-    <string>meatshell</string>
+    <string>Probe Shell</string>
 
     <key>CFBundlePackageType</key>
     <string>APPL</string>
@@ -39,6 +39,6 @@
     <string>11.0</string>
 
     <key>NSHumanReadableCopyright</key>
-    <string>Copyright © 2024 meatshell contributors. MIT OR Apache-2.0.</string>
+    <string>Copyright © 2024 Probe Shell contributors. MIT OR Apache-2.0.</string>
 </dict>
 </plist>

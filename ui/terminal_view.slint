@@ -210,6 +210,12 @@ export component TerminalView inherits Rectangle {
     // 0 = none, -1 = above top (scroll to older), +1 = below bottom (newer).
     property <int> autoscroll-dir: 0;
     property <length> vis-y: 0px;   // scratch: cursor Y within the visible viewport
+    // Defer initial/visibility focus to the next event-loop tick. Calling
+    // ime-input.focus() synchronously while Slint/AccessKit is constructing
+    // the accessibility tree can re-enter the winit focus-change path and
+    // panic with "RefCell already borrowed" when a tab is created during
+    // active terminal output.
+    property <bool> focus-pending: false;
 
     background: Theme.term-bg;
     forward-focus: ime-input;
@@ -295,9 +301,20 @@ export component TerminalView inherits Rectangle {
     }
     changed visible => {
         if (self.visible) {
-            ime-input.focus();
+            root.focus-pending = true;
             // Re-sync the PTY size on return (it was frozen while hidden).
             root.terminal-resize(root.term-cols, root.term-rows);
+        }
+    }
+
+    // One-shot deferred focus. Keep this outside component init/visible-change
+    // callbacks so focus changes happen after AccessKit finishes tree rebuilds.
+    focus-delay-timer := Timer {
+        interval: 1ms;
+        running: root.focus-pending && root.visible;
+        triggered => {
+            root.focus-pending = false;
+            ime-input.focus();
         }
     }
 
@@ -365,7 +382,7 @@ export component TerminalView inherits Rectangle {
             forward-focus: ime-input;
             property <bool> cursor-blink: true;
 
-            init => { ime-input.focus(); }
+            init => { root.focus-pending = true; }
 
             Timer {
                 // Stop blinking (and thus repainting) when the window isn't

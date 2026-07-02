@@ -196,7 +196,7 @@ export component InterfacePanel inherits Rectangle {
     property <bool> wp-is-custom:
         root.current-wallpaper != "" && root.current-wallpaper != "builtin:light"
         && root.current-wallpaper != "builtin:dark" && root.current-wallpaper != "builtin:tech"
-        && root.current-wallpaper != "builtin:miku";
+        && root.current-wallpaper != "builtin:aurora";
 
     callback set-term-font(string);
     callback set-term-font-size(int);
@@ -333,7 +333,7 @@ export component InterfacePanel inherits Rectangle {
                     border-color: Theme.border-subtle;
                     Text {
                         x: 12px;
-                        text: "meatshell ~$ echo preview 0123";
+                        text: "probe-shell ~$ echo preview 0123";
                         font-family: Theme.term-font-family;
                         font-size: Theme.term-font-size;
                         color: Theme.term-fg;
@@ -401,7 +401,7 @@ export component InterfacePanel inherits Rectangle {
                                 }
                             }
                         }
-                        Text { text: root.lang-en ? "Meat Light" : "简约·浅"; font-size: 11px * Theme.panel-font;
+                        Text { text: root.lang-en ? "Probe Light" : "探针·浅"; font-size: 11px * Theme.panel-font;
                                color: Theme.text-secondary; horizontal-alignment: center; }
                     }
                     VerticalLayout {
@@ -420,7 +420,7 @@ export component InterfacePanel inherits Rectangle {
                                 }
                             }
                         }
-                        Text { text: root.lang-en ? "Meat Dark" : "简约·暗"; font-size: 11px * Theme.panel-font;
+                        Text { text: root.lang-en ? "Probe Dark" : "探针·暗"; font-size: 11px * Theme.panel-font;
                                color: Theme.text-secondary; horizontal-alignment: center; }
                     }
                     VerticalLayout {
@@ -453,15 +453,15 @@ export component InterfacePanel inherits Rectangle {
                         spacing: 5px;
                         WallpaperSwatch {
                             width: 100px;
-                            selected: root.current-wallpaper == "builtin:miku";
-                            clicked => { root.set-wallpaper("builtin:miku"); }
+                            selected: root.current-wallpaper == "builtin:aurora";
+                            clicked => { root.set-wallpaper("builtin:aurora"); }
                             Image {
                                 width: 100%; height: 100%;
-                                source: @image-url("../assets/miku.jpg");
+                                source: @image-url("../assets/aurora.jpg");
                                 image-fit: cover;
                             }
                         }
-                        Text { text: "Miku"; font-size: 11px * Theme.panel-font;
+                        Text { text: root.lang-en ? "Aurora" : "极光"; font-size: 11px * Theme.panel-font;
                                color: Theme.text-secondary; horizontal-alignment: center; }
                     }
                 }
@@ -680,7 +680,7 @@ export component InterfacePanel inherits Rectangle {
                 SettingRow {
                     label: root.lang-en ? "Check for new versions on startup" : "启动时检查新版本";
                     desc: root.lang-en
-                        ? "Off: meatshell no longer queries GitHub for releases and the update banner won't appear (takes effect next launch)."
+                        ? "Off: probe-shell no longer queries GitHub for releases and the update banner won't appear (takes effect next launch)."
                         : "关闭后:不再向 GitHub 查询新版本,也不会弹出更新提示(下次启动生效)。";
                     show-divider: false;
                     Switch {

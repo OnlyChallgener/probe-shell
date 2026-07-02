@@ -39,8 +39,8 @@ pub struct Wallpaper {
 
 /// Resolve a stored wallpaper id into an image + palette.
 ///
-/// ids: `""` → none; `"builtin:light"`; `"builtin:dark"`; anything else is
-/// treated as a filesystem path to a user image. Returns `None` for "no
+/// ids: `""` → none; `"builtin:light"`; `"builtin:dark"`; `"builtin:tech"`;
+/// `"builtin:aurora"`; anything else is treated as a filesystem path to a user image. Returns `None` for "no
 /// wallpaper" or when a custom file can't be decoded.
 pub fn load(id: &str) -> Option<Wallpaper> {
     if id.is_empty() {
@@ -50,7 +50,7 @@ pub fn load(id: &str) -> Option<Wallpaper> {
         "builtin:light" => render_builtin(false),
         "builtin:dark" => render_builtin(true),
         "builtin:tech" => render_tech(),
-        "builtin:miku" => decode_miku()?,
+        "builtin:aurora" | "builtin:miku" => decode_aurora()?,
         path => decode_custom(path)?,
     };
     let palette = derive_palette(&buf);
@@ -62,7 +62,7 @@ pub fn load(id: &str) -> Option<Wallpaper> {
 
 /// True if `id` names one of the procedurally-drawn built-ins.
 pub fn is_builtin(id: &str) -> bool {
-    id == "builtin:light" || id == "builtin:dark" || id == "builtin:tech" || id == "builtin:miku"
+    id == "builtin:light" || id == "builtin:dark" || id == "builtin:tech" || id == "builtin:aurora" || id == "builtin:miku"
 }
 
 // ── Built-in wallpapers ───────────────────────────────────────────────────────
@@ -217,11 +217,11 @@ fn decode_custom(path: &str) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
     Some(to_buffer(image::open(path).ok()?.to_rgba8()))
 }
 
-/// The bundled "Miku" wallpaper, embedded in the binary so it ships as a
-/// built-in (the procedural built-ins are drawn in code; this one is a real
-/// image). The asset is pre-compressed to 2560×1440 (#new-user-defaults).
-fn decode_miku() -> Option<SharedPixelBuffer<Rgba8Pixel>> {
-    const BYTES: &[u8] = include_bytes!("../assets/miku.jpg");
+/// Bundled Probe Shell aurora wallpaper. It is a generated, original sci-fi
+/// glass background used as an optional built-in wallpaper. `builtin:miku` is
+/// accepted as a legacy alias so old configs do not break.
+fn decode_aurora() -> Option<SharedPixelBuffer<Rgba8Pixel>> {
+    const BYTES: &[u8] = include_bytes!("../assets/aurora.jpg");
     Some(to_buffer(image::load_from_memory(BYTES).ok()?.to_rgba8()))
 }
 

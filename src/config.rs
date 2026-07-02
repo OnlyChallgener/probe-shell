@@ -5,7 +5,7 @@
 //! preferred so the whole app can ride along on a USB stick and never litters
 //! the user profile. When the executable lives somewhere read-only (a
 //! system-wide install under Program Files / `/usr`), it falls back to the
-//! per-user OS config dir (e.g. `%APPDATA%/meatshell`, `~/.config/meatshell`),
+//! per-user OS config dir (e.g. `%APPDATA%/probe-shell`, `~/.config/probe-shell`),
 //! which is also where every pre-0.4.15 version stored its data — so existing
 //! installs keep working untouched. See [`data_dir`].
 //!
@@ -79,9 +79,9 @@ pub fn log_dir() -> PathBuf {
 }
 
 /// Pre-0.4.15 location: the per-user OS config dir
-/// (`%APPDATA%/meatshell`, `~/.config/meatshell`, …).
+/// (`%APPDATA%/probe-shell`, `~/.config/probe-shell`, …).
 fn legacy_data_dir() -> Option<PathBuf> {
-    ProjectDirs::from("dev", "meatshell", "meatshell")
+    ProjectDirs::from("dev", "OnlyChallenger", "probe-shell")
         .map(|d| d.config_dir().to_path_buf())
 }
 
@@ -126,7 +126,7 @@ fn resolve_data_dir() -> PathBuf {
 
     // Fall back to the legacy per-user dir (also the pre-0.4.15 location). Last
     // resort: a temp dir, so the app still launches if neither is available.
-    let dir = legacy.unwrap_or_else(|| std::env::temp_dir().join("meatshell"));
+    let dir = legacy.unwrap_or_else(|| std::env::temp_dir().join("probe-shell"));
     let _ = fs::create_dir_all(&dir);
     dir
 }
@@ -263,8 +263,8 @@ fn default_parity() -> String {
 fn default_wallpaper() -> String {
     // Serde default for the `wallpaper` field: kept at the old "幻想 3048" so an
     // *existing* config that predates the field stays on tech — `migrate_defaults`
-    // then upgrades those still-on-tech users to miku (and leaves real choices
-    // alone). Brand-new installs get miku straight from `fresh_config`.
+    // keeps those users on the sci-fi tech wallpaper. Brand-new installs get
+    // the same Probe Shell default from `fresh_config`.
     "builtin:tech".to_string()
 }
 
@@ -272,15 +272,15 @@ fn default_wallpaper() -> String {
 pub const DEFAULTS_REV: u32 = 1;
 
 /// A brand-new config (no file yet, or the old one was corrupt). Seeds the
-/// new-user default layout (#new-user-defaults): miku wallpaper, welcome page as
-/// a left sidebar, resource panel docked right, a 0.38 wallpaper overlay — and
-/// marks the migration done so it isn't re-applied.
+/// New-user default layout for Probe Shell: sci-fi tech wallpaper, welcome page
+/// as a left sidebar, resource panel docked right, a 0.48 wallpaper overlay —
+/// and marks the migration done so it is not re-applied.
 fn fresh_config() -> ConfigFile {
     ConfigFile {
-        wallpaper: "builtin:miku".to_string(),
+        wallpaper: "builtin:tech".to_string(),
         welcome_as_sidebar: true,
         sidebar_dock: "right".to_string(),
-        wallpaper_overlay: 0.38,
+        wallpaper_overlay: 0.48,
         defaults_rev: DEFAULTS_REV,
         ..ConfigFile::default()
     }
@@ -294,16 +294,13 @@ fn migrate_defaults(cfg: &mut ConfigFile) -> bool {
     if cfg.defaults_rev >= DEFAULTS_REV {
         return false;
     }
-    // rev 1: miku / welcome-as-sidebar / right-docked resources / 0.38 overlay.
+    // rev 1: Probe Shell default layout / welcome-as-sidebar / right-docked resources / 0.48 overlay.
     if cfg.defaults_rev < 1 {
-        // Old default wallpaper → miku. A custom path, "none" (""), or any other
-        // built-in means the user chose it, so leave it.
-        if cfg.wallpaper == "builtin:tech" {
-            cfg.wallpaper = "builtin:miku".to_string();
-        }
-        // Overlay still unset (0 = "use the 0.86 default") → 0.38.
+        // Keep the sci-fi tech wallpaper as Probe Shell's default. A custom path,
+        // "none" (""), or any other built-in means the user chose it, so leave it.
+        // Overlay still unset (0 = "use the 0.86 default") → 0.48.
         if cfg.wallpaper_overlay <= 0.0 {
-            cfg.wallpaper_overlay = 0.38;
+            cfg.wallpaper_overlay = 0.48;
         }
         // Never enabled the welcome sidebar → enable it.
         if !cfg.welcome_as_sidebar {
@@ -598,15 +595,15 @@ pub struct ConfigFile {
     pub update_check_disabled: bool,
     /// One-time default-layout migration marker (#new-user-defaults). 0 = config
     /// predates the migration. `migrate_defaults` bumps it to `DEFAULTS_REV` after
-    /// pushing the new look (miku wallpaper / welcome-as-sidebar / right-docked
-    /// resource panel / 0.38 overlay) to users still sitting on the old defaults.
+    /// pushing the Probe Shell layout (tech wallpaper / welcome-as-sidebar /
+    /// right-docked resource panel / 0.48 overlay) to users still sitting on old defaults.
     #[serde(default)]
     pub defaults_rev: u32,
 }
 
 /// Portable export file (issue #46): sessions with everything in plaintext
 /// **except** the password, which is encrypted with a fixed key baked into the
-/// binary so the file opens on *any* machine running meatshell.
+/// binary so the file opens on *any* machine running probe-shell.
 ///
 /// Security note: a built-in key in open-source code is **obfuscation, not real
 /// security** — anyone with the source can derive it. It only stops a casual
@@ -614,7 +611,8 @@ pub struct ConfigFile {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ExportFile {
     /// Format marker / version so the schema can evolve later.
-    meatshell_export: u32,
+    #[serde(rename = "probe_shell_export", alias = "meatshell_export", alias = "probe-shell_export")]
+    probe_shell_export: u32,
     sessions: Vec<Session>,
 }
 
@@ -649,7 +647,7 @@ impl ConfigStore {
 
     /// Fixed 32-byte key for portable exports. Baked into the binary so an
     /// exported file decrypts on any machine. Obfuscation only — see `ExportFile`.
-    const EXPORT_KEY: [u8; 32] = *b"meatshell.export.portable.key.01";
+    const EXPORT_KEY: [u8; 32] = *b"probe-shell.export.portable.v1..";
 
     // ── Encryption helpers ────────────────────────────────────────────────
 
@@ -1254,7 +1252,7 @@ impl ConfigStore {
     /// file is human-readable and editable. Returns the number of sessions.
     pub fn export_to(&self, path: &Path) -> Result<usize> {
         let mut out = ExportFile {
-            meatshell_export: 1,
+            probe_shell_export: 1,
             sessions: self.cache.sessions.clone(),
         };
         for s in &mut out.sessions {
@@ -1278,7 +1276,7 @@ impl ConfigStore {
         let raw = fs::read_to_string(path)
             .with_context(|| format!("failed to read {}", path.display()))?;
         let file: ExportFile = serde_json::from_str(&raw)
-            .context("not a valid meatshell export file")?;
+            .context("not a valid probe-shell export file")?;
 
         let mut added = 0usize;
         let mut skipped = 0usize;

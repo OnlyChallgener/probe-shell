@@ -79,49 +79,14 @@ use tokio::runtime::Runtime;
 
 use crate::config::{AuthMethod, ConfigStore, Secret, Session, SessionKind};
 use crate::i18n::t;
-use crate::sftp::{spawn_sftp, SftpHandle};
+use crate::sftp::spawn_sftp;
 use crate::ssh::{
     format_mtime, format_size, spawn_session, ProcInfo, SessionCommand, SessionEvent,
     SessionHandle,
 };
 use crate::system::{format_bytes_per_sec, format_mem, SystemSampler, SystemSnapshot};
+use crate::app_state::{LocalSnap, SftpHandles, SftpLastCwd, TabStatus, TabStatuses};
 
-type SftpHandles = Arc<Mutex<HashMap<String, SftpHandle>>>;
-/// Per-tab flag: once the user explicitly navigates via the SFTP tree or
-/// toolbar, stop auto-syncing to the terminal's `cd` path.
-/// Per-tab last cwd the SFTP panel followed (from OSC 7). Used to ignore the
-/// OSC 7 every prompt re-emits at an unchanged directory; manual SFTP
-/// navigation REMOVES the entry so the very next OSC 7 — same directory or
-/// not — snaps the panel back to the shell's cwd (cd-follow never goes stale).
-type SftpLastCwd = Arc<Mutex<HashMap<String, String>>>;
-
-/// Per-tab connection status + latest remote resource sample, used to drive the
-/// sidebar for whichever tab is active.  `Arc<Mutex>` because the SSH event-pump
-/// threads update it before bouncing to the UI thread.
-#[derive(Clone, Default)]
-struct TabStatus {
-    host: String,       // "root@192.168.100.2"
-    session_id: String, // saved-session id, used to reconnect in place (#79)
-    state: u8,          // 0 = connecting, 1 = connected, 2 = disconnected
-    cpu: f32,     // 0.0..1.0
-    mem_used_kib: u64,
-    mem_total_kib: u64,
-    swap_used_kib: u64,
-    swap_total_kib: u64,
-    /// Latest per-interface rates: (name, rx_bps, tx_bps), busiest first.
-    net: Vec<(String, u64, u64)>,
-    /// Which interface drives the top sparkline (empty = auto = busiest).
-    selected_iface: String,
-    /// Ring buffer of the selected interface's total (rx+tx) bytes/sec.
-    net_hist: Vec<f32>,
-    /// Per-filesystem (mount, available_bytes, total_bytes).
-    disks: Vec<(String, u64, u64)>,
-    /// Top remote processes by CPU, for the process monitor popup (#23).
-    procs: Vec<ProcInfo>,
-}
-type TabStatuses = Arc<Mutex<HashMap<String, TabStatus>>>;
-/// Last local-machine sample (shown on the welcome tab).
-type LocalSnap = Arc<Mutex<SystemSnapshot>>;
 
 // Slint generates types into this scope.
 slint::include_modules!();
@@ -292,9 +257,9 @@ pub fn run() -> Result<()> {
     // --- Build window + models ------------------------------------------
     // Set the Wayland app_id / X11 WM_CLASS *before* the window is created so
     // the Linux desktop shell can match the running window to the installed
-    // `meatshell.desktop` entry and show our icon in the dock/taskbar.  (On
+    // `probe-shell.desktop` entry and show our icon in the dock/taskbar.  (On
     // Windows the icon comes from the embedded .ico, so this is a no-op there.)
-    let _ = slint::set_xdg_app_id("meatshell");
+    let _ = slint::set_xdg_app_id("probe-shell");
     let window = AppWindow::new().context("failed to build Slint window")?;
 
     // Show the crate version (from Cargo.toml at compile time) in the sidebar,
@@ -1054,7 +1019,7 @@ pub fn run() -> Result<()> {
     // --- In-app update check (#48) -----------------------------------------
     // "Download" on the banner opens the latest-release page in the browser.
     window.on_open_update_url(move || {
-        let url = "https://github.com/jeff141/meatshell/releases/latest";
+        let url = "https://github.com/OnlyChallenger/probe-shell/releases/latest";
         #[cfg(windows)]
         let _ = std::process::Command::new("explorer").arg(url).spawn();
         #[cfg(target_os = "macos")]
@@ -1064,7 +1029,7 @@ pub fn run() -> Result<()> {
     });
     // The open-source link in the About dialog opens the project page.
     window.on_open_repo(move || {
-        let url = "https://github.com/jeff141/meatshell";
+        let url = "https://github.com/OnlyChallenger/probe-shell";
         #[cfg(windows)]
         let _ = std::process::Command::new("explorer").arg(url).spawn();
         #[cfg(target_os = "macos")]
@@ -1080,9 +1045,9 @@ pub fn run() -> Result<()> {
         let weak = window.as_weak();
         std::thread::spawn(move || {
             let body = match ureq::get(
-                "https://api.github.com/repos/jeff141/meatshell/releases/latest",
+                "https://api.github.com/repos/OnlyChallenger/probe-shell/releases/latest",
             )
-            .set("User-Agent", "meatshell-update-check")
+            .set("User-Agent", "probe-shell-update-check")
             .timeout(std::time::Duration::from_secs(8))
             .call()
             {
@@ -1899,7 +1864,7 @@ fn wire_session_callbacks(
         let store = store.clone();
         window.on_export_sessions(move || {
             if let Some(path) = rfd::FileDialog::new()
-                .set_file_name("meatshell-connections.json")
+                .set_file_name("probe-shell-connections.json")
                 .add_filter("JSON", &["json"])
                 .save_file()
             {
@@ -3686,7 +3651,7 @@ fn apply_session_event_to_window(
                     win,
                     tab_id,
                     SessionEvent::Output(format!(
-                        "\r\n[meatshell] {} {}: {}\r\n",
+                        "\r\n[probe-shell] {} {}: {}\r\n",
                         crate::i18n::t("无法打开", "Cannot open"),
                         name,
                         error
@@ -6461,12 +6426,12 @@ fn resolve_ui_font_family() -> slint::SharedString {
     use fontdb::{Database, Family, Query, Stretch, Style, Weight};
 
     // Diagnostic / escape hatch (#129): force a specific UI font without a rebuild.
-    // e.g. MEATSHELL_UI_FONT="Meatshell Mono" to test whether the embedded font
+    // e.g. PROBE_SHELL_UI_FONT="Meatshell Mono" to test whether the embedded font
     // renders when system fonts don't. Empty value is ignored.
-    if let Some(f) = std::env::var_os("MEATSHELL_UI_FONT") {
+    if let Some(f) = std::env::var_os("PROBE_SHELL_UI_FONT") {
         let f = f.to_string_lossy().into_owned();
         if !f.trim().is_empty() {
-            tracing::debug!(font = %f, "ui-font: overridden via MEATSHELL_UI_FONT");
+            tracing::debug!(font = %f, "ui-font: overridden via PROBE_SHELL_UI_FONT");
             return f.into();
         }
     }
@@ -6484,7 +6449,7 @@ fn resolve_ui_font_family() -> slint::SharedString {
     // ship on every macOS, so we prefer them and keep PingFang only as a late
     // fallback. (Verified on an M2/macOS 26: Heiti SC/STHeiti/Songti SC render,
     // PingFang/Hiragino don't.) Power users can still force one via
-    // MEATSHELL_UI_FONT. Heiti SC is a clean sans-serif (better for UI than the
+    // PROBE_SHELL_UI_FONT. Heiti SC is a clean sans-serif (better for UI than the
     // serif Songti), so it leads.
     #[cfg(target_os = "macos")]
     let candidates: &[&str] = &[

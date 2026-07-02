@@ -211,7 +211,7 @@ component ShortcutRow inherits Rectangle {
 }
 
 export component AppWindow inherits Window {
-    title: "meatshell";
+    title: "Probe Shell";
     icon: @image-url("../assets/icon.png");
     // Frameless when we draw our own title bar (#119); Rust sets custom-titlebar
     // true on Windows/Linux. Slint maps no-frame → winit set_decorations(false).
@@ -722,8 +722,15 @@ export component AppWindow inherits Window {
         // window controls on the right. macOS keeps its native title bar and
         // shows the toolbar icons via the overlay further below.
         if root.custom-titlebar : Rectangle {
-            height: 38px;
+            height: 40px;
             background: Theme.bg-panel;
+            drop-shadow-blur: 14px;
+            drop-shadow-color: Theme.dark ? #00000055 : #91b7ff35;
+            Rectangle {
+                x: 0px; y: parent.height - 1px;
+                width: parent.width; height: 1px;
+                background: Theme.border-subtle;
+            }
             tb-drag := TouchArea {
                 pointer-event(e) => {
                     if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
@@ -747,7 +754,7 @@ export component AppWindow inherits Window {
                 VerticalLayout {
                     alignment: center;
                     Text {
-                        text: "meatshell";
+                        text: "Probe Shell";
                         color: Theme.text-secondary;
                         font-size: Theme.fs-sm;
                     }
@@ -2621,7 +2628,7 @@ export component AppWindow inherits Window {
                 padding: 18px;
                 spacing: 12px;
                 Text {
-                    text: root.lang-en ? "Close meatshell?" : "确定关闭 meatshell?";
+                    text: root.lang-en ? "Close probe-shell?" : "确定关闭 probe-shell?";
                     color: Theme.text-primary; font-size: Theme.fs-lg; font-weight: 700;
                 }
                 Text {
@@ -2882,7 +2889,7 @@ export component AppWindow inherits Window {
                         alignment: start;
                         spacing: 8px;
                         Text {
-                            text: "meatshell";
+                            text: "Probe Shell";
                             color: Theme.text-primary;
                             font-size: 22px;
                             font-weight: 700;
@@ -2897,7 +2904,7 @@ export component AppWindow inherits Window {
                     }
 
                     Text {
-                        text: @tr("meatshell — a lightweight Rust + Slint SSH client by 'lil meatball'");
+                        text: @tr("Probe Shell — a lightweight SSH/SFTP terminal client.");
                         color: Theme.text-secondary;
                         font-size: Theme.fs-sm;
                         wrap: word-wrap;
@@ -2919,7 +2926,7 @@ export component AppWindow inherits Window {
                             HorizontalLayout {
                                 padding-left: 4px; padding-right: 4px;
                                 Text {
-                                    text: "github.com/jeff141/meatshell";
+                                    text: "github.com/OnlyChallenger/probe-shell";
                                     color: Theme.accent;
                                     font-size: Theme.fs-sm;
                                     vertical-alignment: center;

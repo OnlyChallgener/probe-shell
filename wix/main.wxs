@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="windows-1252"?>
 <!--
-  WiX (v3) installer definition for meatshell, driven by `cargo wix`.
+  WiX (v3) installer definition for probe-shell, driven by `cargo wix`.
 
   cargo-wix injects these preprocessor variables:
     $(var.Version)            crate version from Cargo.toml
@@ -12,17 +12,17 @@
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
     <Product
         Id="*"
-        Name="meatshell"
-        UpgradeCode="6E8F2A1B-3C4D-4E5F-9A0B-1C2D3E4F5A6B"
-        Manufacturer="meatshell contributors"
+        Name="Probe Shell"
+        UpgradeCode="9C5F3A52-8D6B-4C0A-9B42-7E0A1F8D2C61"
+        Manufacturer="Probe Shell contributors"
         Language="1033"
         Codepage="1252"
         Version="$(var.Version)">
 
         <Package Id="*"
             Keywords="Installer"
-            Description="meatshell - lightweight Rust + Slint SSH/terminal client"
-            Manufacturer="meatshell contributors"
+            Description="Probe Shell - lightweight SSH/SFTP terminal client"
+            Manufacturer="Probe Shell contributors"
             InstallerVersion="450"
             Languages="1033"
             Compressed="yes"
@@ -32,22 +32,22 @@
         <!-- Replace an older install in place instead of erroring out. -->
         <MajorUpgrade
             Schedule="afterInstallInitialize"
-            DowngradeErrorMessage="A newer version of meatshell is already installed. Setup will now exit."/>
+            DowngradeErrorMessage="A newer version of Probe Shell is already installed. Setup will now exit."/>
 
         <Media Id="1" Cabinet="media1.cab" EmbedCab="yes" DiskPrompt="CD-ROM #1"/>
-        <Property Id="DiskPrompt" Value="meatshell Installation"/>
+        <Property Id="DiskPrompt" Value="Probe Shell Installation"/>
 
-        <Icon Id="ProductICO" SourceFile="assets\meatshell.ico"/>
+        <Icon Id="ProductICO" SourceFile="assets\probe-shell.ico"/>
         <Property Id="ARPPRODUCTICON" Value="ProductICO"/>
 
         <Directory Id="TARGETDIR" Name="SourceDir">
             <Directory Id="ProgramFiles64Folder">
                 <!-- Default path; the InstallDir UI lets the user change it. -->
-                <Directory Id="APPLICATIONFOLDER" Name="meatshell">
+                <Directory Id="APPLICATIONFOLDER" Name="Probe Shell">
                     <Component Id="MainExecutable" Guid="*">
-                        <File Id="meatshellEXE"
-                              Name="meatshell.exe"
-                              Source="$(var.CargoTargetBinDir)\meatshell.exe"
+                        <File Id="ProbeShellEXE"
+                              Name="probe-shell.exe"
+                              Source="$(var.CargoTargetBinDir)\probe-shell.exe"
                               KeyPath="yes"/>
                     </Component>
                 </Directory>
@@ -55,14 +55,14 @@
             <Directory Id="ProgramMenuFolder">
                 <Component Id="ApplicationShortcut" Guid="*">
                     <Shortcut Id="StartMenuShortcut"
-                        Name="meatshell"
+                        Name="Probe Shell"
                         Description="Lightweight SSH/terminal client"
-                        Target="[APPLICATIONFOLDER]meatshell.exe"
+                        Target="[APPLICATIONFOLDER]probe-shell.exe"
                         WorkingDirectory="APPLICATIONFOLDER"
                         Icon="ProductICO"/>
                     <RemoveFolder Id="CleanUpShortCut" On="uninstall"/>
                     <RegistryValue Root="HKCU"
-                        Key="Software\meatshell"
+                        Key="Software\ProbeShell"
                         Name="installed"
                         Type="integer"
                         Value="1"
@@ -71,7 +71,7 @@
             </Directory>
         </Directory>
 
-        <Feature Id="MainProgram" Title="meatshell" Level="1">
+        <Feature Id="MainProgram" Title="Probe Shell" Level="1">
             <ComponentRef Id="MainExecutable"/>
             <ComponentRef Id="ApplicationShortcut"/>
         </Feature>

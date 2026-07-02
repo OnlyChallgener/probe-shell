@@ -1,4 +1,4 @@
-# meatshell
+# Probe Shell
 
 **简体中文** | [English](./README.en.md)
 
@@ -6,6 +6,11 @@
 **Rust + [Slint](https://slint.dev)** 实现。目标是保留 FinalShell 的核心体验
 （资源监控侧栏、会话管理、多标签页终端）的同时，把内存占用从 400 MB+ 的
 JVM 压到几十 MB 原生级别。
+
+## Fork / 许可证说明
+
+Probe Shell 基于原开源项目重命名和改造，继续遵循 `MIT OR Apache-2.0`。
+保留原许可证和贡献者署名；后续功能、UI 和发布流程以 Probe Shell 为准。
 
 ## 截图
 
@@ -22,18 +27,18 @@ JVM 压到几十 MB 原生级别。
 ## 下载与安装
 
 每次打 `v*` 标签，GitHub Actions 会自动构建 **Windows / Linux / macOS** 三平台二进制，
-发布到 [Releases](https://github.com/jeff141/meatshell/releases) 页面。
+发布到 [Releases](https://github.com/OnlyChallenger/probe-shell/releases) 页面。
 
 ### Windows
 
-下载 `meatshell-*-windows-x86_64.zip`，解压后双击 `meatshell.exe`。
+下载 `probe-shell-*-windows-x86_64.zip`，解压后双击 `probe-shell.exe`。
 
 ### Linux
 
 ```bash
-tar -xzf meatshell-*-linux-x86_64.tar.gz
-cd meatshell-*-linux-x86_64
-./meatshell                                  # 直接运行
+tar -xzf probe-shell-*-linux-x86_64.tar.gz
+cd probe-shell-*-linux-x86_64
+./probe-shell                                  # 直接运行
 # 可选：装应用图标 + 启动器入口（Dock / 应用列表里显示图标，无需传参）
 chmod +x install-linux.sh && ./install-linux.sh
 ```
@@ -42,20 +47,20 @@ chmod +x install-linux.sh && ./install-linux.sh
 
 ### macOS
 
-下载得到的是 `.zip`，里面是 `meatshell.app` 应用程序包：
+下载得到的是 `.zip`，里面是 `probe-shell.app` 应用程序包：
 
 ```bash
 # 解压(aarch64 = Apple 芯片，x86_64 = Intel)
-unzip meatshell-*-macos-*.zip
+unzip probe-shell-*-macos-*.zip
 # 移到「应用程序」(可选，留在原地也行)
-mv meatshell.app /Applications/
-# 去掉「未签名应用」的隔离属性，否则会提示「meatshell 已损坏，无法打开」
-xattr -dr com.apple.quarantine /Applications/meatshell.app
+mv probe-shell.app /Applications/
+# 去掉「未签名应用」的隔离属性，否则会提示「probe-shell 已损坏，无法打开」
+xattr -dr com.apple.quarantine /Applications/probe-shell.app
 # 打开(或在「访达」里双击)
-open /Applications/meatshell.app
+open /Applications/probe-shell.app
 ```
 
-> 若未移到 `/Applications`，把上面两条路径换成 `.app` 实际所在位置(如 `~/Downloads/meatshell.app`)即可。
+> 若未移到 `/Applications`，把上面两条路径换成 `.app` 实际所在位置(如 `~/Downloads/probe-shell.app`)即可。
 
 > 从源码构建见下方 [运行](#运行)。
 
@@ -69,9 +74,9 @@ open /Applications/meatshell.app
 - [x] 完整 VT/ANSI 终端模拟（btop / htop / vim 全屏正常渲染）
 - [x] 多标签页（欢迎页 + 多个会话）
 - [x] 会话管理：新建 / 编辑 / 删除 / 分组，本地 JSON 持久化，导出 / 导入
-  - 配置位置：`%APPDATA%/meatshell/sessions.json`（Windows）
-    / `~/.config/meatshell/sessions.json`（Linux）
-    / `~/Library/Application Support/meatshell/sessions.json`（macOS）
+  - 配置位置：`%APPDATA%/probe-shell/sessions.json`（Windows）
+    / `~/.config/probe-shell/sessions.json`（Linux）
+    / `~/Library/Application Support/probe-shell/sessions.json`（macOS）
 - [x] SSH（`russh`，纯 Rust）：密码 / 私钥 / 加密私钥（密码短语）
 - [x] SFTP 文件浏览 + 上传 / 下载（拖拽）+ 终端内 ZMODEM（`sz`）接收
 - [x] SSH 端口转发 / 隧道：本地 -L / 远程 -R / 动态 -D（SOCKS5）
@@ -83,7 +88,7 @@ open /Applications/meatshell.app
 
 ### 计划中
 
-- [ ] 已知主机 (known_hosts) 校验
+- [x] 已知主机 (known_hosts) 校验
 - [ ] 会话密码改用 OS 钥匙串存储
 - [x] 多标签页终端分屏
 
@@ -104,13 +109,13 @@ open /Applications/meatshell.app
 cargo run --release
 ```
 
-首次启动会在 `%APPDATA%/meatshell/sessions.json` 建立空的会话库。点击右上
+首次启动会在 `%APPDATA%/probe-shell/sessions.json` 建立空的会话库。点击右上
 角 **“＋ 新建会话”** 添加第一台服务器。
 
 ## 项目布局
 
 ```
-meatshell/
+probe-shell/
 ├── Cargo.toml
 ├── build.rs                 # Slint 编译器入口
 ├── ui/
@@ -125,6 +130,7 @@ meatshell/
 └── src/
     ├── main.rs
     ├── app.rs               # UI ↔ 后端桥接
+    ├── app_state.rs         # 会话 / 面板共享状态类型
     ├── config.rs            # 会话 JSON 持久化
     ├── system.rs            # CPU / 内存 / 网络采样
     └── ssh.rs               # SSH 会话 worker
@@ -136,8 +142,7 @@ meatshell/
   反馈方式。
 - 应用事件循环是单线程（Slint 要求），所有跨线程 UI 更新通过
   `slint::invoke_from_event_loop` 回调。
-- 目前 `check_server_key` 接受任意服务端密钥（类似 `StrictHostKeyChecking=no`），
-  生产使用前请接入 known_hosts 校验。
+- 已接入 known_hosts / TOFU 校验：首次连接确认指纹，后续自动校验，密钥变化会提醒。
 
 ## 赞赏 / 请我喝杯咖啡
 

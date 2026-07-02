@@ -1,11 +1,11 @@
 [package]
-name = "meatshell"
+name = "probe-shell"
 version = "0.5.1"
 edition = "2021"
-authors = ["meatshell contributors"]
-description = "A lightweight FinalShell-style SSH/terminal client written in Rust + Slint"
+authors = ["Probe Shell contributors"]
+description = "Probe Shell: a lightweight SSH/SFTP terminal client written in Rust + Slint"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/your/meatshell"
+repository = "https://github.com/OnlyChallenger/probe-shell"
 readme = "README.md"
 rust-version = "1.75"
 
@@ -33,7 +33,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "io-util", "net", "time", "fs"] }
 # Pinned to 0.49: RUSTSEC-2026-0154 (an unbounded-allocation DoS in russh's
 # ssh-AGENT frame parsing) is fixed only in >= 0.60.3, which drags in pre-release
-# crypto crates (ed25519-dalek 3.0.0-pre, aes-gcm 0.11.0-rc, …). meatshell never
+# crypto crates (ed25519-dalek 3.0.0-pre, aes-gcm 0.11.0-rc, …). probe-shell never
 # uses the ssh-agent, so the advisory is not reachable here — see audit.toml.
 # Revisit the upgrade once russh's deps leave the -rc channel (cf. PR #151).
 russh = "0.49"
@@ -97,7 +97,7 @@ slint = { version = "1.8", features = ["renderer-skia"] }
 [build-dependencies]
 slint-build = "1.8"
 
-# Embeds assets/meatshell.ico into the .exe so Explorer / taskbar / shortcuts
+# Embeds assets/probe-shell.ico into the .exe so Explorer / taskbar / shortcuts
 # show the app icon. Windows-only; ignored on other targets.
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"

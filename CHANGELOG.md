@@ -3,6 +3,16 @@
 All notable changes are documented here. 本文件记录所有重要变更。
 中英对照（English first, 中文在后）.
 
+
+## [0.5.1-probe-shell] - 2026-07-02
+
+### Changed / 变更
+
+- **Project rename to Probe Shell / 项目重命名为 Probe Shell.** Cargo package, app id, desktop file, macOS bundle, Windows resources, release workflow, README links and UI copy now use `probe-shell` / `Probe Shell`.
+- **Win12-style glass theme / Win12 风格玻璃主题.** Updated shared design tokens: larger rounded corners, blue-violet accent, softer borders, darker terminal-safe base, and a sci-fi `builtin:tech` wallpaper as the default.
+- **AccessKit focus crash fix / 修复 AccessKit 焦点崩溃.** `TerminalView` no longer calls `ime-input.focus()` directly from `init` / `changed visible`; focus is deferred with a one-shot timer to avoid `RefCell already borrowed` during accessibility-tree rebuilds.
+- **First app.rs split / 第一步拆分 app.rs.** Pure shared state types were moved to `src/app_state.rs`. The remaining `app.rs` is still the Slint callback hub and can be split further by callback domain later.
+
 ## [0.5.1] - 2026-07-01
 
 ### Added / 新增
@@ -79,7 +89,7 @@ All notable changes are documented here. 本文件记录所有重要变更。
   按新宽度重新折行——变窄换行、变宽接回,全程不丢字符;对齐 FinalShell。alt-screen(tmux/vim)仍由
   远端 SIGWINCH 重绘。
   **Terminal content reflows on window resize (#169).** Dragging the width used to clip already-printed
-  lines. meatshell now retains a capped (2 MiB) copy of the byte stream and replays it at the new width,
+  lines. probe-shell now retains a capped (2 MiB) copy of the byte stream and replays it at the new width,
   rewrapping scrollback and the live screen with no lost characters, matching FinalShell. Alt-screen
   programs (tmux/vim) still rely on the remote's SIGWINCH redraw.
 
@@ -239,11 +249,11 @@ All notable changes are documented here. 本文件记录所有重要变更。
 ### Security / 安全
 
 - **记录 RUSTSEC-2026-0154 不可达,暂不升级 russh (#151)。** 该 DoS 在 russh 的 ssh-agent 帧解析,
-  meatshell 完全不用 ssh-agent,漏洞代码路径在本二进制里不可达、不可利用;而唯一修复版
+  probe-shell 完全不用 ssh-agent,漏洞代码路径在本二进制里不可达、不可利用;而唯一修复版
   (russh ≥ 0.60.3)会引入一堆**预发布**加密库(ed25519-dalek pre、aes-gcm rc…),在 SSH 客户端里
   用未审计的 rc 密码库风险更大。故 russh 暂留 0.49,等其依赖脱离 -rc 再迁移;新增 audit.toml 附完整理由。
   **Documented RUSTSEC-2026-0154 as unreachable; holding russh at 0.49 (#151).** The DoS is in russh's
-  ssh-agent frame parsing, which meatshell never uses — the path is dead code here. The only patched
+  ssh-agent frame parsing, which probe-shell never uses — the path is dead code here. The only patched
   russh (>= 0.60.3) drags in a stack of pre-release crypto crates, a worse trade than this unreachable
   DoS, so russh stays at 0.49 until its deps leave the -rc channel. Adds audit.toml with the full
   rationale.
@@ -309,12 +319,12 @@ All notable changes are documented here. 本文件记录所有重要变更。
   The suppression now has a 1.2 s timeout so a non-POSIX shell is usable again; pair it with the
   new "disable shell integration" toggle for a fully clean result.
 
-- **修正 macOS 安装说明(#135)。** README 写的是 `tar -xzf …macos-*.tar.gz` + 裸 `meatshell`
-  二进制,但实际发布产物是 `.zip` + `meatshell.app` 应用包,三条命令全对不上。已改为:解压
+- **修正 macOS 安装说明(#135)。** README 写的是 `tar -xzf …macos-*.tar.gz` + 裸 `probe-shell`
+  二进制,但实际发布产物是 `.zip` + `probe-shell.app` 应用包,三条命令全对不上。已改为:解压
   `.zip` →(可选)移入 `/Applications` → 去 `com.apple.quarantine` 隔离属性 → `open`。
   **Fixed the macOS install instructions (#135).** The README said to `tar -xzf …macos-*.tar.gz`
-  and run a bare `meatshell` binary, but the release artifact is a `.zip` containing
-  `meatshell.app`. Updated to: unzip → optionally move to `/Applications` → clear
+  and run a bare `probe-shell` binary, but the release artifact is a `.zip` containing
+  `probe-shell.app`. Updated to: unzip → optionally move to `/Applications` → clear
   `com.apple.quarantine` → `open`.
 
 ## [0.4.16] - 2026-06-23
@@ -515,7 +525,7 @@ All notable changes are documented here. 本文件记录所有重要变更。
   loaded 900+ faces). The UI now prefers the reliably-rendering "Heiti SC" (a clean
   sans-serif that ships on every macOS), with STHeiti/Songti as further fallbacks
   and the embedded "Meatshell Mono" as a last resort so the window is never blank.
-  A `MEATSHELL_UI_FONT="<family>"` env var can force any family without a rebuild.
+  A `PROBE_SHELL_UI_FONT="<family>"` env var can force any family without a rebuild.
   **修复 macOS 26 文字全白——默认中文界面字体改用 femtovg 能渲染的字体 (#129, #108)。**
   根因最终定位:部分 macOS 26 机器上 femtovg 无法栅格化*新版*系统中文字体(PingFang
   SC、Hiragino)——fontdb 能找到它们,但每个字形都画成空白;而老字体
@@ -523,7 +533,7 @@ All notable changes are documented here. 本文件记录所有重要变更。
   (0.4.11 单独退回 femtovg 没用),也不是字体*加载*(fontdb 加载了 900+ 个 face)。
   界面现在优先用稳定渲染的「Heiti SC」(所有 macOS 自带的干净黑体),STHeiti/Songti
   作为后备,内置「Meatshell Mono」兜底,确保窗口永不全白。可用环境变量
-  `MEATSHELL_UI_FONT="<字体名>"` 免重编强制指定任意字体。
+  `PROBE_SHELL_UI_FONT="<字体名>"` 免重编强制指定任意字体。
 
 ## [0.4.11] - 2026-06-20
 
@@ -1206,12 +1216,12 @@ All notable changes are documented here. 本文件记录所有重要变更。
   `wayland-data-control` 后端,复制改用 set().wait() 使选区在剪贴板句柄 drop 后
   仍然有效。
 
-- **Hide the shell-integration command from the terminal.** meatshell injects a
+- **Hide the shell-integration command from the terminal.** probe-shell injects a
   one-line `PROMPT_COMMAND` (OSC 7) on connect so the SFTP panel can follow the
   terminal's working directory. Its echo used to show up on every connect (and
   pollute shell history); the line now carries a leading space (kept out of
   history) and its echo is stripped from the output before display.
-  **隐藏 shell 集成注入命令。** meatshell 连接时会注入一行 `PROMPT_COMMAND`
+  **隐藏 shell 集成注入命令。** probe-shell 连接时会注入一行 `PROMPT_COMMAND`
   (OSC 7),让 SFTP 面板跟随终端当前目录。此前它的回显每次连接都显示在终端
   (并污染命令历史);现在该行带前导空格(不进历史),回显也会在显示前被剥离。
 
@@ -1320,10 +1330,10 @@ All notable changes are documented here. 本文件记录所有重要变更。
   switched to an ASCII `+`.
   英文下「New session」前的全角 `＋` 显示为豆腐块,改用 ASCII `+`。
 
-- `install-linux.sh` now auto-detects the `meatshell` binary sitting next to it
+- `install-linux.sh` now auto-detects the `probe-shell` binary sitting next to it
   in a release package, so it works with no arguments (it previously defaulted to
   the source-tree `./target/release` path and failed for end users).
-  `install-linux.sh` 现在自动识别发布包里同目录的 `meatshell`,无需传参即可使用
+  `install-linux.sh` 现在自动识别发布包里同目录的 `probe-shell`,无需传参即可使用
   (之前默认指向源码树的 `./target/release`,普通用户直接跑会报错)。
 
 ## [0.2.2] - 2026-06-05
@@ -1366,18 +1376,18 @@ All notable changes are documented here. 本文件记录所有重要变更。
   **会话弹窗的私钥文件选择器**，并支持 `.pub` 容错（自动去后缀加载对应私钥）、
   路径分隔符统一为 `/`。
 
-- **Linux desktop integration** — `assets/meatshell.desktop` + `install-linux.sh`
+- **Linux desktop integration** — `assets/probe-shell.desktop` + `install-linux.sh`
   and an `xdg_app_id` so the GNOME/Ubuntu dock shows the app icon on Wayland.
-  **Linux 桌面集成** —— `assets/meatshell.desktop` + `install-linux.sh`，并设置
+  **Linux 桌面集成** —— `assets/probe-shell.desktop` + `install-linux.sh`，并设置
   `xdg_app_id`，使 Wayland 下 GNOME/Ubuntu 任务栏显示应用图标。
 
 - **Screenshots in the README** (`docs/screenshots/`, sensitive info redacted).
   **README 增加截图**（`docs/screenshots/`，敏感信息已打码）。
 
-[0.3.8]: https://github.com/jeff141/meatshell/releases/tag/v0.3.8
-[0.3.7]: https://github.com/jeff141/meatshell/releases/tag/v0.3.7
-[0.3.3]: https://github.com/jeff141/meatshell/releases/tag/v0.3.3
-[0.3.2]: https://github.com/jeff141/meatshell/releases/tag/v0.3.2
-[0.3.1]: https://github.com/jeff141/meatshell/releases/tag/v0.3.1
-[0.3.0]: https://github.com/jeff141/meatshell/releases/tag/v0.3.0
-[0.2.2]: https://github.com/jeff141/meatshell/releases/tag/v0.2.2
+[0.3.8]: https://github.com/OnlyChallenger/probe-shell/releases/tag/v0.3.8
+[0.3.7]: https://github.com/OnlyChallenger/probe-shell/releases/tag/v0.3.7
+[0.3.3]: https://github.com/OnlyChallenger/probe-shell/releases/tag/v0.3.3
+[0.3.2]: https://github.com/OnlyChallenger/probe-shell/releases/tag/v0.3.2
+[0.3.1]: https://github.com/OnlyChallenger/probe-shell/releases/tag/v0.3.1
+[0.3.0]: https://github.com/OnlyChallenger/probe-shell/releases/tag/v0.3.0
+[0.2.2]: https://github.com/OnlyChallenger/probe-shell/releases/tag/v0.2.2
