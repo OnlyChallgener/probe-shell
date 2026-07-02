@@ -1,3 +1,16 @@
+## v0.6.2-probe2
+
+- 修复已打开/失败会话再次点击、Enter 重连时的 `RefCell already borrowed` 崩溃。
+- 增加 Enter 重连防抖，避免按键重复触发多个连接任务。
+- 日间模式改为不透明浅灰蓝配色，终端/SFTP 区域不再大面积纯白晃眼。
+- 默认窗口改为 1280×760，并对历史保存的超大窗口尺寸做边界钳制。
+
+## v0.6.2-probe1
+
+- Stability: guarded saved-session connect requests against double-click/repeat-click races. Repeated clicks on the same session within 900 ms are now coalesced.
+- Stability: failed connection events are now applied through a panic guard, so a bad/failed record should show a disconnect message instead of taking the whole app down.
+- UX: the left session list has a row-level click lock to prevent accidental duplicate open/connect actions from double-clicking.
+
 
 ## v0.6.1-probe1
 

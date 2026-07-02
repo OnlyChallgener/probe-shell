@@ -41,9 +41,27 @@ component SessionRow inherits Rectangle {
     property <length> ctx-x;
     property <length> ctx-y;
 
+    // Guard against double-click/repeat-click reentrancy. A session row click
+    // starts tab/model mutations and can also fail asynchronously; firing the
+    // same connect callback twice in the same UI tick used to create races and
+    // crash on failed records. Keep the row responsive, but coalesce repeated
+    // clicks into one connect/navigation request.
+    property <bool> connect-lock: false;
+
+    connect-lock-timer := Timer {
+        interval: 900ms;
+        running: root.connect-lock;
+        triggered => { root.connect-lock = false; self.running = false; }
+    }
+
     touch := TouchArea {
         mouse-cursor: pointer;
-        clicked => { root.connect(); }
+        clicked => {
+            if (!root.connect-lock) {
+                root.connect-lock = true;
+                root.connect();
+            }
+        }
         pointer-event(e) => {
             if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) {
                 ctx-x = self.mouse-x;

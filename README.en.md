@@ -186,6 +186,18 @@ For bulk upload/download, install `openssh-sftp-server` on the server and use fu
 
 
 
-### v0.6.1-probe1 update notes
+### v0.6.2-probe1 update notes
 
 This build focuses on product polish rather than adding visual complexity: light mode is opaque and readable, clicking an existing session jumps to its current tab, SSH-browser file browsing is preferred for OpenWrt/Dropbear devices, folders can be opened directly from the file panel, the SFTP tree/list divider is resizable, Telnet defaults to port 23, and router IPv6/firewall quick commands are included.
+
+
+### v0.6.2-probe1 stability note
+
+This build coalesces repeated saved-session clicks and guards failed connection events so double-clicking or re-clicking a failed record should not crash the app.
+
+
+### v0.6.2-probe2
+
+- Fixed repeated failed-session click / Enter reconnect crash (`RefCell already borrowed`).
+- Muted the light theme to opaque soft blue-gray surfaces for readability.
+- Reduced and clamped the default/restored window size to better fit Windows high-DPI displays.

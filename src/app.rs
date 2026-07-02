@@ -237,6 +237,13 @@ pub fn run() -> Result<()> {
     // Per-tab SSH handles (shell only; lives on Slint thread via Rc).
     let handles: Rc<RefCell<HashMap<String, SessionHandle>>> =
         Rc::new(RefCell::new(HashMap::new()));
+    // Per-session click/connect debounce. This protects the model/tab mutation
+    // path from double-clicks and from quickly clicking a record whose previous
+    // connection attempt just failed. Failed connection events are async; without
+    // a small coalescing window, two connect requests can race against Slint's
+    // tab/pane model refresh and crash the UI.
+    let connect_debounce: Rc<RefCell<HashMap<String, std::time::Instant>>> =
+        Rc::new(RefCell::new(HashMap::new()));
 
     // Per-tab SFTP handles — Arc<Mutex> so the event-pump OS thread and the
     // Slint UI thread can both post SftpCommands.
@@ -468,13 +475,17 @@ pub fn run() -> Result<()> {
             window.set_sftp_collapsed(true);
             window.set_sftp_saved_height(s.sftp_panel_height());
         }
-        // Restore the user's preferred window size, if any (#dock).
+        // Restore the user's preferred window size, but never restore a size that
+        // is larger than a 1080p/125%-scaled desktop can comfortably show.  Older
+        // builds saved 1440×900 (or even a maximized physical size), which made the
+        // right status panel run off-screen on Windows high-DPI displays.
         let (ww, wh) = s.window_size();
-        if ww > 0.0 && wh > 0.0 {
-            window
-                .window()
-                .set_size(slint::LogicalSize::new(ww, wh));
-        }
+        let (mut ww, mut wh) = if ww > 0.0 && wh > 0.0 { (ww, wh) } else { (1280.0, 760.0) };
+        ww = ww.clamp(1080.0, 1280.0);
+        wh = wh.clamp(680.0, 760.0);
+        window
+            .window()
+            .set_size(slint::LogicalSize::new(ww, wh));
     }
     {
         let store = store.clone();
@@ -2392,8 +2403,30 @@ fn wire_session_callbacks(
         let local_snap = local_snap.clone();
         let local_net_hist = local_net_hist.clone();
         let sftp_follow_cd = sftp_follow_cd.clone();
+        let connect_debounce = connect_debounce.clone();
         window.on_connect_session(move |id: SharedString| {
             let id = id.to_string();
+
+            // Debounce by saved-session id. This is deliberately Rust-side in
+            // addition to the Slint row guard, because the callback can be
+            // invoked from multiple places (left list, duplicate/reconnect flows,
+            // future command palette) and failed-record clicks used to crash when
+            // two connect attempts overlapped.
+            {
+                let now = std::time::Instant::now();
+                let mut debounce = connect_debounce.borrow_mut();
+                debounce.retain(|_, last| now.duration_since(*last) < std::time::Duration::from_secs(3));
+                if debounce
+                    .get(&id)
+                    .map(|last| now.duration_since(*last) < std::time::Duration::from_millis(900))
+                    .unwrap_or(false)
+                {
+                    tracing::debug!(session_id = %id, "connect request ignored by debounce");
+                    return;
+                }
+                debounce.insert(id.clone(), now);
+            }
+
             let session = match store.borrow().get(&id).cloned() {
                 Some(s) => s,
                 None => return,
@@ -2420,7 +2453,19 @@ fn wire_session_callbacks(
             };
             if let Some(existing_tab) = existing_tab {
                 if let Some(w) = weak.upgrade() {
-                    if let Some(pane_id) = layout.borrow().leaf_of_tab(&existing_tab) {
+                    // IMPORTANT: do not keep `layout.borrow()` alive across the
+                    // later `borrow_mut()`.  In v0.6.1 this was written as
+                    // `if let Some(pane_id) = layout.borrow().leaf_of_tab(...) { ... }`;
+                    // Rust extends that temporary borrow to the whole `if` body,
+                    // so the following `layout.borrow_mut()` panicked with
+                    // "RefCell already borrowed" when the user clicked an already
+                    // opened failed/disconnected session or pressed Enter after a
+                    // failed reconnect.  Compute the pane id in its own scope.
+                    let pane_id = {
+                        let lay = layout.borrow();
+                        lay.leaf_of_tab(&existing_tab)
+                    };
+                    if let Some(pane_id) = pane_id {
                         {
                             let mut lay = layout.borrow_mut();
                             lay.focused = pane_id;
@@ -2428,14 +2473,16 @@ fn wire_session_callbacks(
                                 leaf.active = existing_tab.clone();
                             }
                         }
+                        let lay_snapshot = layout.borrow();
                         refresh_panes(
                             &w,
-                            &layout.borrow(),
+                            &lay_snapshot,
                             content_size.get(),
                             &tabs_model,
                             &panes_model,
                             &splitters_model,
                         );
+                        drop(lay_snapshot);
                         w.set_active_tab_id(existing_tab.into());
                     }
                 }
@@ -2775,9 +2822,13 @@ fn start_session_in_tab(tab_id: &str, session: Session, ctx: &ConnectCtx) {
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(win) = weak_evt.upgrade() {
                         for evt in ui_batch {
-                            apply_session_event_to_window(
-                                &win, &tid, evt, &bufs_evt, &st_evt, &lc_evt, &nh_evt,
-                            );
+                            if let Err(_) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                apply_session_event_to_window(
+                                    &win, &tid, evt, &bufs_evt, &st_evt, &lc_evt, &nh_evt,
+                                );
+                            })) {
+                                tracing::error!(tab_id = %tid, "ignored panic while applying session event");
+                            }
                         }
                     }
                 });
@@ -2807,9 +2858,13 @@ fn start_session_in_tab(tab_id: &str, session: Session, ctx: &ConnectCtx) {
                         let nh_s = net_sftp.clone();
                         let _ = slint::invoke_from_event_loop(move || {
                             if let Some(win) = weak_s.upgrade() {
-                                apply_session_event_to_window(
-                                    &win, &tid, sftp_evt, &bufs_s, &st_s, &lc_s, &nh_s,
-                                );
+                                if let Err(_) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                    apply_session_event_to_window(
+                                        &win, &tid, sftp_evt, &bufs_s, &st_s, &lc_s, &nh_s,
+                                    );
+                                })) {
+                                    tracing::error!(tab_id = %tid, "ignored panic while applying file-browser event");
+                                }
                             }
                         });
                     }
@@ -2919,10 +2974,11 @@ fn save_layout(win: &AppWindow, store: &Rc<RefCell<ConfigStore>>) {
     s.set_sftp_panel_width(win.get_sftp_panel_width());
     s.set_sftp_panel_height(win.get_sftp_panel_height());
     s.set_sftp_dock(win.get_sftp_dock().to_string());
-    // A maximized size isn't a useful "preferred" size to restore to, so only
-    // remember the windowed size.
+    // A maximized/oversized window isn't a useful preferred size to restore to.
+    // Clamp the saved logical size so the next launch fits common 1080p screens
+    // with 125% scaling, while still preserving a user's smaller manual size.
     if !win.get_window_maximized() && w > 200.0 && h > 200.0 {
-        s.set_window_size(w, h);
+        s.set_window_size(w.clamp(1080.0, 1280.0), h.clamp(680.0, 760.0));
     }
     let _ = s.save();
 }
@@ -5741,6 +5797,12 @@ fn wire_key_input(
         // (key="", shift=true).  Used by the time-based Backspace filter below.
         let last_shift_time: Arc<Mutex<Option<std::time::Instant>>> =
             Arc::new(Mutex::new(None));
+        // Per-tab reconnect debounce: pressing Enter on a failed tab can be
+        // repeated by key-repeat/IME.  Coalesce it before touching handles,
+        // buffers, SFTP workers or the Slint model.
+        let reconnect_debounce: Arc<Mutex<HashMap<String, std::time::Instant>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let reconnect_debounce_cb = reconnect_debounce.clone();
         window.on_send_key(move |tab_id: SharedString, key: SharedString, ctrl: bool, alt: bool, shift: bool| {
             // ── Enter on a disconnected tab → reconnect in place (#79) ──────
             // FinalShell-style: the tab shows "连接已断开,按 Enter 重新连接";
@@ -5755,6 +5817,19 @@ fn wire_key_input(
                         .map(|st| st.session_id.clone())
                 };
                 if let Some(session_id) = dead_session {
+                    {
+                        let now = std::time::Instant::now();
+                        let mut d = reconnect_debounce_cb.lock().unwrap();
+                        d.retain(|_, last| now.duration_since(*last) < std::time::Duration::from_secs(5));
+                        if d.get(tab_id.as_str())
+                            .map(|last| now.duration_since(*last) < std::time::Duration::from_millis(1200))
+                            .unwrap_or(false)
+                        {
+                            tracing::debug!(tab_id = %tab_id, "Enter reconnect ignored by debounce");
+                            return;
+                        }
+                        d.insert(tab_id.to_string(), now);
+                    }
                     let Some(session) = store.borrow().get(&session_id).cloned() else {
                         return;
                     };
