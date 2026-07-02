@@ -381,17 +381,26 @@ async fn run_sftp(
     }
 
     // --- Open the sftp subsystem channel -----------------------------------
-    let channel = handle
-        .channel_open_session()
-        .await
-        .context("open sftp channel")?;
-    channel
-        .request_subsystem(true, "sftp")
-        .await
-        .context("request sftp subsystem")?;
-    let sftp = SftpSession::new(channel.into_stream())
-        .await
-        .context("sftp handshake")?;
+    // Some routers / embedded Linux boxes (for example many OpenWrt/Dropbear
+    // installations) allow interactive SSH but do not provide an SFTP
+    // subsystem. MobaXterm's "SSH browser" still works there because it can
+    // fall back to shell commands. Probe Shell v0.6 keeps native SFTP as the
+    // first choice, then falls back to a read/write SSH file-browser mode for
+    // basic directory browsing and text-file operations.
+    let sftp = match open_sftp_subsystem(&handle).await {
+        Ok(sftp) => sftp,
+        Err(err) => {
+            let _ = events.send(SessionEvent::SftpStatus(format!(
+                "{}: {err:#}. {}",
+                t("SFTP 子系统不可用", "SFTP subsystem unavailable"),
+                t(
+                    "已切换到 SSH 文件浏览模式",
+                    "Using SSH file-browser fallback"
+                )
+            )));
+            return run_ssh_file_browser(handle, commands, events).await;
+        }
+    };
     // Share the session + connection so transfers can run on their own task,
     // leaving the command loop free to list/switch directories meanwhile (#116-2).
     let sftp = std::sync::Arc::new(sftp);
@@ -1016,6 +1025,441 @@ async fn run_sftp(
         .disconnect(Disconnect::ByApplication, "bye", "")
         .await;
     Ok(())
+}
+
+
+/// Try to open the real SFTP subsystem.
+async fn open_sftp_subsystem(handle: &client::Handle<SftpClientHandler>) -> Result<SftpSession> {
+    let channel = handle
+        .channel_open_session()
+        .await
+        .context("open sftp channel")?;
+    channel
+        .request_subsystem(true, "sftp")
+        .await
+        .context("request sftp subsystem")?;
+    SftpSession::new(channel.into_stream())
+        .await
+        .context("sftp handshake")
+}
+
+/// Capture stdout/stderr and the exit status from a one-shot SSH exec channel.
+async fn exec_capture(
+    handle: &client::Handle<SftpClientHandler>,
+    cmd: &str,
+) -> Result<(u32, Vec<u8>, Vec<u8>)> {
+    let mut ch = handle
+        .channel_open_session()
+        .await
+        .context("open exec channel")?;
+    ch.exec(true, cmd.as_bytes())
+        .await
+        .with_context(|| format!("exec remote command: {cmd}"))?;
+
+    let mut status = 0u32;
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    while let Some(msg) = ch.wait().await {
+        match msg {
+            russh::ChannelMsg::Data { data } => stdout.extend_from_slice(&data),
+            russh::ChannelMsg::ExtendedData { data, ext: _ } => stderr.extend_from_slice(&data),
+            russh::ChannelMsg::ExitStatus { exit_status } => status = exit_status,
+            russh::ChannelMsg::Close => break,
+            _ => {}
+        }
+    }
+    Ok((status, stdout, stderr))
+}
+
+/// Fallback browser for servers that do not provide the `sftp` subsystem.
+///
+/// This is intentionally conservative: it uses POSIX shell commands over SSH to
+/// browse directories and handle basic file operations. It fixes the common
+/// OpenWrt/Dropbear case where interactive SSH works and MobaXterm can browse
+/// files, but a strict SFTP client cannot.
+async fn run_ssh_file_browser(
+    handle: client::Handle<SftpClientHandler>,
+    mut commands: UnboundedReceiver<SftpCommand>,
+    events: UnboundedSender<SessionEvent>,
+) -> Result<()> {
+    let home = shell_pwd(&handle).await.unwrap_or_else(|_| "/".to_string());
+    let _ = events.send(SessionEvent::SftpStatus(t(
+        "SSH 文件浏览模式：服务器未提供 SFTP 子系统",
+        "SSH file-browser mode: server does not provide an SFTP subsystem",
+    ).into()));
+
+    emit_shell_dir(&handle, &events, &home).await;
+
+    let mut tree_dirs: std::collections::HashMap<String, Vec<(String, String)>> =
+        std::collections::HashMap::new();
+    let mut tree_expanded: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let root_dirs = shell_list_dirs_only(&handle, "/").await.unwrap_or_default();
+    tree_dirs.insert("/".to_string(), root_dirs);
+    tree_expanded.insert("/".to_string());
+    emit_tree(&tree_dirs, &tree_expanded, &events);
+
+    while let Some(cmd) = commands.recv().await {
+        match cmd {
+            SftpCommand::Close => break,
+            SftpCommand::ListDir(path) | SftpCommand::RefreshDir(path) => {
+                emit_shell_dir(&handle, &events, &path).await;
+            }
+            SftpCommand::ToggleTreeNode(path) => {
+                if tree_expanded.contains(&path) {
+                    let prefix = format!("{}/", path.trim_end_matches('/'));
+                    tree_expanded.retain(|p| p != &path && !p.starts_with(&prefix));
+                } else {
+                    if !tree_dirs.contains_key(&path) {
+                        let dirs = shell_list_dirs_only(&handle, &path).await.unwrap_or_default();
+                        tree_dirs.insert(path.clone(), dirs);
+                    }
+                    tree_expanded.insert(path.clone());
+                }
+                emit_tree(&tree_dirs, &tree_expanded, &events);
+            }
+            SftpCommand::MkDir(path) => {
+                let refresh = parent_dir(&path);
+                let cmd = format!("mkdir -p {}", sh_quote(&path));
+                emit_shell_action(&handle, &events, &cmd, t("新建文件夹失败", "Create folder failed")).await;
+                if tree_dirs.contains_key(&refresh) {
+                    if let Ok(dirs) = shell_list_dirs_only(&handle, &refresh).await {
+                        tree_dirs.insert(refresh.clone(), dirs);
+                        emit_tree(&tree_dirs, &tree_expanded, &events);
+                    }
+                }
+                emit_shell_dir(&handle, &events, &refresh).await;
+            }
+            SftpCommand::TouchFile(path) => {
+                let refresh = parent_dir(&path);
+                let cmd = format!("test -e {0} || : > {0}", sh_quote(&path));
+                emit_shell_action(&handle, &events, &cmd, t("新建文件失败", "Create file failed")).await;
+                emit_shell_dir(&handle, &events, &refresh).await;
+            }
+            SftpCommand::Delete(path) => {
+                let refresh = parent_dir(&path);
+                let cmd = format!("rm -rf {}", sh_quote(&path));
+                emit_shell_action(&handle, &events, &cmd, t("删除失败", "Delete failed")).await;
+                if tree_dirs.contains_key(&refresh) {
+                    if let Ok(dirs) = shell_list_dirs_only(&handle, &refresh).await {
+                        tree_dirs.insert(refresh.clone(), dirs);
+                        emit_tree(&tree_dirs, &tree_expanded, &events);
+                    }
+                }
+                emit_shell_dir(&handle, &events, &refresh).await;
+            }
+            SftpCommand::Rename { from, to } => {
+                let refresh = parent_dir(&to);
+                let cmd = format!("mv {} {}", sh_quote(&from), sh_quote(&to));
+                emit_shell_action(&handle, &events, &cmd, t("重命名失败", "Rename failed")).await;
+                emit_shell_dir(&handle, &events, &refresh).await;
+            }
+            SftpCommand::Chmod { path, mode } => {
+                let refresh = parent_dir(&path);
+                let cmd = format!("chmod {:o} {}", mode & 0o7777, sh_quote(&path));
+                emit_shell_action(&handle, &events, &cmd, t("修改权限失败", "chmod failed")).await;
+                emit_shell_dir(&handle, &events, &refresh).await;
+            }
+            SftpCommand::ReadText { remote, edit } => {
+                let name = base_name(&remote);
+                let (content, error) = match shell_read_text(&handle, &remote).await {
+                    Ok(text) => (text, String::new()),
+                    Err(e) => (String::new(), e),
+                };
+                let _ = events.send(SessionEvent::SftpFileText {
+                    path: remote,
+                    name,
+                    content,
+                    edit,
+                    error,
+                });
+            }
+            SftpCommand::WriteText { remote, content } => {
+                let refresh = parent_dir(&remote);
+                match shell_write_text(&handle, &remote, &content).await {
+                    Ok(_) => {
+                        let _ = events.send(SessionEvent::SftpStatus(format!(
+                            "{}: {}",
+                            t("已保存", "Saved"),
+                            base_name(&remote)
+                        )));
+                    }
+                    Err(e) => {
+                        let _ = events.send(SessionEvent::SftpStatus(format!(
+                            "{}: {e}",
+                            t("保存失败", "Save failed")
+                        )));
+                    }
+                }
+                emit_shell_dir(&handle, &events, &refresh).await;
+            }
+            SftpCommand::Download { remote, local_dir } => {
+                match shell_download_file(&handle, &remote, &local_dir).await {
+                    Ok(filename) => {
+                        let _ = events.send(SessionEvent::SftpStatus(format!(
+                            "{}: {}",
+                            t("下载完成", "Downloaded"),
+                            filename
+                        )));
+                    }
+                    Err(e) => {
+                        let _ = events.send(SessionEvent::SftpStatus(format!(
+                            "{}: {e}",
+                            t("下载失败", "Download failed")
+                        )));
+                    }
+                }
+            }
+            SftpCommand::OpenTemp { remote, edit } => {
+                let tmp = std::env::temp_dir().join("probe-shell");
+                let dir = tmp.to_string_lossy().to_string();
+                let _ = tokio::fs::create_dir_all(&dir).await;
+                match shell_download_file(&handle, &remote, &dir).await {
+                    Ok(filename) => {
+                        let local = format!("{}/{}", dir.trim_end_matches('/'), filename);
+                        open_with_os(&local);
+                        if edit {
+                            let _ = events.send(SessionEvent::SftpStatus(t(
+                                "SSH 文件浏览模式暂不支持外部编辑后自动回传",
+                                "SSH file-browser mode does not auto-upload external edits yet",
+                            ).into()));
+                        }
+                    }
+                    Err(e) => {
+                        let _ = events.send(SessionEvent::SftpStatus(format!(
+                            "{}: {e}",
+                            t("打开失败", "Open failed")
+                        )));
+                    }
+                }
+            }
+            SftpCommand::Upload { .. }
+            | SftpCommand::DownloadArchive { .. }
+            | SftpCommand::CancelTransfer(_) => {
+                let _ = events.send(SessionEvent::SftpStatus(t(
+                    "SSH 文件浏览模式暂不支持此传输操作；安装 openssh-sftp-server 后可使用完整 SFTP",
+                    "This transfer is not supported in SSH file-browser mode; install openssh-sftp-server for full SFTP",
+                ).into()));
+            }
+        }
+    }
+
+    let _ = handle
+        .disconnect(Disconnect::ByApplication, "bye", "")
+        .await;
+    Ok(())
+}
+
+async fn shell_pwd(handle: &client::Handle<SftpClientHandler>) -> Result<String> {
+    let (code, out, err) = exec_capture(handle, "pwd").await?;
+    if code != 0 {
+        return Err(anyhow!(String::from_utf8_lossy(&err).trim().to_string()));
+    }
+    Ok(String::from_utf8_lossy(&out).trim().to_string())
+}
+
+async fn emit_shell_dir(
+    handle: &client::Handle<SftpClientHandler>,
+    events: &UnboundedSender<SessionEvent>,
+    path: &str,
+) {
+    let _ = events.send(SessionEvent::SftpStatus(format!("{} {}...", t("加载", "Loading"), path)));
+    match shell_list_dir(handle, path).await {
+        Ok(entries) => {
+            let _ = events.send(SessionEvent::SftpEntries {
+                path: path.to_string(),
+                entries,
+            });
+            let _ = events.send(SessionEvent::SftpStatus(format!(
+                "{} · {}",
+                path,
+                t("SSH 文件浏览", "SSH browser")
+            )));
+        }
+        Err(e) => {
+            let _ = events.send(SessionEvent::SftpError(format!(
+                "{} {}: {e}",
+                t("无法访问", "Cannot open"),
+                path
+            )));
+        }
+    }
+}
+
+async fn emit_shell_action(
+    handle: &client::Handle<SftpClientHandler>,
+    events: &UnboundedSender<SessionEvent>,
+    cmd: &str,
+    fail_title: &str,
+) {
+    match exec_capture(handle, cmd).await {
+        Ok((0, _, _)) => {}
+        Ok((_, _, err)) => {
+            let msg = String::from_utf8_lossy(&err).trim().to_string();
+            let _ = events.send(SessionEvent::SftpStatus(format!("{fail_title}: {msg}")));
+        }
+        Err(e) => {
+            let _ = events.send(SessionEvent::SftpStatus(format!("{fail_title}: {e}")));
+        }
+    }
+}
+
+async fn shell_list_dirs_only(
+    handle: &client::Handle<SftpClientHandler>,
+    path: &str,
+) -> Result<Vec<(String, String)>> {
+    Ok(shell_list_dir(handle, path)
+        .await?
+        .into_iter()
+        .filter(|e| e.is_dir)
+        .map(|e| (e.name, e.full_path))
+        .collect())
+}
+
+async fn shell_list_dir(
+    handle: &client::Handle<SftpClientHandler>,
+    path: &str,
+) -> Result<Vec<RemoteEntry>> {
+    let cmd = format!(
+        concat!(
+            "PATH=/usr/bin:/bin:/usr/sbin:/sbin; export PATH; ",
+            "p={path}; cd \"$p\" 2>/dev/null || exit 2; ",
+            "for f in .[!.]* ..?* *; do ",
+            "[ -e \"$f\" ] || continue; ",
+            "[ \"$f\" = . ] && continue; [ \"$f\" = .. ] && continue; ",
+            "if [ -d \"$f\" ]; then typ=d; else typ=f; fi; ",
+            "sz=$(stat -c %s \"$f\" 2>/dev/null || wc -c < \"$f\" 2>/dev/null || echo 0); ",
+            "mt=$(stat -c %Y \"$f\" 2>/dev/null || echo 0); ",
+            "md=$(stat -c %a \"$f\" 2>/dev/null || echo 0); ",
+            "printf '%s\\t%s\\t%s\\t%s\\t%s\\n' \"$typ\" \"$sz\" \"$mt\" \"$md\" \"$f\"; ",
+            "done"
+        ),
+        path = sh_quote(path)
+    );
+    let (code, out, err) = exec_capture(handle, &cmd).await?;
+    if code != 0 {
+        let msg = String::from_utf8_lossy(&err).trim().to_string();
+        return Err(anyhow!(if msg.is_empty() {
+            format!("cannot list {path}")
+        } else {
+            msg
+        }));
+    }
+
+    let mut entries = Vec::new();
+    for line in String::from_utf8_lossy(&out).lines() {
+        let mut parts = line.splitn(5, '\t');
+        let typ = parts.next().unwrap_or("");
+        let size = parts.next().unwrap_or("0").trim().parse::<u64>().unwrap_or(0);
+        let modified = parts.next().unwrap_or("0").trim().parse::<u32>().unwrap_or(0);
+        let mode_txt = parts.next().unwrap_or("0").trim();
+        let name = parts.next().unwrap_or("").to_string();
+        if name.is_empty() || name == "." || name == ".." {
+            continue;
+        }
+        let full_path = if path == "/" {
+            format!("/{name}")
+        } else {
+            format!("{}/{}", path.trim_end_matches('/'), name)
+        };
+        let mode = u32::from_str_radix(mode_txt, 8).unwrap_or(0);
+        entries.push(RemoteEntry {
+            name,
+            full_path,
+            is_dir: typ == "d",
+            size,
+            modified,
+            mode,
+        });
+    }
+
+    entries.sort_by(|a, b| match (a.is_dir, b.is_dir) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+    });
+    Ok(entries)
+}
+
+async fn shell_read_text(
+    handle: &client::Handle<SftpClientHandler>,
+    remote: &str,
+) -> std::result::Result<String, String> {
+    use base64::Engine as _;
+    let cmd = format!(
+        "test -f {0} || exit 3; sz=$(stat -c %s {0} 2>/dev/null || echo 0); [ \"$sz\" -le 2097152 ] || exit 4; base64 {0}",
+        sh_quote(remote)
+    );
+    let (code, out, err) = exec_capture(handle, &cmd)
+        .await
+        .map_err(|e| e.to_string())?;
+    match code {
+        0 => {}
+        3 => return Err(t("不是普通文件,无法打开", "Not a regular file; cannot open").into()),
+        4 => return Err(t("文件过大,无法在内置编辑器中打开(上限 2 MB),请下载查看", "Too large for the built-in editor (2 MB limit); download it instead").into()),
+        _ => return Err(String::from_utf8_lossy(&err).trim().to_string()),
+    }
+    let b64 = String::from_utf8_lossy(&out).replace('\r', "").replace('\n', "");
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(b64.as_bytes())
+        .map_err(|e| format!("base64 decode: {e}"))?;
+    if bytes
+        .iter()
+        .any(|&b| (b < 0x20 && b != b'\t' && b != b'\n' && b != b'\r') || b == 0x7f)
+    {
+        return Err(t("包含控制字符(疑似二进制),无法以文本打开,请下载查看", "Contains control characters (likely binary); download it instead").into());
+    }
+    String::from_utf8(bytes)
+        .map_err(|_| t("非 UTF-8 文本,无法打开", "Not UTF-8 text; cannot open").into())
+}
+
+async fn shell_write_text(
+    handle: &client::Handle<SftpClientHandler>,
+    remote: &str,
+    content: &str,
+) -> Result<()> {
+    use base64::Engine as _;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(content.as_bytes());
+    let cmd = format!(
+        "printf %s {} | base64 -d > {}",
+        sh_quote(&encoded),
+        sh_quote(remote)
+    );
+    let (code, _out, err) = exec_capture(handle, &cmd).await?;
+    if code == 0 {
+        Ok(())
+    } else {
+        Err(anyhow!(String::from_utf8_lossy(&err).trim().to_string()))
+    }
+}
+
+async fn shell_download_file(
+    handle: &client::Handle<SftpClientHandler>,
+    remote: &str,
+    local_dir: &str,
+) -> Result<String> {
+    use base64::Engine as _;
+    let cmd = format!("test -f {0} || exit 3; base64 {0}", sh_quote(remote));
+    let (code, out, err) = exec_capture(handle, &cmd).await?;
+    if code != 0 {
+        let msg = String::from_utf8_lossy(&err).trim().to_string();
+        return Err(anyhow!(if code == 3 {
+            t("当前 SSH 文件浏览模式只支持下载普通文件", "SSH file-browser mode can only download regular files").to_string()
+        } else if msg.is_empty() {
+            "download failed".to_string()
+        } else {
+            msg
+        }));
+    }
+    let b64 = String::from_utf8_lossy(&out).replace('\r', "").replace('\n', "");
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(b64.as_bytes())
+        .context("base64 decode remote file")?;
+    let filename = sanitize_filename(&base_name(remote));
+    let local_path = std::path::Path::new(local_dir).join(&filename);
+    tokio::fs::write(&local_path, bytes)
+        .await
+        .with_context(|| format!("write local {}", local_path.display()))?;
+    Ok(filename)
 }
 
 /// Read a remote file as UTF-8 text for the built-in editor, rejecting files

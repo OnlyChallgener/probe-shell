@@ -175,3 +175,18 @@ probe-shell/
 ## License
 
 MIT OR Apache-2.0（双许可）。
+
+
+## Probe Shell preview release note
+
+The current preview Release workflow intentionally builds only the Windows x86_64 portable ZIP. AUR publishing, MSI, Linux, and macOS packaging are disabled for now to keep releases stable while the project is being customized.
+
+## v0.6 SFTP / 文件浏览修复
+
+Probe Shell v0.6 会优先使用标准 SFTP subsystem。
+如果服务器没有开放 SFTP，例如部分 OpenWrt / Dropbear 路由器，程序会自动切换到 SSH 文件浏览模式。
+这个模式不需要服务器安装 openssh-sftp-server，也可以浏览 `/etc`、`/root`、`/www` 等内部目录。
+
+当前 fallback 支持：目录浏览、进入文件夹、新建文件夹、新建文件、删除、重命名、chmod、打开/保存 UTF-8 文本、单文件下载。
+大批量上传下载仍建议服务器安装 openssh-sftp-server 后使用完整 SFTP。
+

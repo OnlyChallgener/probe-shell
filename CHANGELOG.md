@@ -1,3 +1,22 @@
+# Changelog
+
+## v0.6.0-probe1
+
+- Product release focused on SFTP/file-browser reliability.
+- Keep native SFTP as the first choice.
+- Add SSH file-browser fallback for OpenWrt/Dropbear and other servers without an SFTP subsystem.
+- Fallback mode supports directory browsing, folder navigation, mkdir, touch, delete, rename, chmod, text open/save, and single-file download.
+- Replace Probe Shell app icon with a brighter Win11-style icon; no glass texture and no dark-only look.
+- Keep the Windows-only portable ZIP release workflow to reduce release failures.
+
+## v0.5.3-probe2
+
+- Release stability: simplified GitHub Actions to a Windows x86_64 portable ZIP only.
+- Release stability: removed MSI/AppImage/macOS/Linux packaging paths from the active Release workflow.
+- Release stability: disabled the AUR publisher as a harmless manual stub to avoid unrelated release failures.
+- Dependency fix: corrected Cargo.lock to use `aead` 0.5.2.
+- Includes the v0.5.3 Probe Shell innovation preview: session search, privacy mode, device profiling, default quick actions, and clearer connection error hints.
+
 # Changelog / 更新日志
 
 All notable changes are documented here. 本文件记录所有重要变更。
