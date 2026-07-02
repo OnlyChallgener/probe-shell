@@ -1,3 +1,13 @@
+
+## v0.6.1-probe1
+
+- Light mode readability: wallpaper immersion is now dark-mode only; light mode uses opaque Win11-style surfaces so text and SFTP tables no longer look grey/washed out.
+- Session navigation: clicking a saved session now jumps to its existing open tab instead of opening duplicate tabs repeatedly.
+- SFTP/SSH browser UX: folders open by click/double-click, file list right-click gets an Open Folder action, and the directory-tree / file-list splitter can be dragged left or right.
+- Router workflow: added quick commands for `vi /etc/config/firewall`, `ip -6 neigh show`, and `ip -6 addr show dev pppoe`.
+- Telnet defaults to port 23 when switching the new-session dialog to Telnet.
+- Remote files: SSH-browser mode is preferred first for OpenWrt/Dropbear-style devices; native SFTP is used when shell exec is unavailable.
+- Icon packaging: refreshed PNG/ICO assets with a transparent outer background so the Windows taskbar icon fills better and no longer shows a white tile edge.
 # Changelog
 
 ## v0.6.0-probe1

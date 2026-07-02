@@ -26,7 +26,11 @@ export global Theme {
     // it translucent so the image shows through. Returns the plain base colour
     // when no wallpaper is active (so the normal opaque theme is unchanged).
     pure function frost(base: color, alpha: float) -> brush {
-        return root.wallpaper-active
+        // Wallpaper immersion is intentionally dark-mode only. In light mode the
+        // old frosted surfaces became a grey/white wash over the sci-fi wallpaper,
+        // making text and SFTP tables hard to read. Keep light mode crisp and
+        // opaque while preserving the immersive wallpaper in dark mode.
+        return root.wallpaper-active && root.dark
             ? base.mix(root.wp-tint, 1.0 - root.tint-amt).with-alpha(alpha)
             : base;
     }
@@ -38,10 +42,10 @@ export global Theme {
 
     property <color> base-bg-root:      dark ? #090f1f : #eef4ff;
     property <color> base-bg-panel:     dark ? #111827 : #ffffff;
-    property <color> base-bg-panel-alt: dark ? #162033 : #f5f8ff;
-    property <color> base-bg-elevated:  dark ? #1e2a44 : #eaf1ff;
-    property <color> base-bg-hover:     dark ? #243453 : #dde8ff;
-    property <color> base-bg-active:    dark ? #2c4168 : #cfddff;
+    property <color> base-bg-panel-alt: dark ? #162033 : #f8fbff;
+    property <color> base-bg-elevated:  dark ? #1e2a44 : #eef5ff;
+    property <color> base-bg-hover:     dark ? #243453 : #e6f0ff;
+    property <color> base-bg-active:    dark ? #2c4168 : #d7e7ff;
 
     // bg-root frosts lighter (lower alpha) so the wallpaper reads clearly in
     // empty / inset areas; panels stay mostly opaque for legible text.
@@ -75,8 +79,8 @@ export global Theme {
     // Terminal uses its own background so it stays readable regardless of
     // what the shell / remote app outputs via ANSI colour codes. With a
     // wallpaper it frosts (kept neutral, not tinted) so text stays legible.
-    property <color> base-term-bg: dark ? #050914 : #fbfdff;
-    out property <brush> term-bg: root.wallpaper-active ? base-term-bg.with-alpha(max(0.0, root.panel-alpha - 0.14)) : base-term-bg;
+    property <color> base-term-bg: dark ? #050914 : #ffffff;
+    out property <brush> term-bg: (root.wallpaper-active && root.dark) ? base-term-bg.with-alpha(max(0.0, root.panel-alpha - 0.14)) : base-term-bg;
     out property <brush> term-fg: dark ? #d4d4d4 : #2d2d2f;
 
     // True on macOS (set by Rust). App shortcuts use Cmd (⌘) here instead of

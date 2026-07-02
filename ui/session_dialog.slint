@@ -302,7 +302,10 @@ export component SessionDialog inherits Rectangle {
                     SegOption {
                         label: "SSH";
                         active: root.draft-kind == "ssh";
-                        clicked => { root.draft-kind = "ssh"; }
+                        clicked => {
+                            root.draft-kind = "ssh";
+                            if (root.draft-port == "" || root.draft-port == "23") { root.draft-port = "22"; }
+                        }
                     }
                     SegOption {
                         label: @tr("Serial");
@@ -312,7 +315,10 @@ export component SessionDialog inherits Rectangle {
                     SegOption {
                         label: "Telnet";
                         active: root.draft-kind == "telnet";
-                        clicked => { root.draft-kind = "telnet"; }
+                        clicked => {
+                            root.draft-kind = "telnet";
+                            if (root.draft-port == "" || root.draft-port == "22") { root.draft-port = "23"; }
+                        }
                     }
                 }
             }

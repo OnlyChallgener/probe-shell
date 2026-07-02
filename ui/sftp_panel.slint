@@ -33,6 +33,8 @@ component SftpMenuItem inherits Rectangle {
     border-radius: Theme.radius-sm;
     background: (root.enabled && ta.has-hover) ? Theme.bg-hover : transparent;
     ta := TouchArea {
+        width: parent.width;
+        height: parent.height;
         mouse-cursor: root.enabled ? pointer : default;
         clicked => { if (root.enabled) { root.clicked(); } }
     }
@@ -60,13 +62,19 @@ export component SftpPanel inherits Rectangle {
     in property <bool> collapsed: false;   // when true only the toolbar shows
     in property <bool> show-tree: true;    // hide the directory tree when narrow (#dock)
     in property <bool> compact: false;     // side-docked + collapsed → render nothing but a clean strip (#dock)
+    // User-resizable directory tree width. This is intentionally local to the
+    // panel, so it is safe and never affects terminal layout.
+    property <length> tree-width: 180px;
+    property <bool> tree-resizing: false;
+    property <length> tree-grab-x;
+    property <length> tree-base-width;
     // Responsive columns: only when docked left/right (narrow, width-adjustable).
     // Docked top/bottom the panel is wide and can only be resized vertically, so
     // always show every column there (show-tree is true exactly in that case).
     // When narrow, drop Size then Modified the moment keeping them would squeeze
     // the Name column below `name-min` (names start eliding to "…"). Reserved
     // widths: checkbox+padding+spacing 36px, Size col 76px, Modified 120px.
-    property <length> list-w: root.show-tree ? root.width - 161px : root.width;
+    property <length> list-w: root.show-tree ? root.width - root.tree-width - 6px : root.width;
     property <length> name-min: 180px;     // narrower than this → start dropping columns
     property <bool> show-size-col: root.show-tree || (root.list-w - 36px - 76px - 120px > root.name-min);
     property <bool> show-modified-col: root.show-tree || (root.list-w - 36px - 120px > root.name-min);
@@ -119,6 +127,8 @@ export component SftpPanel inherits Rectangle {
     // Drag empty space to re-dock; interactive widgets (file list, tree, toolbar
     // buttons) sit in front and capture their own events (#dock).
     dock-bg := TouchArea {
+        width: parent.width;
+        height: parent.height;
         mouse-cursor: move;
         moved => {
             root.dock-drag-move(self.absolute-position.x + self.mouse-x,
@@ -348,7 +358,7 @@ export component SftpPanel inherits Rectangle {
 
             // ── Left: directory tree (hidden when the panel is narrow) ──────
             if root.show-tree : VerticalLayout {
-                width: 160px;
+                width: root.tree-width;
                 spacing: 0;
 
                 // Tree header
@@ -382,6 +392,8 @@ export component SftpPanel inherits Rectangle {
                                     : (mod(i, 2) == 0 ? transparent : #ffffff08));
 
                             node-ta := TouchArea {
+                                width: parent.width;
+                                height: parent.height;
                                 mouse-cursor: pointer;
                                 clicked => { root.tree-expand(node.path); }
                             }
@@ -422,8 +434,35 @@ export component SftpPanel inherits Rectangle {
                 }
             }
 
-            // Vertical separator (only when the tree is shown)
-            if root.show-tree : Rectangle { width: 1px; background: Theme.border-subtle; }
+            // Vertical splitter: drag left/right to resize the directory tree.
+            if root.show-tree : Rectangle {
+                width: 6px;
+                background: split-ta.has-hover || root.tree-resizing ? Theme.accent.with-alpha(0.22) : Theme.border-subtle;
+                split-ta := TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+                    mouse-cursor: ew-resize;
+                    pointer-event(e) => {
+                        if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
+                            root.tree-resizing = true;
+                            root.tree-grab-x = self.absolute-position.x + self.mouse-x;
+                            root.tree-base-width = root.tree-width;
+                        }
+                        if (e.kind == PointerEventKind.up) {
+                            root.tree-resizing = false;
+                        }
+                    }
+                    moved => {
+                        if (root.tree-resizing) {
+                            root.tree-width = clamp(
+                                root.tree-base-width + (self.absolute-position.x + self.mouse-x - root.tree-grab-x),
+                                120px,
+                                min(420px, max(120px, root.width - 260px))
+                            );
+                        }
+                    }
+                }
+            }
 
             // ── Right: file listing ─────────────────────────────────────────
             VerticalLayout {
@@ -487,8 +526,16 @@ export component SftpPanel inherits Rectangle {
                                             : (mod(i, 2) == 0 ? transparent : #ffffff08)));
 
                                 row-ta := TouchArea {
+                                    width: parent.width;
+                                    height: parent.height;
                                     mouse-cursor: pointer;
-                                    clicked => { root.selected-row = i; }
+                                    clicked => {
+                                        if (entry.is-dir) {
+                                            root.navigate(entry.full-path);
+                                        } else {
+                                            root.selected-row = i;
+                                        }
+                                    }
                                     double-clicked => {
                                         if (entry.is-dir) {
                                             root.navigate(entry.full-path);
@@ -525,6 +572,8 @@ export component SftpPanel inherits Rectangle {
                                         border-color: entry.selected ? Theme.accent : Theme.border-strong;
                                         background: entry.selected ? Theme.accent : transparent;
                                         cb-ta := TouchArea {
+                                            width: parent.width;
+                                            height: parent.height;
                                             mouse-cursor: pointer;
                                             clicked => { root.toggle-select(i); }
                                         }
@@ -565,6 +614,8 @@ export component SftpPanel inherits Rectangle {
                                 vertical-stretch: 1;
                                 min-height: 24px;
                                 ws-ta := TouchArea {
+                                    width: parent.width;
+                                    height: parent.height;
                                     pointer-event(ev) => {
                                         if (ev.kind == PointerEventKind.down
                                                 && ev.button == PointerEventButton.right) {
@@ -587,7 +638,7 @@ export component SftpPanel inherits Rectangle {
                         x: root.menu-x;
                         y: root.menu-y;
                         width: 148px;
-                        height: 12 * 27px + 8px;
+                        height: 13 * 27px + 8px;
                         Rectangle {
                             background: Theme.bg-panel;
                             border-radius: Theme.radius-sm;
@@ -598,6 +649,11 @@ export component SftpPanel inherits Rectangle {
                             VerticalLayout {
                                 padding: 4px;
                                 spacing: 1px;
+                                SftpMenuItem {
+                                    label: @tr("Open folder");
+                                    enabled: root.menu-target != "" && root.menu-target-is-dir;
+                                    clicked => { root.navigate(root.menu-target); }
+                                }
                                 SftpMenuItem {
                                     label: @tr("Download");
                                     enabled: root.menu-target != "";

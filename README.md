@@ -190,3 +190,8 @@ Probe Shell v0.6 会优先使用标准 SFTP subsystem。
 当前 fallback 支持：目录浏览、进入文件夹、新建文件夹、新建文件、删除、重命名、chmod、打开/保存 UTF-8 文本、单文件下载。
 大批量上传下载仍建议服务器安装 openssh-sftp-server 后使用完整 SFTP。
 
+
+
+### v0.6.1-probe1 update notes
+
+This build focuses on product polish rather than adding visual complexity: light mode is opaque and readable, clicking an existing session jumps to its current tab, SSH-browser file browsing is preferred for OpenWrt/Dropbear devices, folders can be opened directly from the file panel, the SFTP tree/list divider is resizable, Telnet defaults to port 23, and router IPv6/firewall quick commands are included.

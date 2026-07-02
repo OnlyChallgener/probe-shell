@@ -727,9 +727,9 @@ pub fn run() -> Result<()> {
         let weak = window.as_weak();
         let layout = layout.clone();
         let content_size = content_size.clone();
-        let tabs_model = tabs_model.clone();
         let panes_model = panes_model.clone();
         let splitters_model = splitters_model.clone();
+        let tabs_model = tabs_model.clone();
         window.on_content_resized(move |w: f32, h: f32| {
             content_size.set((w, h));
             if let Some(win) = weak.upgrade() {
@@ -2380,6 +2380,8 @@ fn wire_session_callbacks(
         let terminals_model = terminals_model.clone();
         let layout = layout.clone();
         let content_size = content_size.clone();
+        let panes_model = panes_model.clone();
+        let splitters_model = splitters_model.clone();
         let handles = handles.clone();
         let bufs = bufs.clone();
         let runtime = runtime.clone();
@@ -2396,6 +2398,50 @@ fn wire_session_callbacks(
                 Some(s) => s,
                 None => return,
             };
+
+            // If this saved session is already open, switch to its existing tab
+            // instead of spawning duplicate pages forever. This makes the left
+            // quick-connect list behave like a navigator: click once to open,
+            // click again to jump back to the running session.
+            let existing_tab = {
+                let statuses = tab_statuses.lock().unwrap();
+                statuses
+                    .iter()
+                    .find(|(tab, st)| {
+                        st.session_id == id
+                            && (0..tabs_model.row_count()).any(|i| {
+                                tabs_model
+                                    .row_data(i)
+                                    .map(|r| r.id.as_str() == tab.as_str())
+                                    .unwrap_or(false)
+                            })
+                    })
+                    .map(|(tab, _)| tab.clone())
+            };
+            if let Some(existing_tab) = existing_tab {
+                if let Some(w) = weak.upgrade() {
+                    if let Some(pane_id) = layout.borrow().leaf_of_tab(&existing_tab) {
+                        {
+                            let mut lay = layout.borrow_mut();
+                            lay.focused = pane_id;
+                            if let Some(leaf) = lay.leaf_mut(pane_id) {
+                                leaf.active = existing_tab.clone();
+                            }
+                        }
+                        refresh_panes(
+                            &w,
+                            &layout.borrow(),
+                            content_size.get(),
+                            &tabs_model,
+                            &panes_model,
+                            &splitters_model,
+                        );
+                        w.set_active_tab_id(existing_tab.into());
+                    }
+                }
+                return;
+            }
+
             let tab_id = format!("term-{}", uuid::Uuid::new_v4());
             let tab_title = session.name.clone();
 

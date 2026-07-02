@@ -699,7 +699,7 @@ export component AppWindow inherits Window {
 
     // Immersive wallpaper layer — painted behind everything, filling the window.
     // Panels/terminal frost over it (see Theme.frost). Only present when active.
-    if Theme.wallpaper-active : Image {
+    if Theme.wallpaper-active && Theme.dark : Image {
         x: 0; y: 0;
         width: parent.width;
         height: parent.height;

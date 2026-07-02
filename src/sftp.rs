@@ -380,25 +380,29 @@ async fn run_sftp(
         return Err(anyhow!(t("SFTP 认证失败", "SFTP authentication failed")));
     }
 
-    // --- Open the sftp subsystem channel -----------------------------------
-    // Some routers / embedded Linux boxes (for example many OpenWrt/Dropbear
-    // installations) allow interactive SSH but do not provide an SFTP
-    // subsystem. MobaXterm's "SSH browser" still works there because it can
-    // fall back to shell commands. Probe Shell v0.6 keeps native SFTP as the
-    // first choice, then falls back to a read/write SSH file-browser mode for
-    // basic directory browsing and text-file operations.
+    // --- Open remote file browser ------------------------------------------
+    // Probe Shell is aimed at routers/OpenWrt/NAS devices. Those often allow
+    // normal SSH exec but do not provide a standard SFTP subsystem. MobaXterm's
+    // file browser works because it tries an SSH/SCP-style browser first. Do the
+    // same here: if basic shell exec works, use the lightweight SSH browser by
+    // default. Only fall back to native SFTP when exec is blocked but the SFTP
+    // subsystem is available.
+    if shell_pwd(&handle).await.is_ok() {
+        let _ = events.send(SessionEvent::SftpStatus(t(
+            "SSH 文件浏览模式",
+            "SSH file-browser mode",
+        ).into()));
+        return run_ssh_file_browser(handle, commands, events).await;
+    }
+
     let sftp = match open_sftp_subsystem(&handle).await {
         Ok(sftp) => sftp,
         Err(err) => {
             let _ = events.send(SessionEvent::SftpStatus(format!(
-                "{}: {err:#}. {}",
-                t("SFTP 子系统不可用", "SFTP subsystem unavailable"),
-                t(
-                    "已切换到 SSH 文件浏览模式",
-                    "Using SSH file-browser fallback"
-                )
+                "{}: {err:#}",
+                t("文件浏览不可用", "Remote file browser unavailable")
             )));
-            return run_ssh_file_browser(handle, commands, events).await;
+            return Err(err);
         }
     };
     // Share the session + connection so transfers can run on their own task,

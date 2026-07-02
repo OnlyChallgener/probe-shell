@@ -169,3 +169,23 @@ probe-shell/
 ## License
 
 Dual-licensed under MIT OR Apache-2.0.
+
+
+## Probe Shell preview release note
+
+The current preview Release workflow intentionally builds only the Windows x86_64 portable ZIP. AUR publishing, MSI, Linux, and macOS packaging are disabled for now to keep releases stable while the project is being customized.
+
+## v0.6 SFTP / file-browser fix
+
+Probe Shell v0.6 tries the standard SFTP subsystem first.
+If the server does not provide SFTP, such as many OpenWrt / Dropbear routers, it automatically falls back to SSH file-browser mode.
+This fallback does not require `openssh-sftp-server` and can still browse internal directories such as `/etc`, `/root`, and `/www`.
+
+The fallback currently supports browsing, entering folders, mkdir, touch, delete, rename, chmod, opening/saving UTF-8 text files, and single-file downloads.
+For bulk upload/download, install `openssh-sftp-server` on the server and use full SFTP.
+
+
+
+### v0.6.1-probe1 update notes
+
+This build focuses on product polish rather than adding visual complexity: light mode is opaque and readable, clicking an existing session jumps to its current tab, SSH-browser file browsing is preferred for OpenWrt/Dropbear devices, folders can be opened directly from the file panel, the SFTP tree/list divider is resizable, Telnet defaults to port 23, and router IPv6/firewall quick commands are included.
