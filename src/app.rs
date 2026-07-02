@@ -856,6 +856,7 @@ pub fn run() -> Result<()> {
         local_snap.clone(),
         local_net_hist.clone(),
         sftp_follow_cd.clone(),
+        connect_debounce.clone(),
     );
 
     // Recompute the sidebar whenever the active tab changes (fired from Slint's
@@ -1824,6 +1825,7 @@ fn wire_session_callbacks(
     local_snap: LocalSnap,
     local_net_hist: NetHist,
     sftp_follow_cd: Arc<std::sync::atomic::AtomicBool>,
+    connect_debounce: Rc<RefCell<HashMap<String, std::time::Instant>>>,
 ) {
     // Working set of port forwards (#56) for the session being created/edited.
     // The forward add/delete callbacks mutate it; saving reads it into
