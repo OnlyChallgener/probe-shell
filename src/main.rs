@@ -5,6 +5,8 @@
 
 mod app;
 mod app_state;
+mod app_update;
+mod crash;
 mod config;
 mod errlog;
 mod forward;
@@ -21,7 +23,7 @@ mod telnet;
 mod wallpaper;
 mod zmodem;
 
-fn main() -> anyhow::Result<()> {
+fn main() {
     // macOS renderer is left at Slint's default (femtovg) and is NOT forced.
     //
     // History: 0.4.10 force-set SLINT_BACKEND=winit-skia to work around femtovg's
@@ -39,6 +41,7 @@ fn main() -> anyhow::Result<()> {
     // that override is available without a rebuild.
 
     init_tracing();
+    crash::install();
 
     // ── IME policy ───────────────────────────────────────────────────────────
     // NOTE: We deliberately DO **NOT** call `ImmDisableIME` here.
@@ -55,7 +58,11 @@ fn main() -> anyhow::Result<()> {
     // are handled instead by the C0-marker + 3-layer Backspace filters in
     // `app::on_send_key`, so we no longer need (and must not use) ImmDisableIME.
 
-    app::run()
+    if let Err(e) = app::run() {
+        tracing::error!(error = %e, "application exited with an error");
+        eprintln!("Probe Shell failed: {e:#}");
+        std::process::exit(1);
+    }
 }
 
 /// Set up tracing: stderr (honours RUST_LOG, default info) **plus** a capped

@@ -4,6 +4,19 @@ All notable changes are documented here. 本文件记录所有重要变更。
 中英对照（English first, 中文在后）.
 
 
+## [0.5.2-probe1] - 2026-07-02
+
+### Added / 新增
+
+- **Crash diagnostics / 崩溃诊断.** Added `log/crash.log` with panic payload, source location and backtrace so silent Windows exits can be diagnosed. Startup errors are also written through tracing before the process exits.
+- **Update helper split / 更新检查拆分.** Moved GitHub release URL handling, latest-release API fetch and version parsing into `src/app_update.rs`; `app.rs` now only wires the UI callbacks.
+- **Release MSI switch / MSI 构建开关.** Manual GitHub Actions runs now default to fast Windows ZIP builds; MSI can be enabled with a `build_msi` checkbox. Tag releases still build ZIP and MSI.
+
+### Changed / 变更
+
+- Version bumped to `0.5.2` for the next Probe Shell preview build.
+- Kept the Windows-only release matrix and `probe-shell.exe` artifact naming.
+
 ## [0.5.1-probe-shell] - 2026-07-02
 
 ### Changed / 变更

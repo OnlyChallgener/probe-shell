@@ -26,8 +26,9 @@ Probe Shell 基于原开源项目重命名和改造，继续遵循 `MIT OR Apach
 
 ## 下载与安装
 
-每次打 `v*` 标签，GitHub Actions 会自动构建 **Windows / Linux / macOS** 三平台二进制，
+当前 Probe Shell 预览版的 GitHub Actions 默认只构建 **Windows x86_64**。
 发布到 [Releases](https://github.com/OnlyChallenger/probe-shell/releases) 页面。
+手动运行 `Release` workflow 时默认只生成 ZIP；需要安装包时勾选 `build_msi`。
 
 ### Windows
 
@@ -63,6 +64,13 @@ open /Applications/probe-shell.app
 > 若未移到 `/Applications`，把上面两条路径换成 `.app` 实际所在位置(如 `~/Downloads/probe-shell.app`)即可。
 
 > 从源码构建见下方 [运行](#运行)。
+
+## 日志与崩溃诊断
+
+- 普通警告/错误日志：程序目录旁的 `log/error.log`。
+- 闪退/ panic 诊断：程序目录旁的 `log/crash.log`，包含 panic 信息、源码位置和 backtrace。
+
+如果遇到闪退，优先把这两个文件一起发出来分析。
 
 ## 功能
 

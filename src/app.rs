@@ -1017,25 +1017,13 @@ pub fn run() -> Result<()> {
     }
 
     // --- In-app update check (#48) -----------------------------------------
-    // "Download" on the banner opens the latest-release page in the browser.
+    // URL handling and version parsing live in app_update.rs so fork-specific
+    // repository strings are not scattered throughout this large UI hub.
     window.on_open_update_url(move || {
-        let url = "https://github.com/OnlyChallenger/probe-shell/releases/latest";
-        #[cfg(windows)]
-        let _ = std::process::Command::new("explorer").arg(url).spawn();
-        #[cfg(target_os = "macos")]
-        let _ = std::process::Command::new("open").arg(url).spawn();
-        #[cfg(all(not(windows), not(target_os = "macos")))]
-        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+        crate::app_update::open_url(crate::app_update::RELEASE_URL);
     });
-    // The open-source link in the About dialog opens the project page.
     window.on_open_repo(move || {
-        let url = "https://github.com/OnlyChallenger/probe-shell";
-        #[cfg(windows)]
-        let _ = std::process::Command::new("explorer").arg(url).spawn();
-        #[cfg(target_os = "macos")]
-        let _ = std::process::Command::new("open").arg(url).spawn();
-        #[cfg(all(not(windows), not(target_os = "macos")))]
-        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+        crate::app_update::open_url(crate::app_update::REPO_URL);
     });
     // Query the GitHub releases API on a background thread; if a newer version
     // exists, flip the banner on. Best-effort: any network/parse error is
@@ -1044,26 +1032,8 @@ pub fn run() -> Result<()> {
     if store.borrow().update_check_enabled() {
         let weak = window.as_weak();
         std::thread::spawn(move || {
-            let body = match ureq::get(
-                "https://api.github.com/repos/OnlyChallenger/probe-shell/releases/latest",
-            )
-            .set("User-Agent", "probe-shell-update-check")
-            .timeout(std::time::Duration::from_secs(8))
-            .call()
-            {
-                Ok(resp) => resp.into_string().unwrap_or_default(),
-                Err(_) => return,
-            };
-            let json: serde_json::Value = match serde_json::from_str(&body) {
-                Ok(v) => v,
-                Err(_) => return,
-            };
-            let tag = json["tag_name"].as_str().unwrap_or("").to_string();
-            let newer = matches!(
-                (parse_version(&tag), parse_version(env!("CARGO_PKG_VERSION"))),
-                (Some(latest), Some(cur)) if latest > cur
-            );
-            if !newer {
+            let Some(tag) = crate::app_update::fetch_latest_tag() else { return };
+            if !crate::app_update::is_newer_than_current(&tag) {
                 return;
             }
             let _ = weak.upgrade_in_event_loop(move |w| {
@@ -6519,23 +6489,6 @@ fn system_monospace_fonts() -> Vec<slint::SharedString> {
 /// `http`/`https` scheme prefixes. A value without a (recognised) scheme is
 /// treated as SOCKS5, matching proxy.rs's parse default, so older configs that
 /// stored a bare `host:port` keep working.
-/// Parse a "vX.Y.Z" / "X.Y.Z" tag into a comparable tuple, or None if it isn't
-/// a three-part numeric version. A pre-release suffix on the patch (e.g.
-/// "3-rc1") is tolerated by taking its leading digits (#48).
-fn parse_version(s: &str) -> Option<(u32, u32, u32)> {
-    let s = s.trim().trim_start_matches('v');
-    let mut it = s.split('.');
-    let major = it.next()?.parse().ok()?;
-    let minor = it.next()?.parse().ok()?;
-    let patch = it
-        .next()?
-        .split(|c: char| !c.is_ascii_digit())
-        .next()?
-        .parse()
-        .ok()?;
-    Some((major, minor, patch))
-}
-
 fn split_proxy(url: &str) -> (String, String) {
     let s = url.trim();
     if s.is_empty() {

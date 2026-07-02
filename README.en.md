@@ -27,9 +27,7 @@ It remains licensed as `MIT OR Apache-2.0`; original license and contributor cre
 
 ## Download & install
 
-Every `v*` tag triggers a GitHub Actions build that produces native binaries for
-**Windows / Linux / macOS**, published on the
-[Releases](https://github.com/OnlyChallenger/probe-shell/releases) page.
+The current Probe Shell preview workflow builds **Windows x86_64** by default and publishes artifacts to the [Releases](https://github.com/OnlyChallenger/probe-shell/releases) page. Manual `Release` workflow runs produce the portable ZIP by default; enable `build_msi` when you also need the installer.
 
 ### Windows
 
@@ -67,6 +65,13 @@ open /Applications/probe-shell.app
 > If you didn't move it to `/Applications`, point both paths above at wherever the `.app` actually is (e.g. `~/Downloads/probe-shell.app`).
 
 > To build from source, see [Running](#running) below.
+
+## Logs and crash diagnostics
+
+- Warnings/errors: `log/error.log` beside the portable executable.
+- Hard crashes / panics: `log/crash.log`, including panic payload, source location and backtrace.
+
+When reporting a crash, include both files if possible.
 
 ## Features
 
