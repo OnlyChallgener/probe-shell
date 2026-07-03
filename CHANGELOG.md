@@ -1,4 +1,10 @@
 ## v0.6.3-probe3
+## v0.6.3-probe4
+
+- 精简 SFTP 右侧文件列表右键菜单，移除“打开文件夹 / 设为搜索范围 / 勾选 / 下载选中 / 删除选中”等容易误触或重复的项目。
+- 左侧目录树右键菜单改为中文，并移除“打开文件夹 / 设为搜索范围”，新增“权限”用于给目录赋权。
+- 右键菜单阴影和宽度收敛，避免菜单过大遮挡文件列表。
+
 
 - 修复 SSH-browser fallback 构建失败：补齐 `SftpCommand::Search` 在 fallback worker 中的 match 分支。
 - SSH-browser fallback 支持有边界递归搜索，和原生 SFTP 搜索保持一致。

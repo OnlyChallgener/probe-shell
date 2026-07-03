@@ -569,59 +569,54 @@ export component SftpPanel inherits Rectangle {
                     tree-menu := PopupWindow {
                         x: root.tree-menu-x;
                         y: root.tree-menu-y;
-                        width: 172px;
-                        height: 10 * 27px + 10px;
+                        width: 156px;
+                        height: 9 * 27px + 14px;
                         Rectangle {
                             background: Theme.bg-panel;
                             border-radius: Theme.radius-sm;
                             border-width: 1px;
                             border-color: Theme.border-strong;
-                            drop-shadow-blur: 12px;
-                            drop-shadow-color: #00000060;
+                            drop-shadow-blur: 10px;
+                            drop-shadow-color: #00000040;
                             VerticalLayout {
                                 padding: 4px;
                                 spacing: 1px;
                                 SftpMenuItem {
-                                    label: @tr("Open folder");
-                                    clicked => { root.navigate(root.tree-menu-target); }
-                                }
-                                SftpMenuItem {
-                                    label: @tr("Expand / Collapse");
+                                    label: @tr("展开 / 折叠");
                                     clicked => { root.tree-expand(root.tree-menu-target); }
                                 }
                                 SftpMenuItem {
-                                    label: root.tree-selected-path == root.tree-menu-target ? @tr("Uncheck search scope") : @tr("Set search scope");
-                                    clicked => {
-                                        root.tree-selected-path = root.tree-selected-path == root.tree-menu-target ? "" : root.tree-menu-target;
-                                    }
-                                }
-                                SftpMenuItem {
-                                    label: @tr("Search here");
+                                    label: @tr("在此搜索");
                                     clicked => { root.search-folder(root.tree-menu-target, file-search.text); }
                                 }
                                 SftpMenuItem {
-                                    label: @tr("Copy path");
+                                    label: @tr("复制路径");
                                     clicked => { root.copy-path(root.tree-menu-target); }
+                                }
+                                SftpMenuItem {
+                                    label: @tr("权限");
+                                    enabled: root.tree-menu-target != "";
+                                    clicked => { root.chmod-request(root.tree-menu-target, root.tree-menu-target, 493); }
                                 }
                                 Rectangle { height: 1px; background: Theme.border-subtle; }
                                 SftpMenuItem {
-                                    label: @tr("New folder here");
+                                    label: @tr("新建文件夹");
                                     clicked => { root.new-folder(root.tree-menu-target); }
                                 }
                                 SftpMenuItem {
-                                    label: @tr("New file here");
+                                    label: @tr("新建文件");
                                     clicked => { root.new-file(root.tree-menu-target); }
                                 }
                                 SftpMenuItem {
-                                    label: @tr("Refresh this folder");
+                                    label: @tr("刷新此目录");
                                     clicked => { root.refresh(root.tree-menu-target); }
                                 }
                                 SftpMenuItem {
-                                    label: @tr("Refresh current panel");
+                                    label: @tr("刷新当前面板");
                                     clicked => { root.refresh(root.current-path); }
                                 }
                                 SftpMenuItem {
-                                    label: @tr("Delete folder");
+                                    label: @tr("删除文件夹");
                                     tint: #d86c6c;
                                     enabled: root.tree-menu-target != "/";
                                     clicked => { root.delete(root.tree-menu-target); }
@@ -844,107 +839,81 @@ export component SftpPanel inherits Rectangle {
                     file-menu := PopupWindow {
                         x: root.menu-x;
                         y: root.menu-y;
-                        width: 176px;
-                        height: 21 * 27px + 10px;
+                        width: 154px;
+                        height: 13 * 27px + 14px;
                         Rectangle {
                             background: Theme.bg-panel;
                             border-radius: Theme.radius-sm;
                             border-width: 1px;
                             border-color: Theme.border-strong;
-                            drop-shadow-blur: 12px;
-                            drop-shadow-color: #00000060;
+                            drop-shadow-blur: 10px;
+                            drop-shadow-color: #00000040;
                             VerticalLayout {
                                 padding: 4px;
                                 spacing: 1px;
                                 SftpMenuItem {
-                                    label: @tr("Open folder");
-                                    enabled: root.menu-target != "" && root.menu-target-is-dir;
-                                    clicked => { root.navigate(root.menu-target); }
-                                }
-                                SftpMenuItem {
-                                    label: @tr("Search in this folder");
+                                    label: @tr("在此搜索");
                                     enabled: root.menu-target != "" && root.menu-target-is-dir;
                                     clicked => { root.search-folder(root.menu-target, file-search.text); }
                                 }
-                                SftpMenuItem {
-                                    label: @tr("Set as search scope");
-                                    enabled: root.menu-target != "" && root.menu-target-is-dir;
-                                    clicked => { root.tree-selected-path = root.menu-target; }
-                                }
-                                SftpMenuItem {
-                                    label: @tr("Check / Uncheck");
-                                    enabled: root.menu-target-index >= 0;
-                                    clicked => { root.toggle-select(root.menu-target-index); }
-                                }
-                                SftpMenuItem {
-                                    label: @tr("Download selected");
-                                    enabled: root.selected-count > 0;
-                                    clicked => { root.download-selected(); }
-                                }
-                                SftpMenuItem {
-                                    label: @tr("Delete selected");
-                                    tint: #d86c6c;
-                                    enabled: root.selected-count > 0;
-                                    clicked => { root.delete-selected(); }
-                                }
                                 Rectangle { height: 1px; background: Theme.border-subtle; }
                                 SftpMenuItem {
-                                    label: @tr("Download");
+                                    label: @tr("下载");
                                     enabled: root.menu-target != "";
                                     clicked => { root.download(root.menu-target); }
                                 }
                                 SftpMenuItem {
-                                    label: @tr("View");
+                                    label: @tr("查看");
                                     enabled: root.menu-target != "" && !root.menu-target-is-dir;
                                     clicked => { root.view(root.menu-target); }
                                 }
                                 SftpMenuItem {
-                                    label: @tr("Edit");
+                                    label: @tr("编辑");
                                     enabled: root.menu-target != "" && !root.menu-target-is-dir;
                                     clicked => { root.edit(root.menu-target); }
                                 }
                                 SftpMenuItem {
-                                    label: @tr("Open externally");
+                                    label: @tr("外部程序查看");
                                     enabled: root.menu-target != "" && !root.menu-target-is-dir;
                                     clicked => { root.open-external(root.menu-target); }
                                 }
                                 SftpMenuItem {
-                                    label: @tr("Edit externally");
+                                    label: @tr("外部程序编辑");
                                     enabled: root.menu-target != "" && !root.menu-target-is-dir;
                                     clicked => { root.edit-external(root.menu-target); }
                                 }
                                 SftpMenuItem {
-                                    label: @tr("Rename");
+                                    label: @tr("重命名");
                                     enabled: root.menu-target != "";
                                     clicked => { root.rename-request(root.menu-target, root.menu-target-name); }
                                 }
                                 SftpMenuItem {
-                                    label: @tr("Permissions");
+                                    label: @tr("权限");
                                     enabled: root.menu-target != "";
                                     clicked => { root.chmod-request(root.menu-target, root.menu-target-name, root.menu-target-mode); }
                                 }
                                 SftpMenuItem {
-                                    label: @tr("Copy path");
+                                    label: @tr("复制路径");
                                     enabled: root.menu-target != "";
                                     clicked => { root.copy-path(root.menu-target); }
                                 }
                                 SftpMenuItem {
-                                    label: @tr("Delete");
+                                    label: @tr("删除");
                                     tint: #d86c6c;
                                     enabled: root.menu-target != "";
                                     clicked => { root.delete(root.menu-target); }
                                 }
                                 Rectangle { height: 1px; background: Theme.border-subtle; }
                                 SftpMenuItem {
-                                    label: @tr("New folder here");
+                                    label: @tr("新建文件夹");
                                     clicked => { root.new-folder(root.current-path); }
                                 }
                                 SftpMenuItem {
-                                    label: @tr("New file here");
+                                    label: @tr("新建文件");
                                     clicked => { root.new-file(root.current-path); }
                                 }
                                 SftpMenuItem {
-                                    label: @tr("Refresh current folder");
+                                    label: @tr("刷新当前目录");
                                     clicked => { root.refresh(root.current-path); }
                                 }
                             }
