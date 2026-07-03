@@ -1,3 +1,9 @@
+## v0.6.2-probe4
+
+- Light mode polish: switched the pure-white day palette to a soft technology-blue palette for less glare.
+- SFTP UI polish: changed the directory-tree/file-list divider to a 1px hairline while keeping a wider invisible drag hit area.
+- Icon polish: regenerated PNG/ICO assets with a deeper mid-blue base so the taskbar icon is not too white, but still not dark-mode styled.
+
 ## v0.6.2-probe2
 
 - 修复已打开/失败会话再次点击、Enter 重连时的 `RefCell already borrowed` 崩溃。

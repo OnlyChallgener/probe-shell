@@ -434,10 +434,18 @@ export component SftpPanel inherits Rectangle {
                 }
             }
 
-            // Vertical splitter: drag left/right to resize the directory tree.
+            // Vertical splitter: keep the visible divider as a thin Win11-style
+            // hairline, not a glowing block. The transparent 7px hit area still
+            // makes it easy to drag left/right without adding visual noise.
             if root.show-tree : Rectangle {
-                width: 6px;
-                background: split-ta.has-hover || root.tree-resizing ? Theme.accent.with-alpha(0.22) : Theme.border-subtle;
+                width: 7px;
+                background: transparent;
+                Rectangle {
+                    x: 3px;
+                    width: 1px;
+                    height: parent.height;
+                    background: split-ta.has-hover || root.tree-resizing ? Theme.border-strong : Theme.border-subtle;
+                }
                 split-ta := TouchArea {
                     width: parent.width;
                     height: parent.height;

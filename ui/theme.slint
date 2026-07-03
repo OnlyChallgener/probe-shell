@@ -38,14 +38,14 @@ export global Theme {
     // --- Palette -----------------------------------------------------------
     // Opaque window base — the wallpaper Image covers it when active, so panels
     // frost over the image rather than over this.
-    out property <brush> window-base: dark ? #070a12 : #e9eef5;
+    out property <brush> window-base: dark ? #070a12 : #dbeaf7;
 
-    property <color> base-bg-root:      dark ? #090f1f : #e9eef5;
-    property <color> base-bg-panel:     dark ? #111827 : #f7f9fc;
-    property <color> base-bg-panel-alt: dark ? #162033 : #eef3f9;
-    property <color> base-bg-elevated:  dark ? #1e2a44 : #ffffff;
-    property <color> base-bg-hover:     dark ? #243453 : #e5edf7;
-    property <color> base-bg-active:    dark ? #2c4168 : #dbe9fb;
+    property <color> base-bg-root:      dark ? #090f1f : #dbeaf7;
+    property <color> base-bg-panel:     dark ? #111827 : #edf6ff;
+    property <color> base-bg-panel-alt: dark ? #162033 : #e4f0fb;
+    property <color> base-bg-elevated:  dark ? #1e2a44 : #f5faff;
+    property <color> base-bg-hover:     dark ? #243453 : #d8e8f7;
+    property <color> base-bg-active:    dark ? #2c4168 : #c8ddf5;
 
     // bg-root frosts lighter (lower alpha) so the wallpaper reads clearly in
     // empty / inset areas; panels stay mostly opaque for legible text.
@@ -59,18 +59,18 @@ export global Theme {
     // grey labels stay legible even at a low wallpaper overlay (user request).
     out property <brush> bg-panel-strong: frost(base-bg-panel, min(1.0, root.panel-alpha + 0.20));
 
-    out property <brush> border-subtle: dark ? #ffffff18 : #d1dbe8;
-    out property <brush> border-strong: dark ? #8bd5ff55 : #9db3ce;
+    out property <brush> border-subtle: dark ? #ffffff18 : #c7d7e8;
+    out property <brush> border-strong: dark ? #8bd5ff55 : #8aa8c9;
 
     out property <brush> text-primary:   dark ? #edf6ff : #172033;
     // Light-mode secondary/muted darkened further (was #55555a / #7c7c82): over a
     // see-through frosted-wallpaper panel the greys were still too faint to read.
-    out property <brush> text-secondary: dark ? #b9c7dc : #526174;
-    out property <brush> text-muted:     dark ? #8290a8 : #6b788c;
+    out property <brush> text-secondary: dark ? #b9c7dc : #46576c;
+    out property <brush> text-muted:     dark ? #8290a8 : #5f7086;
 
-    out property <brush> accent:         (root.wallpaper-active && root.dark) ? root.wp-accent          : (dark ? #59b8ff : #3f7fd9);
-    out property <brush> accent-hover:   (root.wallpaper-active && root.dark) ? root.wp-accent.brighter(0.12) : (dark ? #7cc8ff : #4e8ce4);
-    out property <brush> accent-pressed: (root.wallpaper-active && root.dark) ? root.wp-accent.darker(0.12)   : (dark ? #2f8fd3 : #2f69b8);
+    out property <brush> accent:         (root.wallpaper-active && root.dark) ? root.wp-accent          : (dark ? #59b8ff : #3178d4);
+    out property <brush> accent-hover:   (root.wallpaper-active && root.dark) ? root.wp-accent.brighter(0.12) : (dark ? #7cc8ff : #4489e1);
+    out property <brush> accent-pressed: (root.wallpaper-active && root.dark) ? root.wp-accent.darker(0.12)   : (dark ? #2f8fd3 : #2264b5);
 
     out property <brush> success: dark ? #52d6b8 : #16a34a;
     out property <brush> warning: dark ? #f4c067 : #f59e0b;
@@ -79,9 +79,9 @@ export global Theme {
     // Terminal uses its own background so it stays readable regardless of
     // what the shell / remote app outputs via ANSI colour codes. With a
     // wallpaper it frosts (kept neutral, not tinted) so text stays legible.
-    property <color> base-term-bg: dark ? #050914 : #f8fafc;
+    property <color> base-term-bg: dark ? #050914 : #edf5ff;
     out property <brush> term-bg: (root.wallpaper-active && root.dark) ? base-term-bg.with-alpha(max(0.0, root.panel-alpha - 0.14)) : base-term-bg;
-    out property <brush> term-fg: dark ? #d4d4d4 : #1f2937;
+    out property <brush> term-fg: dark ? #d4d4d4 : #172033;
 
     // True on macOS (set by Rust). App shortcuts use Cmd (⌘) here instead of
     // Ctrl, so the physical Ctrl key stays free for the shell (^C/^X…) (#158).
