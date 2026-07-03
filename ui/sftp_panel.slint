@@ -90,6 +90,13 @@ export component SftpPanel inherits Rectangle {
     property <string> menu-target-name;
     property <bool>   menu-target-is-dir;
     property <int>    menu-target-mode;     // permission bits for the chmod dialog
+    // Directory-tree selection is separate from the right file-list checkbox.
+    // It acts as a search scope: check one folder in the tree, then use the
+    // small folder-search button or press Enter in the search box (#probe-folder-search).
+    property <string> tree-selected-path: "";
+    property <length> tree-menu-x;
+    property <length> tree-menu-y;
+    property <string> tree-menu-target;
 
     // --- Callbacks ---------------------------------------------------------
     callback toggle-collapsed();    // minimise / restore the panel
@@ -98,6 +105,7 @@ export component SftpPanel inherits Rectangle {
     callback upload-clicked(string /* remote dir */, bool /* folder */);
     callback refresh(string);
     callback search-changed(string); // filter files/folders in current directory
+    callback search-folder(string /* root dir */, string /* query */); // recursive search from a selected/current folder
     callback tree-expand(string);   // toggle expand/collapse + navigate
     callback delete(string);        // remove a remote file/dir
     callback toggle-select(int);    // toggle a row's multi-select checkbox (#100)
@@ -233,8 +241,15 @@ export component SftpPanel inherits Rectangle {
                         font-size: Theme.fs-sm;
                         vertical-alignment: center;
                         single-line: true;
+                        // Typing filters the current visible listing only, so it stays instant.
                         edited => { root.search-changed(self.text); }
-                        accepted => { root.search-changed(self.text); }
+                        // Enter performs a scoped search: checked tree folder first, otherwise current path.
+                        accepted => {
+                            root.search-folder(
+                                root.tree-selected-path != "" ? root.tree-selected-path : root.current-path,
+                                self.text
+                            );
+                        }
                     }
                     Text {
                         x: 6px;
@@ -251,11 +266,32 @@ export component SftpPanel inherits Rectangle {
                         x: 24px;
                         width: parent.width - 30px;
                         height: parent.height;
-                        text: @tr("Search files");
+                        text: root.tree-selected-path != "" ? @tr("Search checked folder") : @tr("Search files");
                         color: Theme.text-muted;
                         font-size: Theme.fs-xs;
                         vertical-alignment: center;
                     }
+                }
+
+                // Scoped search: if a directory in the tree is checked, search there;
+                // otherwise search the current path. Kept as a compact icon so it
+                // doesn't crowd the path bar (#probe-folder-search).
+                Rectangle {
+                    width: 24px; height: 22px;
+                    border-radius: Theme.radius-sm;
+                    background: fs-ta.has-hover ? Theme.bg-hover : transparent;
+                    fs-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.search-folder(
+                                root.tree-selected-path != "" ? root.tree-selected-path : root.current-path,
+                                file-search.text
+                            );
+                        }
+                    }
+                    Text { text: "\u{F02F}"; font-family: "Material Icons";
+                           color: root.tree-selected-path != "" ? Theme.accent : Theme.text-secondary;
+                           font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                 }
 
                 // Copy the current path to the clipboard.
@@ -424,63 +460,157 @@ export component SftpPanel inherits Rectangle {
                 }
                 Rectangle { height: 1px; background: Theme.border-subtle; }
 
-                // Tree list with scrollbar
-                ScrollView {
+                // Tree list with scrollbar. Tree nodes are navigation targets, but
+                // they are also useful as search scopes, so each row has a small
+                // checkbox and a right-click menu (#probe-folder-search).
+                tree-area := Rectangle {
                     vertical-stretch: 1;
+                    clip: true;
 
-                    tree-list := VerticalLayout {
-                        spacing: 0;
+                    ScrollView {
+                        width: parent.width;
+                        height: parent.height;
 
-                        for node[i] in root.tree-nodes : Rectangle {
-                            height: 22px;
-                            background: node-ta.has-hover
-                                ? Theme.bg-hover
-                                : (node.path == root.current-path
-                                    ? #4a90e230
-                                    : (mod(i, 2) == 0 ? transparent : #ffffff08));
+                        tree-list := VerticalLayout {
+                            spacing: 0;
 
-                            node-ta := TouchArea {
-                                width: parent.width;
-                                height: parent.height;
-                                mouse-cursor: pointer;
-                                clicked => { root.tree-expand(node.path); }
-                            }
+                            for node[i] in root.tree-nodes : Rectangle {
+                                height: 24px;
+                                background: node-ta.has-hover
+                                    ? Theme.bg-hover
+                                    : (node.path == root.current-path
+                                        ? #4a90e230
+                                        : (node.path == root.tree-selected-path
+                                            ? #4a90e218
+                                            : (mod(i, 2) == 0 ? transparent : #ffffff08)));
 
-                            HorizontalLayout {
-                                spacing: 0;
-                                padding-top: 1px;
-
-                                // Depth indent spacer
-                                Rectangle { width: node.depth * 12px; }
-
-                                // Expand/collapse arrow
-                                Text {
-                                    width: 14px;
-                                    text: node.has-children
-                                        ? (node.expanded ? "▼" : "▶")
-                                        : " ";
-                                    color: Theme.text-muted;
-                                    font-size: 9px;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
+                                node-ta := TouchArea {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    mouse-cursor: pointer;
+                                    clicked => { root.tree-expand(node.path); }
+                                    pointer-event(ev) => {
+                                        if (ev.kind == PointerEventKind.down
+                                                && ev.button == PointerEventButton.right) {
+                                            root.tree-menu-target = node.path;
+                                            root.tree-menu-x = self.absolute-position.x + self.mouse-x - tree-area.absolute-position.x;
+                                            root.tree-menu-y = self.absolute-position.y + self.mouse-y - tree-area.absolute-position.y;
+                                            tree-menu.show();
+                                        }
+                                    }
                                 }
 
-                                // Folder name
-                                Text {
-                                    text: node.depth == 0 ? "/" : node.name;
-                                    color: node.path == root.current-path
-                                        ? Theme.accent
-                                        : Theme.text-primary;
-                                    font-size: Theme.fs-sm;
-                                    horizontal-stretch: 1;
-                                    overflow: elide;
-                                    vertical-alignment: center;
+                                HorizontalLayout {
+                                    spacing: 0;
+                                    padding-top: 1px;
+
+                                    // Depth indent spacer
+                                    Rectangle { width: node.depth * 12px; }
+
+                                    // Search-scope checkbox. It is intentionally
+                                    // single-select: one checked folder means
+                                    // "search from here". Clicking again clears it.
+                                    Rectangle {
+                                        width: 16px;
+                                        y: (parent.height - self.height) / 2;
+                                        height: 16px;
+                                        border-radius: 3px;
+                                        border-width: 1px;
+                                        border-color: node.path == root.tree-selected-path ? Theme.accent : Theme.border-strong;
+                                        background: node.path == root.tree-selected-path ? Theme.accent : transparent;
+                                        tree-cb-ta := TouchArea {
+                                            width: parent.width;
+                                            height: parent.height;
+                                            mouse-cursor: pointer;
+                                            clicked => {
+                                                root.tree-selected-path = root.tree-selected-path == node.path ? "" : node.path;
+                                            }
+                                        }
+                                        if node.path == root.tree-selected-path : Text {
+                                            text: "\u{E5CA}";
+                                            font-family: "Material Icons";
+                                            color: #ffffff;
+                                            font-size: 13px;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                            width: parent.width; height: parent.height;
+                                        }
+                                    }
+
+                                    // Expand/collapse arrow
+                                    Text {
+                                        width: 14px;
+                                        text: node.has-children
+                                            ? (node.expanded ? "▼" : "▶")
+                                            : " ";
+                                        color: Theme.text-muted;
+                                        font-size: 9px;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+
+                                    // Folder name
+                                    Text {
+                                        text: node.depth == 0 ? "/" : node.name;
+                                        color: node.path == root.current-path
+                                            ? Theme.accent
+                                            : Theme.text-primary;
+                                        font-size: Theme.fs-sm;
+                                        horizontal-stretch: 1;
+                                        overflow: elide;
+                                        vertical-alignment: center;
+                                    }
                                 }
                             }
                         }
                     }
-                }
-            }
+
+                    tree-menu := PopupWindow {
+                        x: root.tree-menu-x;
+                        y: root.tree-menu-y;
+                        width: 148px;
+                        height: 6 * 27px + 8px;
+                        Rectangle {
+                            background: Theme.bg-panel;
+                            border-radius: Theme.radius-sm;
+                            border-width: 1px;
+                            border-color: Theme.border-strong;
+                            drop-shadow-blur: 12px;
+                            drop-shadow-color: #00000060;
+                            VerticalLayout {
+                                padding: 4px;
+                                spacing: 1px;
+                                SftpMenuItem {
+                                    label: @tr("Open folder");
+                                    clicked => { root.navigate(root.tree-menu-target); }
+                                }
+                                SftpMenuItem {
+                                    label: root.tree-selected-path == root.tree-menu-target ? @tr("Uncheck folder") : @tr("Check folder");
+                                    clicked => {
+                                        root.tree-selected-path = root.tree-selected-path == root.tree-menu-target ? "" : root.tree-menu-target;
+                                    }
+                                }
+                                SftpMenuItem {
+                                    label: @tr("Search here");
+                                    clicked => { root.search-folder(root.tree-menu-target, file-search.text); }
+                                }
+                                SftpMenuItem {
+                                    label: @tr("Copy path");
+                                    clicked => { root.copy-path(root.tree-menu-target); }
+                                }
+                                Rectangle { height: 1px; background: Theme.border-subtle; }
+                                SftpMenuItem {
+                                    label: @tr("New folder");
+                                    clicked => { root.new-folder(root.tree-menu-target); }
+                                }
+                                SftpMenuItem {
+                                    label: @tr("Refresh");
+                                    clicked => { root.refresh(root.tree-menu-target); }
+                                }
+                            }
+                        }
+                    }
+                }            }
 
             // Vertical splitter: keep the visible divider as a thin Win11-style
             // hairline, not a glowing block. The transparent 7px hit area still

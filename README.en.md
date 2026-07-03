@@ -201,3 +201,9 @@ This build coalesces repeated saved-session clicks and guards failed connection 
 - Fixed repeated failed-session click / Enter reconnect crash (`RefCell already borrowed`).
 - Muted the light theme to opaque soft blue-gray surfaces for readability.
 - Reduced and clamped the default/restored window size to better fit Windows high-DPI displays.
+### v0.6.3-probe2
+
+- Directory tree nodes can now be checked and right-clicked.
+- When a tree folder is checked, pressing Enter in the SFTP search box or clicking the search icon searches from that folder.
+- The existing current-directory local filter is preserved and does not add extra server requests while typing.
+

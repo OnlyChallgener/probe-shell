@@ -5191,6 +5191,23 @@ fn wire_sftp_callbacks(
         });
     }
 
+    // Scoped folder search from the checked tree folder (or the current path).
+    // This sends one bounded search command to the SFTP worker; the worker
+    // ignores unreadable branches instead of failing the whole search.
+    {
+        let sftp_handles = sftp_handles.clone();
+        window.on_sftp_search_folder(move |tab_id: SharedString, root_dir: SharedString, query: SharedString| {
+            let tab_id = tab_id.to_string();
+            let root_dir = root_dir.to_string();
+            let query = query.to_string();
+            if let Ok(handles) = sftp_handles.lock() {
+                if let Some(h) = handles.get(&tab_id) {
+                    h.search(root_dir, query);
+                }
+            }
+        });
+    }
+
     // Toggle tree node expand/collapse and navigate to that directory.
     {
         let sftp_handles = sftp_handles.clone();

@@ -649,6 +649,8 @@ export component AppWindow inherits Window {
     callback sftp-refresh(string /* tab-id */, string /* path */);
     // Search files/folders in the current directory without a network roundtrip.
     callback sftp-search(string /* tab-id */, string /* query */);
+    // Search recursively from a checked/current folder.
+    callback sftp-search-folder(string /* tab-id */, string /* root dir */, string /* query */);
     // Toggle expand/collapse of a tree node (also navigates to that directory).
     callback sftp-tree-expand(string /* tab-id */, string /* path */);
     callback sftp-delete(string /* tab-id */, string /* path */);
@@ -1183,6 +1185,7 @@ export component AppWindow inherits Window {
                     sftp-upload-clicked(dir, folder) => { root.sftp-upload-clicked(term.id, dir, folder); }
                     sftp-refresh(path) => { root.sftp-refresh(term.id, path); }
                     sftp-search-changed(q) => { root.sftp-search(term.id, q); }
+                    sftp-search-folder(path, q) => { root.sftp-search-folder(term.id, path, q); }
                     sftp-tree-expand(path) => { root.sftp-tree-expand(term.id, path); }
                     sftp-toggle-select(i) => { root.sftp-toggle-select(term.id, i); }
                     sftp-download-selected() => { root.sftp-download-selected(term.id); }

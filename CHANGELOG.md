@@ -1,3 +1,10 @@
+## v0.6.3-probe2
+
+- SFTP 目录树支持勾选文件夹，用作搜索范围。
+- 目录树支持右键菜单：打开文件夹、勾选/取消、在此搜索、复制路径、新建文件夹、刷新。
+- SFTP 搜索支持“当前路径 / 勾选目录”范围搜索；输入框回车或点击搜索图标触发，搜索时会忽略无权限分支，避免路由器目录报错导致卡死。
+- 文件列表原有搜索仍保留为本地过滤，输入即筛选当前列表，不额外访问服务器。
+
 ## v0.6.3-probe1
 
 - File browser: prefer native SFTP when available; fall back to SSH-browser only when SFTP is unavailable.

@@ -51,6 +51,10 @@ pub enum SftpCommand {
     RefreshDir(String),
     /// Toggle a directory node in the tree (expand if collapsed, collapse if expanded).
     ToggleTreeNode(String),
+    /// Search files/folders below a specific directory. This is intentionally
+    /// bounded so a router flash filesystem or slow WAN session cannot freeze
+    /// the UI by walking the whole system forever.
+    Search { root: String, query: String },
     /// Download a remote file to a local directory.
     Download { remote: String, local_dir: String },
     /// Multi-select download (#100): tar the named entries under `remote_dir`
@@ -123,6 +127,9 @@ impl SftpHandle {
     }
     pub fn toggle_tree_node(&self, path: String) {
         let _ = self.commands.send(SftpCommand::ToggleTreeNode(path));
+    }
+    pub fn search(&self, root: String, query: String) {
+        let _ = self.commands.send(SftpCommand::Search { root, query });
     }
     pub fn delete(&self, path: String) {
         let _ = self.commands.send(SftpCommand::Delete(path));
@@ -545,6 +552,40 @@ async fn run_sftp(
                 let mut nodes = Vec::new();
                 build_tree_nodes("/", 0, &tree_expanded, &tree_dirs, &mut nodes);
                 let _ = events.send(SessionEvent::SftpTreeUpdate(nodes));
+            }
+
+            SftpCommand::Search { root, query } => {
+                let root = normalise_remote_dir(&root);
+                let query = query.trim().to_string();
+                let _ = events.send(SessionEvent::SftpStatus(format!(
+                    "{} {}{}",
+                    t("搜索", "Searching"),
+                    root,
+                    if query.is_empty() { "".to_string() } else { format!("  ·  {query}") }
+                )));
+                match search_dir_impl(&sftp, &root, &query, 400, 900).await {
+                    Ok(entries) => {
+                        let count = entries.len();
+                        let _ = events.send(SessionEvent::SftpEntries {
+                            path: root.clone(),
+                            entries,
+                        });
+                        let _ = events.send(SessionEvent::SftpStatus(format!(
+                            "{}: {}  ·  {}",
+                            t("搜索完成", "Search complete"),
+                            root,
+                            count
+                        )));
+                    }
+                    Err(e) => {
+                        let _ = events.send(SessionEvent::SftpError(format!(
+                            "{} {}: {}",
+                            t("搜索失败", "Search failed"),
+                            root,
+                            e
+                        )));
+                    }
+                }
             }
 
             SftpCommand::Download { remote, local_dir } => {
@@ -1746,6 +1787,88 @@ fn list_error_msg(path: &str, e: &impl std::fmt::Display) -> String {
     } else {
         format!("{} {}: {}", t("无法访问", "Cannot open"), path, raw)
     }
+}
+
+fn normalise_remote_dir(path: &str) -> String {
+    let p = path.trim();
+    if p.is_empty() || p == "." {
+        "/".to_string()
+    } else if p == ".." {
+        "..".to_string()
+    } else if p == "/" {
+        "/".to_string()
+    } else {
+        let mut out = p.replace('\\', "/");
+        while out.ends_with('/') && out.len() > 1 {
+            out.pop();
+        }
+        if out.starts_with('/') { out } else { format!("/{out}") }
+    }
+}
+
+async fn search_dir_impl(
+    sftp: &SftpSession,
+    root: &str,
+    query: &str,
+    max_results: usize,
+    max_dirs: usize,
+) -> Result<Vec<RemoteEntry>> {
+    let q = query.trim().to_lowercase();
+    let base = normalise_remote_dir(root);
+    let mut stack = vec![base.clone()];
+    let mut visited_dirs = 0usize;
+    let mut out = Vec::new();
+
+    while let Some(dir) = stack.pop() {
+        visited_dirs += 1;
+        if visited_dirs > max_dirs || out.len() >= max_results {
+            break;
+        }
+
+        let entries = match list_dir_impl(sftp, &dir).await {
+            Ok(v) => v,
+            Err(_) => {
+                // Permission denied under one branch should not cancel the entire search.
+                continue;
+            }
+        };
+
+        for mut entry in entries {
+            let rel = if entry.full_path == base {
+                entry.name.clone()
+            } else {
+                entry
+                    .full_path
+                    .strip_prefix(base.trim_end_matches('/'))
+                    .unwrap_or(&entry.full_path)
+                    .trim_start_matches('/')
+                    .to_string()
+            };
+            let hay = format!("{} {}", entry.name.to_lowercase(), entry.full_path.to_lowercase());
+            if q.is_empty() || hay.contains(&q) {
+                if !rel.is_empty() {
+                    entry.name = rel;
+                }
+                out.push(entry.clone());
+                if out.len() >= max_results {
+                    break;
+                }
+            }
+            if entry.is_dir {
+                let name = entry.name.rsplit('/').next().unwrap_or(&entry.name);
+                if name != "." && name != ".." {
+                    stack.push(entry.full_path.clone());
+                }
+            }
+        }
+    }
+
+    out.sort_by(|a, b| match (a.is_dir, b.is_dir) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+    });
+    Ok(out)
 }
 
 async fn list_dir_impl(sftp: &SftpSession, path: &str) -> Result<Vec<RemoteEntry>> {

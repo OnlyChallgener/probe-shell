@@ -207,3 +207,9 @@ This build coalesces repeated saved-session clicks and guards failed connection 
 - Fixed repeated failed-session click / Enter reconnect crash (`RefCell already borrowed`).
 - Muted the light theme to opaque soft blue-gray surfaces for readability.
 - Reduced and clamped the default/restored window size to better fit Windows high-DPI displays.
+### v0.6.3-probe2
+
+- 目录树支持勾选与右键菜单。
+- 勾选目录后，SFTP 搜索框回车或点击搜索图标会从该目录搜索文件/文件夹。
+- 当前目录本地过滤仍然保留，不会频繁访问服务器。
+

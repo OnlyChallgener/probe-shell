@@ -171,6 +171,7 @@ export component TerminalView inherits Rectangle {
     callback sftp-upload-clicked(string, bool);
     callback sftp-refresh(string);
     callback sftp-search-changed(string);
+    callback sftp-search-folder(string, string);
     callback sftp-tree-expand(string);
     callback sftp-delete(string);
     in property <int> sftp-selected-count;          // checked-entry count (#100)
@@ -1493,6 +1494,7 @@ export component TerminalView inherits Rectangle {
             upload-clicked(dir, folder) => { root.sftp-upload-clicked(dir, folder); }
             refresh(path)       => { root.sftp-refresh(path); }
             search-changed(q)   => { root.sftp-search-changed(q); }
+            search-folder(path, q) => { root.sftp-search-folder(path, q); }
             tree-expand(path)   => { root.sftp-tree-expand(path); }
             delete(path)        => { root.sftp-delete(path); }
             toggle-select(i)    => { root.sftp-toggle-select(i); }
