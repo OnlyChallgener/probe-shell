@@ -62,9 +62,11 @@ export struct TerminalState {
 
     // SFTP panel state
     sftp-path: string,
-    sftp-entries: [SftpEntry],
+    sftp-entries: [SftpEntry],       // filtered visible listing
+    sftp-all-entries: [SftpEntry],   // full listing for local search
     sftp-status: string,
     sftp-loading: bool,
+    sftp-search: string,
     sftp-tree-nodes: [SftpTreeNode],
     sftp-selected-count: int,   // checked entries in the SFTP panel (#100)
     sftp-collapsed: bool,       // SFTP panel minimised — per session (#v0.5)
@@ -645,6 +647,8 @@ export component AppWindow inherits Window {
     callback sftp-upload-clicked(string /* tab-id */, string /* remote-dir */, bool /* folder */);
     // Refresh the current directory listing.
     callback sftp-refresh(string /* tab-id */, string /* path */);
+    // Search files/folders in the current directory without a network roundtrip.
+    callback sftp-search(string /* tab-id */, string /* query */);
     // Toggle expand/collapse of a tree node (also navigates to that directory).
     callback sftp-tree-expand(string /* tab-id */, string /* path */);
     callback sftp-delete(string /* tab-id */, string /* path */);
@@ -1146,6 +1150,7 @@ export component AppWindow inherits Window {
                     sftp-entries: term.sftp-entries;
                     sftp-status: term.sftp-status;
                     sftp-loading: term.sftp-loading;
+                    sftp-search-query: term.sftp-search;
                     sftp-tree-nodes: term.sftp-tree-nodes;
                     sftp-selected-count: term.sftp-selected-count;
                     quick-commands: root.quick-commands;
@@ -1177,6 +1182,7 @@ export component AppWindow inherits Window {
                     sftp-download(path) => { root.sftp-download(term.id, path); }
                     sftp-upload-clicked(dir, folder) => { root.sftp-upload-clicked(term.id, dir, folder); }
                     sftp-refresh(path) => { root.sftp-refresh(term.id, path); }
+                    sftp-search-changed(q) => { root.sftp-search(term.id, q); }
                     sftp-tree-expand(path) => { root.sftp-tree-expand(term.id, path); }
                     sftp-toggle-select(i) => { root.sftp-toggle-select(term.id, i); }
                     sftp-download-selected() => { root.sftp-download-selected(term.id); }

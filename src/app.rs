@@ -91,6 +91,48 @@ use crate::app_state::{LocalSnap, SftpHandles, SftpLastCwd, TabStatus, TabStatus
 // Slint generates types into this scope.
 slint::include_modules!();
 
+fn sftp_entries_model(entries: Vec<SftpEntry>) -> ModelRc<SftpEntry> {
+    ModelRc::from(Rc::new(VecModel::from(entries)))
+}
+
+fn collect_sftp_entries(model: &ModelRc<SftpEntry>) -> Vec<SftpEntry> {
+    let mut out = Vec::new();
+    for i in 0..model.row_count() {
+        if let Some(row) = model.row_data(i) {
+            out.push(row);
+        }
+    }
+    out
+}
+
+fn filter_sftp_entries(entries: &[SftpEntry], query: &str) -> Vec<SftpEntry> {
+    let q = query.trim().to_lowercase();
+    if q.is_empty() {
+        return entries.to_vec();
+    }
+    entries
+        .iter()
+        .filter(|e| {
+            e.name.to_string().to_lowercase().contains(&q)
+                || e.full_path.to_string().to_lowercase().contains(&q)
+                || e.size.to_string().to_lowercase().contains(&q)
+                || e.modified.to_string().to_lowercase().contains(&q)
+        })
+        .cloned()
+        .collect()
+}
+
+fn current_sftp_search(terminals: &VecModel<TerminalState>, tab_id: &str) -> String {
+    for i in 0..terminals.row_count() {
+        if let Some(row) = terminals.row_data(i) {
+            if row.id.as_str() == tab_id {
+                return row.sftp_search.to_string();
+            }
+        }
+    }
+    String::new()
+}
+
 /// Number of samples kept for the sparkline.
 const NET_HISTORY_LEN: usize = 60;
 
@@ -2554,12 +2596,16 @@ fn wire_session_callbacks(
                 sftp_entries: ModelRc::from(
                     std::rc::Rc::new(VecModel::<SftpEntry>::default()),
                 ),
+                sftp_all_entries: ModelRc::from(
+                    std::rc::Rc::new(VecModel::<SftpEntry>::default()),
+                ),
                 sftp_status: if has_sftp {
                     t("SFTP 连接中...", "SFTP connecting...").into()
                 } else {
                     t("此会话类型不支持 SFTP", "SFTP not available for this session").into()
                 },
                 sftp_loading: has_sftp,
+                sftp_search: "".into(),
                 sftp_tree_nodes: ModelRc::from(
                     std::rc::Rc::new(VecModel::<SftpTreeNode>::default()),
                 ),
@@ -3771,13 +3817,15 @@ fn apply_session_event_to_window(
                     selected: false,
                 })
                 .collect();
-            let model = ModelRc::from(
-                std::rc::Rc::new(VecModel::from(slint_entries)),
-            );
+            let q = current_sftp_search(terminals, tab_id);
+            let all_model = sftp_entries_model(slint_entries.clone());
+            let model = sftp_entries_model(filter_sftp_entries(&slint_entries, &q));
             update_terminal(&|t| {
                 t.sftp_path = path.clone().into();
+                t.sftp_all_entries = all_model.clone();
                 t.sftp_entries = model.clone();
                 t.sftp_loading = false;
+                t.sftp_selected_count = 0;
             });
         }
         SessionEvent::SftpStatus(msg) => {
@@ -5109,6 +5157,35 @@ fn wire_sftp_callbacks(
                 if let Some(h) = handles.get(&tab_id) {
                     // Refresh re-syncs the left tree too, not just the file list (#189).
                     h.refresh_dir(path);
+                }
+            }
+        });
+    }
+
+    // Local search within the current directory. This filters the cached full
+    // listing without opening another SSH/SFTP request, so it is safe even on
+    // routers that reject extra exec channels.
+    {
+        let weak = window.as_weak();
+        window.on_sftp_search(move |tab_id: SharedString, query: SharedString| {
+            let tab_id = tab_id.to_string();
+            let query = query.to_string();
+            if let Some(w) = weak.upgrade() {
+                let terminals_rc = w.get_terminals();
+                let Some(terminals) = terminals_rc.as_any().downcast_ref::<VecModel<TerminalState>>() else {
+                    return;
+                };
+                for i in 0..terminals.row_count() {
+                    if let Some(mut row) = terminals.row_data(i) {
+                        if row.id.as_str() == tab_id {
+                            let all = collect_sftp_entries(&row.sftp_all_entries);
+                            row.sftp_search = query.clone().into();
+                            row.sftp_entries = sftp_entries_model(filter_sftp_entries(&all, &query));
+                            row.sftp_selected_count = 0;
+                            terminals.set_row_data(i, row);
+                            break;
+                        }
+                    }
                 }
             }
         });

@@ -60,6 +60,7 @@ export component SftpPanel inherits Rectangle {
     in property <bool>    loading: false;
     in property <[SftpTreeNode]> tree-nodes: [];
     in property <bool> collapsed: false;   // when true only the toolbar shows
+    in property <string> search-query: ""; // file/folder search text, filtered in Rust
     in property <bool> show-tree: true;    // hide the directory tree when narrow (#dock)
     in property <bool> compact: false;     // side-docked + collapsed → render nothing but a clean strip (#dock)
     // User-resizable directory tree width. This is intentionally local to the
@@ -96,6 +97,7 @@ export component SftpPanel inherits Rectangle {
     callback download(string);
     callback upload-clicked(string /* remote dir */, bool /* folder */);
     callback refresh(string);
+    callback search-changed(string); // filter files/folders in current directory
     callback tree-expand(string);   // toggle expand/collapse + navigate
     callback delete(string);        // remove a remote file/dir
     callback toggle-select(int);    // toggle a row's multi-select checkbox (#100)
@@ -207,6 +209,52 @@ export component SftpPanel inherits Rectangle {
                         vertical-alignment: center;
                         single-line: true;
                         accepted => { root.navigate(self.text); }
+                    }
+                }
+
+                // Search within the current remote directory. Filtering happens in
+                // Rust against the last full directory listing, so it is instant and
+                // does not touch the network. Kept compact to avoid stealing space
+                // from the path bar on small windows.
+                Rectangle {
+                    width: root.width > 900px ? 180px : 128px;
+                    height: 22px;
+                    border-radius: Theme.radius-sm;
+                    background: Theme.bg-root;
+                    border-width: 1px;
+                    border-color: file-search.has-focus ? Theme.accent : Theme.border-subtle;
+                    file-search := TextInput {
+                        x: 24px;
+                        width: parent.width - 30px;
+                        height: parent.height;
+                        text: root.search-query;
+                        color: Theme.text-primary;
+                        font-family: Theme.ui-font-family;
+                        font-size: Theme.fs-sm;
+                        vertical-alignment: center;
+                        single-line: true;
+                        edited => { root.search-changed(self.text); }
+                        accepted => { root.search-changed(self.text); }
+                    }
+                    Text {
+                        x: 6px;
+                        width: 16px;
+                        height: parent.height;
+                        text: "\u{E8B6}"; // search
+                        font-family: "Material Icons";
+                        color: Theme.text-muted;
+                        font-size: Theme.fs-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    if file-search.text == "" : Text {
+                        x: 24px;
+                        width: parent.width - 30px;
+                        height: parent.height;
+                        text: @tr("Search files");
+                        color: Theme.text-muted;
+                        font-size: Theme.fs-xs;
+                        vertical-alignment: center;
                     }
                 }
 

@@ -381,23 +381,29 @@ async fn run_sftp(
     }
 
     // --- Open remote file browser ------------------------------------------
-    // Probe Shell is aimed at routers/OpenWrt/NAS devices. Those often allow
-    // normal SSH exec but do not provide a standard SFTP subsystem. MobaXterm's
-    // file browser works because it tries an SSH/SCP-style browser first. Do the
-    // same here: if basic shell exec works, use the lightweight SSH browser by
-    // default. Only fall back to native SFTP when exec is blocked but the SFTP
-    // subsystem is available.
-    if shell_pwd(&handle).await.is_ok() {
-        let _ = events.send(SessionEvent::SftpStatus(t(
-            "SSH 文件浏览模式",
-            "SSH file-browser mode",
-        ).into()));
-        return run_ssh_file_browser(handle, commands, events).await;
-    }
-
+    // v0.6.3: prefer the native SFTP subsystem when the server offers it.
+    // Some routers/OpenWrt builds allow a login shell but reject additional
+    // exec channels after a few directory operations ("open exec channel"),
+    // which breaks an SSH-browser/SCP-style file panel. Native SFTP is more
+    // stable in that case. If SFTP is missing, fall back to the lightweight
+    // SSH-browser so Dropbear-only devices still have basic browsing.
     let sftp = match open_sftp_subsystem(&handle).await {
-        Ok(sftp) => sftp,
+        Ok(sftp) => {
+            let _ = events.send(SessionEvent::SftpStatus(t(
+                "SFTP 模式",
+                "SFTP mode",
+            ).into()));
+            sftp
+        }
         Err(err) => {
+            if shell_pwd(&handle).await.is_ok() {
+                let _ = events.send(SessionEvent::SftpStatus(format!(
+                    "{} · {}",
+                    t("SSH 文件浏览模式", "SSH file-browser mode"),
+                    t("未检测到标准 SFTP", "native SFTP not detected")
+                )));
+                return run_ssh_file_browser(handle, commands, events).await;
+            }
             let _ = events.send(SessionEvent::SftpStatus(format!(
                 "{}: {err:#}",
                 t("文件浏览不可用", "Remote file browser unavailable")
@@ -1075,6 +1081,34 @@ async fn exec_capture(
     Ok((status, stdout, stderr))
 }
 
+/// SSH-browser exec wrapper. A few embedded SSH servers (especially router
+/// builds) temporarily reject opening a new exec channel while the previous
+/// command is being torn down. Retrying once after a tiny delay avoids turning
+/// a folder click into a dead panel. If the server consistently refuses exec,
+/// the user still gets a clear status message instead of an app crash.
+async fn exec_capture_browser(
+    handle: &client::Handle<SftpClientHandler>,
+    cmd: &str,
+) -> Result<(u32, Vec<u8>, Vec<u8>)> {
+    match exec_capture(handle, cmd).await {
+        Ok(r) => Ok(r),
+        Err(e) => {
+            let text = format!("{e:#}").to_lowercase();
+            if text.contains("open exec channel")
+                || text.contains("administratively prohibited")
+                || text.contains("channel open")
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(180)).await;
+                exec_capture(handle, cmd)
+                    .await
+                    .with_context(|| "retry after exec channel failure")
+            } else {
+                Err(e)
+            }
+        }
+    }
+}
+
 /// Fallback browser for servers that do not provide the `sftp` subsystem.
 ///
 /// This is intentionally conservative: it uses POSIX shell commands over SSH to
@@ -1254,7 +1288,7 @@ async fn run_ssh_file_browser(
 }
 
 async fn shell_pwd(handle: &client::Handle<SftpClientHandler>) -> Result<String> {
-    let (code, out, err) = exec_capture(handle, "pwd").await?;
+    let (code, out, err) = exec_capture_browser(handle, "pwd").await?;
     if code != 0 {
         return Err(anyhow!(String::from_utf8_lossy(&err).trim().to_string()));
     }
@@ -1295,7 +1329,7 @@ async fn emit_shell_action(
     cmd: &str,
     fail_title: &str,
 ) {
-    match exec_capture(handle, cmd).await {
+    match exec_capture_browser(handle, cmd).await {
         Ok((0, _, _)) => {}
         Ok((_, _, err)) => {
             let msg = String::from_utf8_lossy(&err).trim().to_string();
@@ -1339,7 +1373,7 @@ async fn shell_list_dir(
         ),
         path = sh_quote(path)
     );
-    let (code, out, err) = exec_capture(handle, &cmd).await?;
+    let (code, out, err) = exec_capture_browser(handle, &cmd).await?;
     if code != 0 {
         let msg = String::from_utf8_lossy(&err).trim().to_string();
         return Err(anyhow!(if msg.is_empty() {
@@ -1393,7 +1427,7 @@ async fn shell_read_text(
         "test -f {0} || exit 3; sz=$(stat -c %s {0} 2>/dev/null || echo 0); [ \"$sz\" -le 2097152 ] || exit 4; base64 {0}",
         sh_quote(remote)
     );
-    let (code, out, err) = exec_capture(handle, &cmd)
+    let (code, out, err) = exec_capture_browser(handle, &cmd)
         .await
         .map_err(|e| e.to_string())?;
     match code {
@@ -1428,7 +1462,7 @@ async fn shell_write_text(
         sh_quote(&encoded),
         sh_quote(remote)
     );
-    let (code, _out, err) = exec_capture(handle, &cmd).await?;
+    let (code, _out, err) = exec_capture_browser(handle, &cmd).await?;
     if code == 0 {
         Ok(())
     } else {
@@ -1443,7 +1477,7 @@ async fn shell_download_file(
 ) -> Result<String> {
     use base64::Engine as _;
     let cmd = format!("test -f {0} || exit 3; base64 {0}", sh_quote(remote));
-    let (code, out, err) = exec_capture(handle, &cmd).await?;
+    let (code, out, err) = exec_capture_browser(handle, &cmd).await?;
     if code != 0 {
         let msg = String::from_utf8_lossy(&err).trim().to_string();
         return Err(anyhow!(if code == 3 {

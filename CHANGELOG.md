@@ -1,3 +1,11 @@
+## v0.6.3-probe1
+
+- File browser: prefer native SFTP when available; fall back to SSH-browser only when SFTP is unavailable.
+- File browser: retry transient `open exec channel` failures in SSH-browser mode so folder clicks do not leave the panel stuck.
+- SFTP panel: add local file/folder search in the toolbar. Search filters the cached current directory and does not open extra network channels.
+- UX: clarify that `open exec channel` is an SSH exec-channel limitation, not an SCP capability problem.
+
+
 ## v0.6.2-probe4
 
 - Light mode polish: switched the pure-white day palette to a soft technology-blue palette for less glare.

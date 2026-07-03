@@ -104,6 +104,7 @@ export component TerminalView inherits Rectangle {
     in property <[SftpEntry]> sftp-entries;
     in property <string>  sftp-status: "";
     in property <bool>    sftp-loading: false;
+    in property <string>  sftp-search-query: "";
     in property <[SftpTreeNode]> sftp-tree-nodes: [];
 
     // Per-session now (#v0.5): the AppWindow stores these in each TerminalState
@@ -169,6 +170,7 @@ export component TerminalView inherits Rectangle {
     callback sftp-download(string);
     callback sftp-upload-clicked(string, bool);
     callback sftp-refresh(string);
+    callback sftp-search-changed(string);
     callback sftp-tree-expand(string);
     callback sftp-delete(string);
     in property <int> sftp-selected-count;          // checked-entry count (#100)
@@ -1472,6 +1474,7 @@ export component TerminalView inherits Rectangle {
             entries:       root.sftp-entries;
             status:        root.sftp-status;
             loading:       root.sftp-loading;
+            search-query:  root.sftp-search-query;
             tree-nodes:    root.sftp-tree-nodes;
             selected-count: root.sftp-selected-count;
             toggle-collapsed => {
@@ -1489,6 +1492,7 @@ export component TerminalView inherits Rectangle {
             download(path)      => { root.sftp-download(path); }
             upload-clicked(dir, folder) => { root.sftp-upload-clicked(dir, folder); }
             refresh(path)       => { root.sftp-refresh(path); }
+            search-changed(q)   => { root.sftp-search-changed(q); }
             tree-expand(path)   => { root.sftp-tree-expand(path); }
             delete(path)        => { root.sftp-delete(path); }
             toggle-select(i)    => { root.sftp-toggle-select(i); }
