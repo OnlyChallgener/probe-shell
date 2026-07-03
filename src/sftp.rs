@@ -1196,6 +1196,39 @@ async fn run_ssh_file_browser(
                 }
                 emit_tree(&tree_dirs, &tree_expanded, &events);
             }
+            SftpCommand::Search { root, query } => {
+                let root = normalise_remote_dir(&root);
+                let query = query.trim().to_string();
+                let _ = events.send(SessionEvent::SftpStatus(format!(
+                    "{} {}{}",
+                    t("搜索", "Searching"),
+                    root,
+                    if query.is_empty() { "".to_string() } else { format!("  ·  {query}") }
+                )));
+                match shell_search_dir_impl(&handle, &root, &query, 400, 900).await {
+                    Ok(entries) => {
+                        let count = entries.len();
+                        let _ = events.send(SessionEvent::SftpEntries {
+                            path: root.clone(),
+                            entries,
+                        });
+                        let _ = events.send(SessionEvent::SftpStatus(format!(
+                            "{}: {}  ·  {}",
+                            t("搜索完成", "Search complete"),
+                            root,
+                            count
+                        )));
+                    }
+                    Err(e) => {
+                        let _ = events.send(SessionEvent::SftpError(format!(
+                            "{} {}: {}",
+                            t("搜索失败", "Search failed"),
+                            root,
+                            e
+                        )));
+                    }
+                }
+            }
             SftpCommand::MkDir(path) => {
                 let refresh = parent_dir(&path);
                 let cmd = format!("mkdir -p {}", sh_quote(&path));
@@ -1457,6 +1490,63 @@ async fn shell_list_dir(
         _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
     });
     Ok(entries)
+}
+
+async fn shell_search_dir_impl(
+    handle: &client::Handle<SftpClientHandler>,
+    root: &str,
+    query: &str,
+    max_results: usize,
+    max_dirs: usize,
+) -> Result<Vec<RemoteEntry>> {
+    let q = query.trim().to_lowercase();
+    let base = normalise_remote_dir(root);
+    let mut stack = vec![base.clone()];
+    let mut visited_dirs = 0usize;
+    let mut out = Vec::new();
+
+    while let Some(dir) = stack.pop() {
+        visited_dirs += 1;
+        if visited_dirs > max_dirs || out.len() >= max_results {
+            break;
+        }
+
+        let entries = match shell_list_dir(handle, &dir).await {
+            Ok(v) => v,
+            Err(_) => {
+                // A denied branch should not cancel a search. This matters on
+                // routers where /proc, /sys, or vendor paths may reject exec/stat.
+                continue;
+            }
+        };
+
+        for mut entry in entries {
+            let rel = entry
+                .full_path
+                .strip_prefix(base.trim_end_matches('/'))
+                .unwrap_or(&entry.full_path)
+                .trim_start_matches('/')
+                .to_string();
+            let hay = format!("{} {}", entry.name.to_lowercase(), entry.full_path.to_lowercase());
+            if q.is_empty() || hay.contains(&q) {
+                if !rel.is_empty() {
+                    entry.name = rel;
+                }
+                out.push(entry.clone());
+                if out.len() >= max_results {
+                    break;
+                }
+            }
+            if entry.is_dir {
+                let name = entry.name.rsplit('/').next().unwrap_or(&entry.name);
+                if name != "." && name != ".." {
+                    stack.push(entry.full_path.clone());
+                }
+            }
+        }
+    }
+
+    Ok(out)
 }
 
 async fn shell_read_text(

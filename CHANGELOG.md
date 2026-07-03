@@ -1,3 +1,10 @@
+## v0.6.3-probe3
+
+- 修复 SSH-browser fallback 构建失败：补齐 `SftpCommand::Search` 在 fallback worker 中的 match 分支。
+- SSH-browser fallback 支持有边界递归搜索，和原生 SFTP 搜索保持一致。
+- SFTP 文件列表右键菜单增强：搜索此文件夹、设为搜索范围、勾选/取消、下载选中、删除选中。
+- 目录树右键菜单增强：展开/折叠、设为搜索范围、新建文件、新建文件夹、刷新当前面板、删除文件夹。
+
 ## v0.6.3-probe2
 
 - SFTP 目录树支持勾选文件夹，用作搜索范围。

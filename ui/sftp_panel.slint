@@ -90,6 +90,7 @@ export component SftpPanel inherits Rectangle {
     property <string> menu-target-name;
     property <bool>   menu-target-is-dir;
     property <int>    menu-target-mode;     // permission bits for the chmod dialog
+    property <int>    menu-target-index: -1; // row index for checkbox/multi-select actions
     // Directory-tree selection is separate from the right file-list checkbox.
     // It acts as a search scope: check one folder in the tree, then use the
     // small folder-search button or press Enter in the search box (#probe-folder-search).
@@ -568,8 +569,8 @@ export component SftpPanel inherits Rectangle {
                     tree-menu := PopupWindow {
                         x: root.tree-menu-x;
                         y: root.tree-menu-y;
-                        width: 148px;
-                        height: 6 * 27px + 8px;
+                        width: 172px;
+                        height: 10 * 27px + 10px;
                         Rectangle {
                             background: Theme.bg-panel;
                             border-radius: Theme.radius-sm;
@@ -585,7 +586,11 @@ export component SftpPanel inherits Rectangle {
                                     clicked => { root.navigate(root.tree-menu-target); }
                                 }
                                 SftpMenuItem {
-                                    label: root.tree-selected-path == root.tree-menu-target ? @tr("Uncheck folder") : @tr("Check folder");
+                                    label: @tr("Expand / Collapse");
+                                    clicked => { root.tree-expand(root.tree-menu-target); }
+                                }
+                                SftpMenuItem {
+                                    label: root.tree-selected-path == root.tree-menu-target ? @tr("Uncheck search scope") : @tr("Set search scope");
                                     clicked => {
                                         root.tree-selected-path = root.tree-selected-path == root.tree-menu-target ? "" : root.tree-menu-target;
                                     }
@@ -600,12 +605,26 @@ export component SftpPanel inherits Rectangle {
                                 }
                                 Rectangle { height: 1px; background: Theme.border-subtle; }
                                 SftpMenuItem {
-                                    label: @tr("New folder");
+                                    label: @tr("New folder here");
                                     clicked => { root.new-folder(root.tree-menu-target); }
                                 }
                                 SftpMenuItem {
-                                    label: @tr("Refresh");
+                                    label: @tr("New file here");
+                                    clicked => { root.new-file(root.tree-menu-target); }
+                                }
+                                SftpMenuItem {
+                                    label: @tr("Refresh this folder");
                                     clicked => { root.refresh(root.tree-menu-target); }
+                                }
+                                SftpMenuItem {
+                                    label: @tr("Refresh current panel");
+                                    clicked => { root.refresh(root.current-path); }
+                                }
+                                SftpMenuItem {
+                                    label: @tr("Delete folder");
+                                    tint: #d86c6c;
+                                    enabled: root.tree-menu-target != "/";
+                                    clicked => { root.delete(root.tree-menu-target); }
                                 }
                             }
                         }
@@ -737,6 +756,7 @@ export component SftpPanel inherits Rectangle {
                                             root.menu-target-name = entry.name;
                                             root.menu-target-is-dir = entry.is-dir;
                                             root.menu-target-mode = entry.mode;
+                                            root.menu-target-index = i;
                                             root.menu-x = self.absolute-position.x + self.mouse-x - file-area.absolute-position.x;
                                             root.menu-y = self.absolute-position.y + self.mouse-y - file-area.absolute-position.y;
                                             file-menu.show();
@@ -807,6 +827,7 @@ export component SftpPanel inherits Rectangle {
                                                 && ev.button == PointerEventButton.right) {
                                             root.selected-row = -1;
                                             root.menu-target = "";
+                                            root.menu-target-index = -1;
                                             root.menu-x = self.absolute-position.x + self.mouse-x - file-area.absolute-position.x;
                                             root.menu-y = self.absolute-position.y + self.mouse-y - file-area.absolute-position.y;
                                             file-menu.show();
@@ -823,8 +844,8 @@ export component SftpPanel inherits Rectangle {
                     file-menu := PopupWindow {
                         x: root.menu-x;
                         y: root.menu-y;
-                        width: 148px;
-                        height: 13 * 27px + 8px;
+                        width: 176px;
+                        height: 21 * 27px + 10px;
                         Rectangle {
                             background: Theme.bg-panel;
                             border-radius: Theme.radius-sm;
@@ -840,6 +861,33 @@ export component SftpPanel inherits Rectangle {
                                     enabled: root.menu-target != "" && root.menu-target-is-dir;
                                     clicked => { root.navigate(root.menu-target); }
                                 }
+                                SftpMenuItem {
+                                    label: @tr("Search in this folder");
+                                    enabled: root.menu-target != "" && root.menu-target-is-dir;
+                                    clicked => { root.search-folder(root.menu-target, file-search.text); }
+                                }
+                                SftpMenuItem {
+                                    label: @tr("Set as search scope");
+                                    enabled: root.menu-target != "" && root.menu-target-is-dir;
+                                    clicked => { root.tree-selected-path = root.menu-target; }
+                                }
+                                SftpMenuItem {
+                                    label: @tr("Check / Uncheck");
+                                    enabled: root.menu-target-index >= 0;
+                                    clicked => { root.toggle-select(root.menu-target-index); }
+                                }
+                                SftpMenuItem {
+                                    label: @tr("Download selected");
+                                    enabled: root.selected-count > 0;
+                                    clicked => { root.download-selected(); }
+                                }
+                                SftpMenuItem {
+                                    label: @tr("Delete selected");
+                                    tint: #d86c6c;
+                                    enabled: root.selected-count > 0;
+                                    clicked => { root.delete-selected(); }
+                                }
+                                Rectangle { height: 1px; background: Theme.border-subtle; }
                                 SftpMenuItem {
                                     label: @tr("Download");
                                     enabled: root.menu-target != "";
@@ -888,15 +936,15 @@ export component SftpPanel inherits Rectangle {
                                 }
                                 Rectangle { height: 1px; background: Theme.border-subtle; }
                                 SftpMenuItem {
-                                    label: @tr("New folder");
+                                    label: @tr("New folder here");
                                     clicked => { root.new-folder(root.current-path); }
                                 }
                                 SftpMenuItem {
-                                    label: @tr("New file");
+                                    label: @tr("New file here");
                                     clicked => { root.new-file(root.current-path); }
                                 }
                                 SftpMenuItem {
-                                    label: @tr("Refresh");
+                                    label: @tr("Refresh current folder");
                                     clicked => { root.refresh(root.current-path); }
                                 }
                             }
