@@ -1,3 +1,12 @@
+## v0.6.7-probe1 - global search state model
+
+- Reworked SFTP search into an explicit global/search-results mode: focusing the search box enters search mode, dims the left navigation, and recursive search uses `/` unless explicit search scopes are added with the left-side `+` buttons.
+- Added a permanent clear `×` button in the search field. Clearing search restores the pre-search directory and exits search mode.
+- Search results now show an extra `位置` column with the absolute path, while the address bar keeps representing the normal current directory only.
+- Double-clicking a search result precisely locates it: folders open directly, files open their parent directory.
+- Address-bar manual input now rolls back visually to the last known good path immediately after Enter; failed navigation leaves the previous listing in place.
+- Right-side blank double-click navigates to the parent directory.
+
 ## v0.6.6-probe3 - simplified file manager navigation
 
 - Changed the left SFTP area from a complex expandable tree into a simple directory navigation list: no dropdown arrows and no left-side checkboxes.

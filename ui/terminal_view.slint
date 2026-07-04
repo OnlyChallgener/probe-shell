@@ -169,6 +169,7 @@ export component TerminalView inherits Rectangle {
     callback send-key(string, bool, bool, bool);
     callback terminal-resize(float, float);
     callback sftp-navigate(string);
+    callback sftp-locate-result(string, bool);
     callback sftp-download(string);
     callback sftp-upload-clicked(string, bool);
     callback sftp-refresh(string);
@@ -1499,6 +1500,7 @@ export component TerminalView inherits Rectangle {
                 }
             }
             navigate(path)      => { root.sftp-navigate(path); }
+            locate-result(path, is_dir) => { root.sftp-locate-result(path, is_dir); }
             download(path)      => { root.sftp-download(path); }
             upload-clicked(dir, folder) => { root.sftp-upload-clicked(dir, folder); }
             refresh(path)       => { root.sftp-refresh(path); }

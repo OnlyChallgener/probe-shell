@@ -3962,7 +3962,9 @@ fn apply_session_event_to_window(
                 let selected_count = mark_sftp_entries_for_scope(&mut slint_entries, t.sftp_tree_scope.as_str());
                 let all_model = sftp_entries_model(slint_entries.clone());
                 let model = sftp_entries_model(filter_sftp_entries(&slint_entries, &q));
-                t.sftp_path = path.clone().into();
+                if !t.sftp_search_running {
+                    t.sftp_path = path.clone().into();
+                }
                 t.sftp_all_entries = all_model;
                 t.sftp_entries = model;
                 t.sftp_loading = false;
@@ -5136,6 +5138,29 @@ fn wire_sftp_callbacks(
             if let Ok(handles) = sftp_handles.lock() {
                 if let Some(h) = handles.get(&tab_id) {
                     h.list_dir(resolved);
+                }
+            }
+        });
+    }
+
+    // Search-result double click: leave search mode by opening the result's parent directory
+    // (or the directory itself when the result is a folder). The UI clears the query and
+    // switches back to the normal listing before this callback runs, so this is a safe
+    // precise-locate operation rather than a download/edit action.
+    {
+        let sftp_handles = sftp_handles.clone();
+        let sftp_last_cwd = sftp_last_cwd.clone();
+        window.on_sftp_locate_result(move |tab_id: SharedString, path: SharedString, is_dir: bool| {
+            let tab_id = tab_id.to_string();
+            let target = if is_dir {
+                path.to_string()
+            } else {
+                parent_path(path.as_str())
+            };
+            sftp_last_cwd.lock().unwrap().remove(&tab_id);
+            if let Ok(handles) = sftp_handles.lock() {
+                if let Some(h) = handles.get(&tab_id) {
+                    h.list_dir(target);
                 }
             }
         });

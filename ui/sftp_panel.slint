@@ -155,6 +155,8 @@ export component SftpPanel inherits Rectangle {
     property <length> tree-menu-y;
     property <string> tree-menu-target;
     property <string> toolbar-tip: ""; // hover hint for compact icon buttons
+    property <bool> search-mode: false;       // global/search-results mode; disables left navigation while active
+    property <string> search-restore-path: ""; // directory to restore when clearing search
     property <bool> quick-edit-mode: false;
     property <bool> qa-add-open: false;
     property <string> qa-manual-path: "";
@@ -175,6 +177,7 @@ export component SftpPanel inherits Rectangle {
     // --- Callbacks ---------------------------------------------------------
     callback toggle-collapsed();    // minimise / restore the panel
     callback navigate(string);
+    callback locate-result(string /* full path */, bool /* is-dir */);
     callback download(string);
     callback upload-clicked(string /* remote dir */, bool /* folder */);
     callback refresh(string);
@@ -295,7 +298,10 @@ export component SftpPanel inherits Rectangle {
                         font-size: Theme.fs-sm;
                         vertical-alignment: center;
                         single-line: true;
-                        accepted => { root.navigate(self.text); }
+                        accepted => {
+                            root.navigate(self.text);
+                            self.text = root.current-path;
+                        }
                     }
                 }
 
@@ -312,7 +318,7 @@ export component SftpPanel inherits Rectangle {
                     border-color: file-search.has-focus ? Theme.accent : Theme.border-subtle;
                     file-search := TextInput {
                         x: 24px;
-                        width: parent.width - 30px;
+                        width: parent.width - (root.search-mode || self.text != "" ? 48px : 30px);
                         height: parent.height;
                         text: root.search-query;
                         color: Theme.text-primary;
@@ -320,12 +326,22 @@ export component SftpPanel inherits Rectangle {
                         font-size: Theme.fs-sm;
                         vertical-alignment: center;
                         single-line: true;
-                        // Typing filters the current visible listing only, so it stays instant.
-                        edited => { root.search-changed(self.text); }
-                        // Enter performs a scoped search: checked tree folder first, otherwise current path.
+                        changed has-focus => {
+                            if (self.has-focus && !root.search-mode) {
+                                root.search-restore-path = root.current-path;
+                                root.search-mode = true;
+                            }
+                        }
+                        // Typing filters the current visible listing only. Press Enter or the search button
+                        // to enter bounded global search results.
+                        edited => {
+                            if (!root.search-mode) { root.search-restore-path = root.current-path; root.search-mode = true; }
+                            root.search-changed(self.text);
+                        }
                         accepted => {
+                            if (!root.search-mode) { root.search-restore-path = root.current-path; root.search-mode = true; }
                             root.search-folder(
-                                root.tree-scope != "" ? root.tree-scope : root.current-path,
+                                root.tree-scope != "" ? root.tree-scope : "/",
                                 self.text
                             );
                         }
@@ -345,10 +361,32 @@ export component SftpPanel inherits Rectangle {
                         x: 24px;
                         width: parent.width - 30px;
                         height: parent.height;
-                        text: root.tree-scope != "" ? @tr("搜索勾选目录") : @tr("搜索当前目录");
+                        text: root.tree-scope != "" ? @tr("搜索范围") : @tr("全局搜索");
                         color: Theme.text-muted;
                         font-size: Theme.fs-xs;
                         vertical-alignment: center;
+                    }
+                    if root.search-mode || file-search.text != "" : Rectangle {
+                        x: parent.width - 22px;
+                        y: 2px;
+                        width: 18px;
+                        height: 18px;
+                        border-radius: 9px;
+                        background: clear-search-ta.has-hover ? Theme.bg-hover : transparent;
+                        clear-search-ta := TouchArea {
+                            width: parent.width;
+                            height: parent.height;
+                            mouse-cursor: pointer;
+                            changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("清空搜索并恢复搜索前目录") : ""; }
+                            clicked => {
+                                file-search.text = "";
+                                root.search-changed("");
+                                root.search-mode = false;
+                                root.navigate(root.search-restore-path != "" ? root.search-restore-path : root.current-path);
+                                root.search-restore-path = "";
+                            }
+                        }
+                        Text { text: "×"; color: Theme.text-muted; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
                     }
                 }
 
@@ -372,7 +410,7 @@ export component SftpPanel inherits Rectangle {
                                 root.cancel-search();
                             } else {
                                 root.search-folder(
-                                    root.tree-scope != "" ? root.tree-scope : root.current-path,
+                                    root.tree-scope != "" ? root.tree-scope : "/",
                                     file-search.text
                                 );
                             }
@@ -622,7 +660,7 @@ export component SftpPanel inherits Rectangle {
 
                 Rectangle { horizontal-stretch: 1; }
                 Text {
-                    text: root.tree-scope != "" ? @tr("搜索范围: ") + root.tree-scope : @tr("搜索范围: 当前目录");
+                    text: root.search-mode ? @tr("搜索模式: 全局/范围") : (root.tree-scope != "" ? @tr("搜索范围: ") + root.tree-scope : @tr("搜索范围: 当前目录"));
                     color: Theme.text-muted;
                     font-size: 10px;
                     vertical-alignment: center;
@@ -696,6 +734,7 @@ export component SftpPanel inherits Rectangle {
             // only for opening directories or adding a directory to search scope.
             if root.show-tree : VerticalLayout {
                 width: root.tree-width;
+                opacity: root.search-mode ? 0.42 : 1.0;
                 spacing: 0;
 
                 Rectangle {
@@ -736,9 +775,15 @@ export component SftpPanel inherits Rectangle {
                                     height: parent.height;
                                     mouse-cursor: pointer;
                                     clicked => {
-                                        root.tree-active-path = node.path;
-                                        root.navigate(node.path);
+                                        if (!root.search-mode) {
+                                            root.tree-active-path = node.path;
+                                            root.navigate(node.path);
+                                        }
                                     }
+                                    double-clicked => {
+                                        if (!root.search-mode) { root.tree-expand(node.path); }
+                                    }
+                                    double-clicked => { root.navigate(".."); }
                                     pointer-event(ev) => {
                                         if (ev.kind == PointerEventKind.down
                                                 && ev.button == PointerEventButton.right) {
@@ -769,7 +814,7 @@ export component SftpPanel inherits Rectangle {
                                             height: parent.height;
                                             mouse-cursor: pointer;
                                             changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("加入/移出搜索范围") : ""; }
-                                            clicked => { root.toggle-tree-scope(node.path); }
+                                            clicked => { if (!root.search-mode) { root.toggle-tree-scope(node.path); } }
                                         }
                                         Text {
                                             text: node.checked ? "✓" : "+";
@@ -898,13 +943,15 @@ export component SftpPanel inherits Rectangle {
                         // Spacer matching the rows' checkbox so the header columns
                         // line up with the values below them (#dock).
                         Rectangle { width: 16px; }
-                        Text { text: @tr("Name"); color: Theme.text-muted; font-size: Theme.fs-xs;
+                        Text { text: @tr("名称"); color: Theme.text-muted; font-size: Theme.fs-xs;
                                horizontal-stretch: 1; vertical-alignment: center; }
-                        if root.show-size-col : Text { text: @tr("Size"); color: Theme.text-muted; font-size: Theme.fs-xs;
+                        if root.search-mode : Text { text: @tr("位置"); color: Theme.text-muted; font-size: Theme.fs-xs;
+                               width: 180px; horizontal-alignment: left; vertical-alignment: center; }
+                        if root.show-size-col : Text { text: @tr("大小"); color: Theme.text-muted; font-size: Theme.fs-xs;
                                width: 72px; horizontal-alignment: right; vertical-alignment: center; }
                         if root.show-mode-col : Text { text: @tr("权限"); color: Theme.text-muted; font-size: Theme.fs-xs;
                                width: 56px; horizontal-alignment: right; vertical-alignment: center; }
-                        if root.show-modified-col : Text { text: @tr("Modified"); color: Theme.text-muted; font-size: Theme.fs-xs;
+                        if root.show-modified-col : Text { text: @tr("修改时间"); color: Theme.text-muted; font-size: Theme.fs-xs;
                                width: 116px; horizontal-alignment: right; vertical-alignment: center; }
                     }
                 }
@@ -962,7 +1009,13 @@ export component SftpPanel inherits Rectangle {
                                     }
                                     double-clicked => {
                                         root.file-active-path = entry.full-path;
-                                        if (entry.is-dir) {
+                                        if (root.search-mode) {
+                                            root.locate-result(entry.full-path, entry.is-dir);
+                                            root.search-mode = false;
+                                            root.search-restore-path = "";
+                                            file-search.text = "";
+                                            root.search-changed("");
+                                        } else if (entry.is-dir) {
                                             root.navigate(entry.full-path);
                                         } else {
                                             root.download(entry.full-path);
@@ -1019,6 +1072,14 @@ export component SftpPanel inherits Rectangle {
                                         color: entry.is-dir ? Theme.accent : Theme.text-primary;
                                         font-size: Theme.fs-sm;
                                         horizontal-stretch: 1;
+                                        overflow: elide;
+                                        vertical-alignment: center;
+                                    }
+                                    if root.search-mode : Text {
+                                        text: entry.full-path;
+                                        color: Theme.text-muted;
+                                        font-size: Theme.fs-xs;
+                                        width: 180px;
                                         overflow: elide;
                                         vertical-alignment: center;
                                     }
@@ -1163,7 +1224,7 @@ export component SftpPanel inherits Rectangle {
                 x: 8px;
                 text: root.toolbar-tip != ""
                     ? "提示: " + root.toolbar-tip
-                    : root.status
+                    : (root.search-mode ? @tr("搜索模式") + "  ·  " : "") + root.status
                         + "  ·  当前目录: " + (root.current-path != "" ? root.current-path : "未打开")
                         + (root.file-active-path != "" ? "  ·  右侧选中: " + root.file-active-path : "")
                         + (root.tree-active-path != "" ? "  ·  左侧选中: " + root.tree-active-path : "")

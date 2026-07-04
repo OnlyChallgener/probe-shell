@@ -262,3 +262,8 @@ Probe Shell 会把 SFTP/SSH 文件面板里的常见操作记录到本地 `log/o
 - 右侧文件/文件夹单击只选中并显示完整路径；双击才打开目录或预览文件。
 - 目录树增加更明确的文件夹图标。
 - 路由/OpenWrt 设备文件模式改为自动选择，优先减少 `open exec channel` 访问失败。
+
+
+### v0.6.7-probe1 notes
+
+This build clarifies SFTP navigation/search state: the address bar only represents the currently opened folder, the search box has a clear/restore button, global search displays a `位置/Path` column, and double-clicking a search result locates it in the normal file list.
