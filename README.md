@@ -25,6 +25,13 @@ Probe Shell 基于原开源项目重命名和改造，继续遵循 `MIT OR Apach
 </p>
 
 
+## v0.6.6 设备画像与地址栏逻辑
+
+- 地址栏只表示右侧文件列表当前打开目录；左侧单击、勾选、右键和搜索范围不会改写地址栏。
+- 快捷访问 `+` 只用于快速添加已勾选目录；手动输入目录地址和备注统一放到齿轮管理弹窗。
+- 设备类型判断升级为多信号画像：名称、备注、品牌关键词、IP 网关规律、协议共同判断；不确定时继续显示 SSH/Telnet/Serial，不强行猜测。
+- 路由/OpenWrt 画像默认偏向 SSH 文件浏览，NAS/Linux 默认偏向 SFTP；服务端不支持时仍会自动回退。
+
 ## v0.6.5 文件管理增强
 
 - 支持目录树多选作为递归搜索范围。
@@ -241,3 +248,8 @@ This build coalesces repeated saved-session clicks and guards failed connection 
 
 Probe Shell 会把 SFTP/SSH 文件面板里的常见操作记录到本地 `log/operations.log`，包括上传、下载、搜索、新建、删除、重命名、权限修改、查看、编辑和保存。日志只记录时间、行为和路径，不记录文件内容、密码或私钥。文件面板工具栏里的“操作日志”图标可以直接打开该日志文件。
 
+
+
+### v0.6.5-probe4
+
+- Polished the SFTP quick access row, custom shortcut add popup, manage/delete mode, recursive selection uncheck behavior, refresh status hints, and cleaner tree expand arrows.

@@ -50,6 +50,56 @@ component SftpMenuItem inherits Rectangle {
     }
 }
 
+
+
+// Compact quick-access chip used by the SFTP shortcut row.
+// The delete "×" only appears in manage mode and is intentionally tiny so it
+// does not steal space from the path bar.
+component QuickAccessButton inherits Rectangle {
+    in property <string> label;
+    in property <string> path;
+    in property <bool> editing: false;
+    callback clicked();
+    callback remove();
+    height: 20px;
+    border-radius: Theme.radius-sm;
+    background: qa-ta.has-hover ? Theme.bg-hover : transparent;
+    border-width: 1px;
+    border-color: qa-ta.has-hover ? Theme.border-strong : transparent;
+    qa-ta := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    Text {
+        x: 6px;
+        width: parent.width - (root.editing ? 17px : 12px);
+        height: parent.height;
+        text: root.label;
+        color: Theme.text-primary;
+        font-size: 9px;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+        overflow: elide;
+    }
+    if root.editing : Rectangle {
+        x: parent.width - 13px;
+        y: 2px;
+        width: 11px;
+        height: 11px;
+        border-radius: 6px;
+        background: del-ta.has-hover ? Theme.danger : Theme.danger.with-alpha(0.68);
+        del-ta := TouchArea {
+            width: parent.width;
+            height: parent.height;
+            mouse-cursor: pointer;
+            clicked => { root.remove(); }
+        }
+        Text { text: "×"; color: #ffffff; font-size: 8px; horizontal-alignment: center; vertical-alignment: center; }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // SftpPanel — left directory tree + right file listing
 // ---------------------------------------------------------------------------
@@ -104,6 +154,20 @@ export component SftpPanel inherits Rectangle {
     property <length> tree-menu-y;
     property <string> tree-menu-target;
     property <string> toolbar-tip: ""; // hover hint for compact icon buttons
+    property <bool> quick-edit-mode: false;
+    property <bool> qa-add-open: false;
+    property <bool> qa-show-root: true;
+    property <bool> qa-show-home: true;
+    property <bool> qa-show-etc: true;
+    property <bool> qa-show-var: true;
+    property <bool> qa-show-tmp: true;
+    property <bool> qa-show-www: true;
+    property <bool> qa-show-over: true;
+    property <string> qa1-path: ""; property <string> qa1-label: "";
+    property <string> qa2-path: ""; property <string> qa2-label: "";
+    property <string> qa3-path: ""; property <string> qa3-label: "";
+    property <string> qa4-path: ""; property <string> qa4-label: "";
+    property <string> qa5-path: ""; property <string> qa5-label: "";
 
     // --- Callbacks ---------------------------------------------------------
     callback toggle-collapsed();    // minimise / restore the panel
@@ -462,7 +526,7 @@ export component SftpPanel inherits Rectangle {
                     ref-ta := TouchArea {
                         mouse-cursor: pointer;
                         changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("刷新当前目录") : ""; }
-                        clicked => { root.refresh(root.current-path); }
+                        clicked => { root.toolbar-tip = @tr("正在刷新当前目录..."); root.refresh(root.current-path); }
                     }
                     Text { text: "\u{E5D5}"; font-family: "Material Icons";
                            color: Theme.text-secondary; font-size: Theme.fs-sm;
@@ -488,40 +552,72 @@ export component SftpPanel inherits Rectangle {
         }
 
         // --- Quick access bar, inspired by Lucky SSH file manager ---------
+        // Address/path ownership rule:
+        //   - The path bar above is the current directory shown in the RIGHT file list.
+        //   - Clicking/checkboxing/right-clicking the LEFT tree never rewrites it.
+        //   - This shortcut row only navigates when a chip is clicked.
         Rectangle {
-            height: 26px;
+            height: 25px;
             background: Theme.bg-panel-alt;
             HorizontalLayout {
                 padding-left: 8px;
                 padding-right: 8px;
-                spacing: 4px;
-                SftpMenuItem { width: 44px; label: @tr("根"); clicked => { root.navigate("/"); } }
-                SftpMenuItem { width: 46px; label: "HOME"; clicked => { root.navigate("/root"); } }
-                SftpMenuItem { width: 38px; label: "ETC"; clicked => { root.navigate("/etc"); } }
-                SftpMenuItem { width: 38px; label: "VAR"; clicked => { root.navigate("/var"); } }
-                SftpMenuItem { width: 38px; label: "TMP"; clicked => { root.navigate("/tmp"); } }
-                SftpMenuItem { width: 42px; label: "WWW"; clicked => { root.navigate("/www"); } }
-                SftpMenuItem { width: 60px; label: "OVER"; clicked => { root.navigate("/overlay"); } }
+                spacing: 3px;
+                if root.qa-show-root : QuickAccessButton { width: 48px; label: @tr("根目录"); path: "/"; editing: false; clicked => { root.navigate("/"); } remove => { } }
+                if root.qa-show-home : QuickAccessButton { width: 34px; label: "HOME"; path: "/root"; editing: false; clicked => { root.navigate("/root"); } remove => { } }
+                if root.qa-show-etc : QuickAccessButton { width: 28px; label: "ETC"; path: "/etc"; editing: false; clicked => { root.navigate("/etc"); } remove => { } }
+                if root.qa-show-var : QuickAccessButton { width: 28px; label: "VAR"; path: "/var"; editing: false; clicked => { root.navigate("/var"); } remove => { } }
+                if root.qa-show-tmp : QuickAccessButton { width: 30px; label: "TMP"; path: "/tmp"; editing: false; clicked => { root.navigate("/tmp"); } remove => { } }
+                if root.qa-show-www : QuickAccessButton { width: 34px; label: "WWW"; path: "/www"; editing: false; clicked => { root.navigate("/www"); } remove => { } }
+                if root.qa-show-over : QuickAccessButton { width: 34px; label: "OVER"; path: "/overlay"; editing: false; clicked => { root.navigate("/overlay"); } remove => { } }
+                if root.qa1-path != "" : QuickAccessButton { width: 56px; label: root.qa1-label; path: root.qa1-path; editing: false; clicked => { root.navigate(root.qa1-path); } remove => { } }
+                if root.qa2-path != "" : QuickAccessButton { width: 56px; label: root.qa2-label; path: root.qa2-path; editing: false; clicked => { root.navigate(root.qa2-path); } remove => { } }
+                if root.qa3-path != "" : QuickAccessButton { width: 56px; label: root.qa3-label; path: root.qa3-path; editing: false; clicked => { root.navigate(root.qa3-path); } remove => { } }
+                if root.qa4-path != "" : QuickAccessButton { width: 56px; label: root.qa4-label; path: root.qa4-path; editing: false; clicked => { root.navigate(root.qa4-path); } remove => { } }
+                if root.qa5-path != "" : QuickAccessButton { width: 56px; label: root.qa5-label; path: root.qa5-path; editing: false; clicked => { root.navigate(root.qa5-path); } remove => { } }
+
+                // + only quick-adds the checked tree scope. Manual path input lives
+                // in the gear dialog so the meaning stays clear.
                 Rectangle {
-                    width: 22px; height: 22px; border-radius: Theme.radius-sm;
+                    width: 20px; height: 20px; border-radius: Theme.radius-sm;
                     background: qa-add-ta.has-hover ? Theme.bg-hover : transparent;
                     qa-add-ta := TouchArea {
                         mouse-cursor: pointer;
-                        changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("添加当前目录到快捷访问（当前版本复制路径，后续持久化）") : ""; }
-                        clicked => { root.copy-path(root.current-path); }
+                        changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("快速添加勾选目录到快捷栏") : ""; }
+                        clicked => {
+                            if (root.tree-scope != "") {
+                                if (root.qa1-path == "") { root.qa1-path = root.tree-scope; root.qa1-label = @tr("已选目录"); }
+                                else if (root.qa2-path == "") { root.qa2-path = root.tree-scope; root.qa2-label = @tr("已选目录"); }
+                                else if (root.qa3-path == "") { root.qa3-path = root.tree-scope; root.qa3-label = @tr("已选目录"); }
+                                else if (root.qa4-path == "") { root.qa4-path = root.tree-scope; root.qa4-label = @tr("已选目录"); }
+                                else if (root.qa5-path == "") { root.qa5-path = root.tree-scope; root.qa5-label = @tr("已选目录"); }
+                                else { root.toolbar-tip = @tr("最多只能添加 5 个自定义快捷目录"); }
+                            } else {
+                                root.toolbar-tip = @tr("请先勾选左侧目录；手动添加请点齿轮");
+                            }
+                        }
                     }
-                    Text { text: "+"; color: Theme.accent; font-size: Theme.fs-md; horizontal-alignment: center; vertical-alignment: center; }
+                    Text { text: "+"; color: Theme.accent; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                 }
+
                 Rectangle {
-                    width: 22px; height: 22px; border-radius: Theme.radius-sm;
+                    width: 20px; height: 20px; border-radius: Theme.radius-sm;
                     background: qa-manage-ta.has-hover ? Theme.bg-hover : transparent;
                     qa-manage-ta := TouchArea {
                         mouse-cursor: pointer;
-                        changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("管理快捷访问预留：当前版本先复制当前目录") : ""; }
-                        clicked => { root.copy-path(root.current-path); }
+                        changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("管理快捷目录：手动添加 / 删除快捷入口") : ""; }
+                        clicked => {
+                            qa-path-input.text = root.current-path;
+                            qa-label-input.text = "";
+                            qa-add-popup.show();
+                        }
                     }
-                    Text { text: "\u{E8B8}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: Theme.fs-xs; horizontal-alignment: center; vertical-alignment: center; }
+                    Text { text: "\u{E8B8}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
                 }
+
+                // Up one level is placed next to the shortcut settings for faster access.
+                QuickAccessButton { width: 28px; label: "↑"; path: ".."; editing: false; clicked => { root.navigate(".."); } remove => { } }
+
                 Rectangle { horizontal-stretch: 1; }
                 Text {
                     text: root.tree-scope != "" ? @tr("搜索范围: ") + root.tree-scope : @tr("搜索范围: 当前目录");
@@ -529,7 +625,68 @@ export component SftpPanel inherits Rectangle {
                     font-size: 10px;
                     vertical-alignment: center;
                     overflow: elide;
-                    width: 320px;
+                    width: 280px;
+                }
+            }
+
+            qa-add-popup := PopupWindow {
+                x: 52px;
+                y: parent.height + 2px;
+                width: 420px;
+                height: 420px;
+                Rectangle {
+                    background: Theme.bg-panel;
+                    border-radius: Theme.radius-md;
+                    border-width: 1px;
+                    border-color: Theme.border-strong;
+                    drop-shadow-blur: 16px;
+                    drop-shadow-color: #00000060;
+                    VerticalLayout {
+                        padding: 10px;
+                        spacing: 7px;
+                        Text { text: @tr("管理快捷目录"); color: Theme.text-primary; font-size: Theme.fs-md; }
+                        Text { text: @tr("手动添加快捷目录"); color: Theme.text-secondary; font-size: Theme.fs-xs; }
+                        Rectangle { height: 24px; border-radius: Theme.radius-sm; border-width: 1px; border-color: Theme.border-subtle; background: Theme.bg-root;
+                            qa-path-input := TextInput { x: 8px; width: parent.width - 16px; height: parent.height; text: root.current-path; single-line: true; font-size: Theme.fs-sm; color: Theme.text-primary; vertical-alignment: center; }
+                        }
+                        Rectangle { height: 24px; border-radius: Theme.radius-sm; border-width: 1px; border-color: Theme.border-subtle; background: Theme.bg-root;
+                            qa-label-input := TextInput { x: 8px; width: parent.width - 16px; height: parent.height; text: ""; single-line: true; font-size: Theme.fs-sm; color: Theme.text-primary; vertical-alignment: center; }
+                            Text { x: 8px; text: qa-label-input.text == "" ? @tr("备注 / 显示名，例如 防火墙配置") : ""; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; height: parent.height; }
+                        }
+                        HorizontalLayout { spacing: 8px; Rectangle { horizontal-stretch: 1; }
+                            Rectangle { width: 72px; height: 24px; border-radius: Theme.radius-sm; background: Theme.accent;
+                                TouchArea { mouse-cursor: pointer; clicked => {
+                                    if (qa-path-input.text != "") {
+                                        if (root.qa1-path == "") { root.qa1-path = qa-path-input.text; root.qa1-label = qa-label-input.text != "" ? qa-label-input.text : qa-path-input.text; }
+                                        else if (root.qa2-path == "") { root.qa2-path = qa-path-input.text; root.qa2-label = qa-label-input.text != "" ? qa-label-input.text : qa-path-input.text; }
+                                        else if (root.qa3-path == "") { root.qa3-path = qa-path-input.text; root.qa3-label = qa-label-input.text != "" ? qa-label-input.text : qa-path-input.text; }
+                                        else if (root.qa4-path == "") { root.qa4-path = qa-path-input.text; root.qa4-label = qa-label-input.text != "" ? qa-label-input.text : qa-path-input.text; }
+                                        else if (root.qa5-path == "") { root.qa5-path = qa-path-input.text; root.qa5-label = qa-label-input.text != "" ? qa-label-input.text : qa-path-input.text; }
+                                        else { root.toolbar-tip = @tr("最多只能添加 5 个自定义快捷目录"); }
+                                    }
+                                } }
+                                Text { text: @tr("添加"); color: #ffffff; font-size: Theme.fs-xs; horizontal-alignment: center; vertical-alignment: center; }
+                            }
+                            Rectangle { width: 72px; height: 24px; border-radius: Theme.radius-sm; background: Theme.bg-hover;
+                                TouchArea { mouse-cursor: pointer; clicked => { qa-add-popup.close(); } }
+                                Text { text: @tr("关闭"); color: Theme.text-secondary; font-size: Theme.fs-xs; horizontal-alignment: center; vertical-alignment: center; }
+                            }
+                        }
+                        Rectangle { height: 1px; background: Theme.border-subtle; }
+                        Text { text: @tr("当前快捷入口"); color: Theme.text-secondary; font-size: Theme.fs-xs; }
+                        if root.qa-show-root : HorizontalLayout { height: 20px; spacing: 6px; Text { text: @tr("根目录  /"); color: Theme.text-primary; font-size: Theme.fs-xs; horizontal-stretch: 1; } Rectangle { width: 28px; background: Theme.danger.with-alpha(0.14); border-radius: Theme.radius-sm; TouchArea { mouse-cursor: pointer; clicked => { root.qa-show-root = false; } } Text { text: "×"; color: Theme.danger; horizontal-alignment: center; vertical-alignment: center; } } }
+                        if root.qa-show-home : HorizontalLayout { height: 20px; spacing: 6px; Text { text: "HOME  /root"; color: Theme.text-primary; font-size: Theme.fs-xs; horizontal-stretch: 1; } Rectangle { width: 28px; background: Theme.danger.with-alpha(0.14); border-radius: Theme.radius-sm; TouchArea { mouse-cursor: pointer; clicked => { root.qa-show-home = false; } } Text { text: "×"; color: Theme.danger; horizontal-alignment: center; vertical-alignment: center; } } }
+                        if root.qa-show-etc : HorizontalLayout { height: 20px; spacing: 6px; Text { text: "ETC  /etc"; color: Theme.text-primary; font-size: Theme.fs-xs; horizontal-stretch: 1; } Rectangle { width: 28px; background: Theme.danger.with-alpha(0.14); border-radius: Theme.radius-sm; TouchArea { mouse-cursor: pointer; clicked => { root.qa-show-etc = false; } } Text { text: "×"; color: Theme.danger; horizontal-alignment: center; vertical-alignment: center; } } }
+                        if root.qa-show-var : HorizontalLayout { height: 20px; spacing: 6px; Text { text: "VAR  /var"; color: Theme.text-primary; font-size: Theme.fs-xs; horizontal-stretch: 1; } Rectangle { width: 28px; background: Theme.danger.with-alpha(0.14); border-radius: Theme.radius-sm; TouchArea { mouse-cursor: pointer; clicked => { root.qa-show-var = false; } } Text { text: "×"; color: Theme.danger; horizontal-alignment: center; vertical-alignment: center; } } }
+                        if root.qa-show-tmp : HorizontalLayout { height: 20px; spacing: 6px; Text { text: "TMP  /tmp"; color: Theme.text-primary; font-size: Theme.fs-xs; horizontal-stretch: 1; } Rectangle { width: 28px; background: Theme.danger.with-alpha(0.14); border-radius: Theme.radius-sm; TouchArea { mouse-cursor: pointer; clicked => { root.qa-show-tmp = false; } } Text { text: "×"; color: Theme.danger; horizontal-alignment: center; vertical-alignment: center; } } }
+                        if root.qa-show-www : HorizontalLayout { height: 20px; spacing: 6px; Text { text: "WWW  /www"; color: Theme.text-primary; font-size: Theme.fs-xs; horizontal-stretch: 1; } Rectangle { width: 28px; background: Theme.danger.with-alpha(0.14); border-radius: Theme.radius-sm; TouchArea { mouse-cursor: pointer; clicked => { root.qa-show-www = false; } } Text { text: "×"; color: Theme.danger; horizontal-alignment: center; vertical-alignment: center; } } }
+                        if root.qa-show-over : HorizontalLayout { height: 20px; spacing: 6px; Text { text: "OVER  /overlay"; color: Theme.text-primary; font-size: Theme.fs-xs; horizontal-stretch: 1; } Rectangle { width: 28px; background: Theme.danger.with-alpha(0.14); border-radius: Theme.radius-sm; TouchArea { mouse-cursor: pointer; clicked => { root.qa-show-over = false; } } Text { text: "×"; color: Theme.danger; horizontal-alignment: center; vertical-alignment: center; } } }
+                        if root.qa1-path != "" : HorizontalLayout { height: 20px; spacing: 6px; Text { text: root.qa1-label + "  " + root.qa1-path; color: Theme.text-primary; font-size: Theme.fs-xs; horizontal-stretch: 1; overflow: elide; } Rectangle { width: 28px; background: Theme.danger.with-alpha(0.14); border-radius: Theme.radius-sm; TouchArea { mouse-cursor: pointer; clicked => { root.qa1-path = ""; root.qa1-label = ""; } } Text { text: "×"; color: Theme.danger; horizontal-alignment: center; vertical-alignment: center; } } }
+                        if root.qa2-path != "" : HorizontalLayout { height: 20px; spacing: 6px; Text { text: root.qa2-label + "  " + root.qa2-path; color: Theme.text-primary; font-size: Theme.fs-xs; horizontal-stretch: 1; overflow: elide; } Rectangle { width: 28px; background: Theme.danger.with-alpha(0.14); border-radius: Theme.radius-sm; TouchArea { mouse-cursor: pointer; clicked => { root.qa2-path = ""; root.qa2-label = ""; } } Text { text: "×"; color: Theme.danger; horizontal-alignment: center; vertical-alignment: center; } } }
+                        if root.qa3-path != "" : HorizontalLayout { height: 20px; spacing: 6px; Text { text: root.qa3-label + "  " + root.qa3-path; color: Theme.text-primary; font-size: Theme.fs-xs; horizontal-stretch: 1; overflow: elide; } Rectangle { width: 28px; background: Theme.danger.with-alpha(0.14); border-radius: Theme.radius-sm; TouchArea { mouse-cursor: pointer; clicked => { root.qa3-path = ""; root.qa3-label = ""; } } Text { text: "×"; color: Theme.danger; horizontal-alignment: center; vertical-alignment: center; } } }
+                        if root.qa4-path != "" : HorizontalLayout { height: 20px; spacing: 6px; Text { text: root.qa4-label + "  " + root.qa4-path; color: Theme.text-primary; font-size: Theme.fs-xs; horizontal-stretch: 1; overflow: elide; } Rectangle { width: 28px; background: Theme.danger.with-alpha(0.14); border-radius: Theme.radius-sm; TouchArea { mouse-cursor: pointer; clicked => { root.qa4-path = ""; root.qa4-label = ""; } } Text { text: "×"; color: Theme.danger; horizontal-alignment: center; vertical-alignment: center; } } }
+                        if root.qa5-path != "" : HorizontalLayout { height: 20px; spacing: 6px; Text { text: root.qa5-label + "  " + root.qa5-path; color: Theme.text-primary; font-size: Theme.fs-xs; horizontal-stretch: 1; overflow: elide; } Rectangle { width: 28px; background: Theme.danger.with-alpha(0.14); border-radius: Theme.radius-sm; TouchArea { mouse-cursor: pointer; clicked => { root.qa5-path = ""; root.qa5-label = ""; } } Text { text: "×"; color: Theme.danger; horizontal-alignment: center; vertical-alignment: center; } } }
+                    }
                 }
             }
         }
@@ -550,7 +707,7 @@ export component SftpPanel inherits Rectangle {
                     background: Theme.bg-root;
                     Text {
                         x: 8px;
-                        text: @tr("Directory tree");
+                        text: @tr("目录树");
                         color: Theme.text-muted;
                         font-size: Theme.fs-xs;
                         vertical-alignment: center;
@@ -740,11 +897,11 @@ export component SftpPanel inherits Rectangle {
                                 }
                                 SftpMenuItem {
                                     label: @tr("刷新此目录");
-                                    clicked => { root.refresh(root.tree-menu-target); }
+                                    clicked => { root.toolbar-tip = @tr("正在刷新此目录..."); root.refresh(root.tree-menu-target); }
                                 }
                                 SftpMenuItem {
                                     label: @tr("刷新当前面板");
-                                    clicked => { root.refresh(root.current-path); }
+                                    clicked => { root.toolbar-tip = @tr("正在刷新当前目录..."); root.refresh(root.current-path); }
                                 }
                                 SftpMenuItem {
                                     label: @tr("删除文件夹");
@@ -898,9 +1055,9 @@ export component SftpPanel inherits Rectangle {
                                     // sits above the row, so toggling doesn't trigger
                                     // navigate/select.
                                     Rectangle {
-                                        width: 16px;
+                                        width: 13px;
                                         y: (parent.height - self.height) / 2;
-                                        height: 16px;
+                                        height: 13px;
                                         border-radius: 3px;
                                         border-width: 1px;
                                         border-color: entry.selected ? Theme.accent : Theme.border-strong;
@@ -915,7 +1072,7 @@ export component SftpPanel inherits Rectangle {
                                             text: "\u{E5CA}"; // check
                                             font-family: "Material Icons";
                                             color: #ffffff;
-                                            font-size: 13px;
+                                            font-size: 10px;
                                             horizontal-alignment: center;
                                             vertical-alignment: center;
                                             width: parent.width; height: parent.height;
@@ -1052,7 +1209,7 @@ export component SftpPanel inherits Rectangle {
                                 }
                                 SftpMenuItem {
                                     label: @tr("刷新当前目录");
-                                    clicked => { root.refresh(root.current-path); }
+                                    clicked => { root.toolbar-tip = @tr("正在刷新当前目录..."); root.refresh(root.current-path); }
                                 }
                             }
                         }

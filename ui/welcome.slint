@@ -245,7 +245,7 @@ component SessionRow inherits Rectangle {
                 }
             }
             Text {
-                text: session.display-host + ":" + session.port + "  ·  " + session.display-user + "  ·  " + session.action-hint;
+                text: session.action-hint != "" ? (session.display-host + ":" + session.port + "  ·  " + session.display-user + "  ·  " + session.action-hint) : (session.display-host + ":" + session.port + "  ·  " + session.display-user);
                 color: Theme.text-secondary;
                 font-size: Theme.fs-xs;
                 vertical-alignment: center;

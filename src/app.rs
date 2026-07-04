@@ -5407,8 +5407,19 @@ fn wire_sftp_callbacks(
                 }
                 let clicked = normalize_remote_path_for_scope(path.as_str());
                 let mut scopes = split_sftp_scope_list(row.sftp_tree_scope.as_str());
-                if scopes.iter().any(|s| s == &clicked) {
-                    scopes.retain(|s| s != &clicked && !path_same_or_child(s, &clicked));
+                let was_checked = remote_path_in_scope(&clicked, row.sftp_tree_scope.as_str());
+                if was_checked {
+                    // If the item is checked because a parent scope (especially /)
+                    // covers it, clicking it must still turn something off. The
+                    // previous logic only removed exact matches, which made the
+                    // tree look "stuck" with every folder checked. To keep this
+                    // safe and predictable, a click on any inherited checked folder
+                    // clears the active scope instead of creating hidden excludes.
+                    if scopes.iter().any(|s| s == &clicked) {
+                        scopes.retain(|s| s != &clicked && !path_same_or_child(s, &clicked));
+                    } else {
+                        scopes.clear();
+                    }
                 } else {
                     // Parent scopes already cover this folder; keep only the parent
                     // so recursive multi-scope searches do not rescan child paths.

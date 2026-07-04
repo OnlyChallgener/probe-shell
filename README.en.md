@@ -25,6 +25,20 @@ It remains licensed as `MIT OR Apache-2.0`; original license and contributor cre
   <em>Tabbed terminal (full-screen btop) + SFTP file browser + remote resource monitoring</em>
 </p>
 
+## v0.6.6 Device profile and path-bar semantics
+
+- The path bar now means only one thing: the directory currently displayed in the right file list. Left-tree click, checkbox, right-click and search-scope changes do not rewrite it.
+- The quick-access `+` only fast-adds checked folders; manual path + note entry is moved into the gear management dialog.
+- Device profiling combines name, note, brand keywords, gateway-IP patterns and protocol. Low-confidence hosts keep the protocol label (SSH/Telnet/Serial) instead of being guessed.
+- Router/OpenWrt profiles prefer SSH-browser first; NAS/Linux profiles prefer native SFTP, with automatic fallback kept in both directions.
+
+## v0.6.5 File manager upgrades
+
+- Multi-select folders in the tree as recursive search scopes.
+- SFTP file panel adds a Lucky-inspired quick-access row: Root, HOME, ETC, VAR, TMP, WWW, OVERLAY.
+- Checked files expose safe batch operations: copy paths, download, clear selection.
+- Search remains a background task and can be stopped without blocking directory expansion or tab switching.
+
 ## Download & install
 
 The current Probe Shell preview workflow builds **Windows x86_64** by default and publishes artifacts to the [Releases](https://github.com/OnlyChallenger/probe-shell/releases) page. Manual `Release` workflow runs produce the portable ZIP by default; enable `build_msi` when you also need the installer.
@@ -235,3 +249,8 @@ This build coalesces repeated saved-session clicks and guards failed connection 
 
 Probe Shell 会把 SFTP/SSH 文件面板里的常见操作记录到本地 `log/operations.log`，包括上传、下载、搜索、新建、删除、重命名、权限修改、查看、编辑和保存。日志只记录时间、行为和路径，不记录文件内容、密码或私钥。文件面板工具栏里的“操作日志”图标可以直接打开该日志文件。
 
+
+
+### v0.6.5-probe4
+
+- Polished the SFTP quick access row, custom shortcut add popup, manage/delete mode, recursive selection uncheck behavior, refresh status hints, and cleaner tree expand arrows.

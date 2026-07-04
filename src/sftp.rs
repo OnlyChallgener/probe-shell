@@ -266,7 +266,7 @@ fn build_tree_nodes(
         path.rsplit('/').next().unwrap_or(path).to_string()
     };
     let children = tree_dirs.get(path);
-    let has_children = children.map(|c| !c.is_empty()).unwrap_or(true);
+    let has_children = children.map(|c| !c.is_empty()).unwrap_or(false);
     let is_expanded = expanded.contains(path);
     nodes.push(RemoteTreeNode {
         path: path.to_string(),
@@ -407,12 +407,37 @@ async fn run_sftp(
     }
 
     // --- Open remote file browser ------------------------------------------
-    // v0.6.3: prefer the native SFTP subsystem when the server offers it.
-    // Some routers/OpenWrt builds allow a login shell but reject additional
-    // exec channels after a few directory operations ("open exec channel"),
-    // which breaks an SSH-browser/SCP-style file panel. Native SFTP is more
-    // stable in that case. If SFTP is missing, fall back to the lightweight
-    // SSH-browser so Dropbear-only devices still have basic browsing.
+    // Device profile can bias the first attempt: OpenWrt/routers commonly run
+    // Dropbear without a full SFTP subsystem, so SSH-browser first avoids a slow
+    // failed subsystem negotiation.  NAS/Linux hosts still prefer native SFTP.
+    // Either branch keeps the old fallback behaviour, so a wrong guess does not
+    // make the panel unavailable.
+    let prefer_ssh_browser = matches!(
+        crate::device_profile::recommended_file_mode(
+            session.kind.as_str(),
+            &session.name,
+            &session.host,
+            &session.user,
+            &session.note,
+        ),
+        crate::device_profile::FileModeHint::SshBrowserFirst
+    );
+
+    if prefer_ssh_browser {
+        if shell_pwd(&handle).await.is_ok() {
+            let _ = events.send(SessionEvent::SftpStatus(format!(
+                "{} · {}",
+                t("SSH 文件浏览模式", "SSH file-browser mode"),
+                t("根据设备画像优先使用", "selected by device profile")
+            )));
+            return run_ssh_file_browser(handle, commands, events).await;
+        }
+        let _ = events.send(SessionEvent::SftpStatus(t(
+            "SSH 文件浏览不可用,改试 SFTP...",
+            "SSH browser unavailable, trying SFTP...",
+        ).into()));
+    }
+
     let sftp = match open_sftp_subsystem(&handle).await {
         Ok(sftp) => {
             let _ = events.send(SessionEvent::SftpStatus(t(
@@ -1604,7 +1629,7 @@ async fn shell_search_dir_impl(
         if visited_dirs > max_dirs || out.len() >= max_results {
             break;
         }
-        if visited_dirs == 1 || last_status.elapsed() >= Duration::from_millis(350) {
+        if visited_dirs == 1 || last_status.elapsed() >= Duration::from_millis(220) {
             let _ = events.send(SessionEvent::SftpStatus(format!(
                 "{}: {}  ·  {} {}",
                 t("搜索中", "Searching"),
@@ -2057,7 +2082,7 @@ async fn search_dir_impl(
         if visited_dirs > max_dirs || out.len() >= max_results {
             break;
         }
-        if visited_dirs == 1 || last_status.elapsed() >= Duration::from_millis(350) {
+        if visited_dirs == 1 || last_status.elapsed() >= Duration::from_millis(220) {
             let _ = events.send(SessionEvent::SftpStatus(format!(
                 "{}: {}  ·  {} {}",
                 t("搜索中", "Searching"),
