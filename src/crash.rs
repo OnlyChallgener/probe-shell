@@ -27,7 +27,7 @@ pub fn path() -> std::path::PathBuf {
     dir.join("crash.log")
 }
 
-fn write_panic(info: &panic::PanicInfo<'_>) {
+fn write_panic(info: &panic::PanicHookInfo<'_>) {
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())

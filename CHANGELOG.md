@@ -1,5 +1,12 @@
 ## v0.6.5-probe1
 
+## v0.6.5-probe2
+
+- 修复 Windows Release 编译失败：SSH 文件浏览 fallback 的多目录搜索不再直接 clone `russh::client::Handle`。
+- 保留 v0.6.5-probe1 的多目录搜索、快捷访问、多选安全操作、操作日志和中文右键菜单。
+- 更新 panic hook 类型，消除 Rust 新版 `PanicInfo` 废弃警告。
+
+
 - SFTP 多目录搜索：目录树可以同时勾选多个目录；搜索会按多个范围依次后台扫描，并自动跳过父子目录重复范围。
 - 勾选目录的语义更清晰：勾选框用于搜索/批量范围，不会改变地址栏；搜索范围以 `;` 分隔显示。
 - 文件面板新增 Lucky 风格快捷访问栏：根目录、HOME、ETC、VAR、TMP、WWW、OVERLAY。

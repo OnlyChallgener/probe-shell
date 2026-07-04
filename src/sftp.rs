@@ -1212,6 +1212,12 @@ async fn run_ssh_file_browser(
     mut commands: UnboundedReceiver<SftpCommand>,
     events: UnboundedSender<SessionEvent>,
 ) -> Result<()> {
+    // `russh::client::Handle` itself is not Clone in the version we build
+    // against. Wrap it in Arc so background search tasks can share the same
+    // browser connection without moving it out of the command loop. This fixes
+    // the Windows release build error introduced by multi-scope search while
+    // keeping search cancellable and non-blocking for the UI.
+    let handle = Arc::new(handle);
     let home = shell_pwd(&handle).await.unwrap_or_else(|_| "/".to_string());
     let _ = events.send(SessionEvent::SftpStatus(t(
         "SSH 文件浏览模式：服务器未提供 SFTP 子系统",
