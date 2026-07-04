@@ -253,3 +253,11 @@ Probe Shell 会把 SFTP/SSH 文件面板里的常见操作记录到本地 `log/o
 ### v0.6.5-probe4
 
 - Polished the SFTP quick access row, custom shortcut add popup, manage/delete mode, recursive selection uncheck behavior, refresh status hints, and cleaner tree expand arrows.
+
+
+### v0.6.6-probe2
+
+- 地址栏只代表右侧当前目录；左侧选中、右侧选中、勾选范围都在底部状态栏单独显示。
+- 右侧文件/文件夹单击只选中并显示完整路径；双击才打开目录或预览文件。
+- 目录树增加更明确的文件夹图标。
+- 路由/OpenWrt 设备文件模式改为自动选择，优先减少 `open exec channel` 访问失败。

@@ -1,3 +1,19 @@
+## v0.6.6-probe3 - simplified file manager navigation
+
+- Changed the left SFTP area from a complex expandable tree into a simple directory navigation list: no dropdown arrows and no left-side checkboxes.
+- Replaced the old left tree checkbox with a small `+` button for adding/removing a directory from search scope.
+- Double-clicking a file in the right list downloads it again; double-clicking a folder still opens it.
+- Improved file/folder readability: right list shows folder/file icons and folders use `文件夹` in the size column; empty directories show a dedicated empty-folder state.
+- Fixed the Slint build failure caused by accessing TextInput IDs inside a PopupWindow by replacing the quick-access manager with an inline manager panel.
+- Simplified Auto file browser selection to SFTP first, then SSH-browser fallback; SCP is treated as transfer fallback, not directory browsing.
+
+## v0.6.6-probe2 - file panel selection and safer auto file mode
+
+- Fixed SFTP status bar semantics: address bar only means the right file list current directory; left tree selection and right file selection are shown separately in the bottom status bar.
+- Right file/folder single click now only selects and shows the full path; double click opens folders and previews files.
+- Directory tree labels now use explicit folder icons to separate folders from files visually.
+- Router/OpenWrt device profiles now use auto file-mode selection instead of forcing SSH-browser first, reducing open exec channel failures when native SFTP is available.
+
 ## v0.6.6-probe1
 
 - 明确 SFTP 地址栏语义：地址栏只代表右侧文件列表当前打开目录；左侧单击、勾选、右键、搜索范围不会改写地址栏。

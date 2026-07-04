@@ -407,37 +407,14 @@ async fn run_sftp(
     }
 
     // --- Open remote file browser ------------------------------------------
-    // Device profile can bias the first attempt: OpenWrt/routers commonly run
-    // Dropbear without a full SFTP subsystem, so SSH-browser first avoids a slow
-    // failed subsystem negotiation.  NAS/Linux hosts still prefer native SFTP.
-    // Either branch keeps the old fallback behaviour, so a wrong guess does not
-    // make the panel unavailable.
-    let prefer_ssh_browser = matches!(
-        crate::device_profile::recommended_file_mode(
-            session.kind.as_str(),
-            &session.name,
-            &session.host,
-            &session.user,
-            &session.note,
-        ),
-        crate::device_profile::FileModeHint::SshBrowserFirst
-    );
-
-    if prefer_ssh_browser {
-        if shell_pwd(&handle).await.is_ok() {
-            let _ = events.send(SessionEvent::SftpStatus(format!(
-                "{} · {}",
-                t("SSH 文件浏览模式", "SSH file-browser mode"),
-                t("根据设备画像优先使用", "selected by device profile")
-            )));
-            return run_ssh_file_browser(handle, commands, events).await;
-        }
-        let _ = events.send(SessionEvent::SftpStatus(t(
-            "SSH 文件浏览不可用,改试 SFTP...",
-            "SSH browser unavailable, trying SFTP...",
-        ).into()));
-    }
-
+    // Directory browsing is safest when native SFTP is available: it can list
+    // directories, identify file/folder metadata, transfer files, and does not
+    // depend on extra shell exec channels.  Therefore Auto mode is now:
+    //   1) try native SFTP first
+    //   2) fall back to SSH-browser only when the SFTP subsystem is unavailable
+    //   3) SCP remains a transfer fallback concept, not a directory browser.
+    // This avoids the common OpenWrt/Dropbear failure where an extra exec channel
+    // is refused while the SSH shell itself is still connected.
     let sftp = match open_sftp_subsystem(&handle).await {
         Ok(sftp) => {
             let _ = events.send(SessionEvent::SftpStatus(t(

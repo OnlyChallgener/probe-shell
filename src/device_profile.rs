@@ -53,13 +53,13 @@ pub enum FileModeHint {
 impl DeviceKind {
     fn profile(self, protocol_label: &'static str) -> DeviceProfile {
         match self {
-            DeviceKind::OpenWrt => DeviceProfile { kind: self, label: "OpenWrt", icon: "router", hint_zh: "OpenWrt 路由 · SSH浏览优先", hint_en: "OpenWrt router · SSH-browser first", file_mode: FileModeHint::SshBrowserFirst, confidence: 95 },
-            DeviceKind::RuijieRouter => DeviceProfile { kind: self, label: "锐捷路由", icon: "router", hint_zh: "锐捷路由 · SSH浏览优先", hint_en: "Ruijie router · SSH-browser first", file_mode: FileModeHint::SshBrowserFirst, confidence: 92 },
-            DeviceKind::XiaomiRouter => DeviceProfile { kind: self, label: "小米路由", icon: "router", hint_zh: "小米路由 · SSH浏览优先", hint_en: "Xiaomi router · SSH-browser first", file_mode: FileModeHint::SshBrowserFirst, confidence: 88 },
-            DeviceKind::TpLinkRouter => DeviceProfile { kind: self, label: "TP路由", icon: "router", hint_zh: "TP-Link 路由", hint_en: "TP-Link router", file_mode: FileModeHint::SshBrowserFirst, confidence: 86 },
-            DeviceKind::HuaweiRouter => DeviceProfile { kind: self, label: "华为设备", icon: "router", hint_zh: "华为网络设备", hint_en: "Huawei network device", file_mode: FileModeHint::SshBrowserFirst, confidence: 84 },
-            DeviceKind::AsusRouter => DeviceProfile { kind: self, label: "华硕路由", icon: "router", hint_zh: "华硕路由", hint_en: "ASUS router", file_mode: FileModeHint::SshBrowserFirst, confidence: 84 },
-            DeviceKind::Router => DeviceProfile { kind: self, label: "Router", icon: "router", hint_zh: "路由管理 · SSH浏览优先", hint_en: "router ops · SSH-browser first", file_mode: FileModeHint::SshBrowserFirst, confidence: 80 },
+            DeviceKind::OpenWrt => DeviceProfile { kind: self, label: "OpenWrt", icon: "router", hint_zh: "OpenWrt 路由 · 自动选择文件模式", hint_en: "OpenWrt router · auto file mode", file_mode: FileModeHint::Auto, confidence: 95 },
+            DeviceKind::RuijieRouter => DeviceProfile { kind: self, label: "锐捷路由", icon: "router", hint_zh: "锐捷路由 · 自动选择文件模式", hint_en: "Ruijie router · auto file mode", file_mode: FileModeHint::Auto, confidence: 92 },
+            DeviceKind::XiaomiRouter => DeviceProfile { kind: self, label: "小米路由", icon: "router", hint_zh: "小米路由 · 自动选择文件模式", hint_en: "Xiaomi router · auto file mode", file_mode: FileModeHint::Auto, confidence: 88 },
+            DeviceKind::TpLinkRouter => DeviceProfile { kind: self, label: "TP路由", icon: "router", hint_zh: "TP-Link 路由", hint_en: "TP-Link router", file_mode: FileModeHint::Auto, confidence: 86 },
+            DeviceKind::HuaweiRouter => DeviceProfile { kind: self, label: "华为设备", icon: "router", hint_zh: "华为网络设备", hint_en: "Huawei network device", file_mode: FileModeHint::Auto, confidence: 84 },
+            DeviceKind::AsusRouter => DeviceProfile { kind: self, label: "华硕路由", icon: "router", hint_zh: "华硕路由", hint_en: "ASUS router", file_mode: FileModeHint::Auto, confidence: 84 },
+            DeviceKind::Router => DeviceProfile { kind: self, label: "Router", icon: "router", hint_zh: "路由管理 · 自动选择文件模式", hint_en: "router ops · auto file mode", file_mode: FileModeHint::Auto, confidence: 80 },
             DeviceKind::Modem => DeviceProfile { kind: self, label: "光猫", icon: "settings_input_component", hint_zh: "光猫/ONT", hint_en: "modem / ONT", file_mode: FileModeHint::None, confidence: 86 },
             DeviceKind::Nas => DeviceProfile { kind: self, label: "NAS", icon: "storage", hint_zh: "NAS · SFTP优先", hint_en: "NAS · SFTP first", file_mode: FileModeHint::SftpFirst, confidence: 90 },
             DeviceKind::Docker => DeviceProfile { kind: self, label: "Docker", icon: "dns", hint_zh: "Docker 主机", hint_en: "Docker host", file_mode: FileModeHint::SftpFirst, confidence: 88 },
