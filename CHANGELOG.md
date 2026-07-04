@@ -1,3 +1,15 @@
+## v0.6.8-probe2 - cleaner file-kind icons
+
+## v0.6.8-probe3
+
+- 修复 Windows Release 编译失败：补回 `list_dirs_only_impl` 目录树辅助函数。
+- 左侧目录导航只接收目录项，普通文件、0B 空文件、死链接不会被误画成可展开目录。
+- 去掉 `kind` 局部变量的无意义 `mut` 警告。
+
+- 重新设计文件列表与左侧导航的类型图标：改用一致的 Material Icons 图标，不再使用 `📁↗` / `📄↗` 这种混排 emoji。
+- 链接目录/链接文件改为“基础图标 + 右下角小徽标”，死链接改为警告图标，视觉更统一。
+- 保留原来的空目录状态图标 `📂 目录为空`，不影响空文件夹提示。
+
 ## v0.6.8-probe1 - safer inaccessible-folder handling
 - 文件列表新增链接状态识别：软链接目录显示箭头标识，死链接显示灰色警告图标，避免误双击。
 - SFTP 目录读取增加更长超时与一次轻量重试；失败时底部状态栏显示明确错误码，如 Permission Denied / Connection Timeout / Exec Channel Refused。

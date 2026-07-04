@@ -2145,6 +2145,24 @@ async fn search_dir_impl(
     Ok(out)
 }
 
+
+/// List only child directories for the lightweight left navigation tree.
+///
+/// `list_dir_impl` returns both files and directories. The tree cache only
+/// needs directories, and it must not include dead links or regular files;
+/// otherwise the UI may draw an expandable arrow for a non-directory item.
+async fn list_dirs_only_impl(sftp: &SftpSession, path: &str) -> Result<Vec<(String, String)>> {
+    let entries = list_dir_impl(sftp, path).await?;
+    let mut dirs: Vec<(String, String)> = entries
+        .into_iter()
+        .filter(|entry| entry.is_dir && entry.kind != "dead-link")
+        .map(|entry| (entry.name, entry.full_path))
+        .collect();
+
+    dirs.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+    Ok(dirs)
+}
+
 async fn list_dir_impl(sftp: &SftpSession, path: &str) -> Result<Vec<RemoteEntry>> {
     let mut last_err: Option<anyhow::Error> = None;
     let raw = {
@@ -2191,7 +2209,7 @@ async fn list_dir_impl(sftp: &SftpSession, path: &str) -> Result<Vec<RemoteEntry
         let modified = meta.mtime.unwrap_or(0);
 
         let mut is_dir = file_type == 0o040_000;
-        let mut kind = if is_dir {
+        let kind = if is_dir {
             "dir".to_string()
         } else if file_type == 0o120_000 {
             // SFTP directory listings often tell us only "this is a symlink".

@@ -53,6 +53,49 @@ component SftpMenuItem inherits Rectangle {
 
 
 
+
+// Consistent file-kind glyph used in the right file list and left navigation.
+// Avoid emoji folder+arrow combinations because they render differently on
+// Windows fonts. Empty-directory page keeps the previous 📂 empty-state icon.
+component FileKindIcon inherits Rectangle {
+    in property <bool> is-dir: false;
+    in property <string> kind: "file"; // file / dir / symlink-file / symlink-dir / dead-link
+    width: 18px;
+    height: 18px;
+
+    Text {
+        text: root.kind == "dead-link" ? "\u{E002}" : (root.is-dir ? "\u{E2C7}" : "\u{E24D}");
+        font-family: "Material Icons";
+        font-size: 17px;
+        color: root.kind == "dead-link" ? Theme.text-muted : (root.is-dir ? Theme.accent : Theme.text-secondary);
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        width: parent.width;
+        height: parent.height;
+    }
+
+    if root.kind == "symlink-dir" || root.kind == "symlink-file" : Rectangle {
+        x: parent.width - 8px;
+        y: parent.height - 8px;
+        width: 8px;
+        height: 8px;
+        border-radius: 4px;
+        background: Theme.accent;
+        border-width: 1px;
+        border-color: Theme.bg-panel;
+        Text {
+            text: "\u{E89E}"; // open_in_new, clearer than a raw ↗ emoji overlay
+            font-family: "Material Icons";
+            color: #ffffff;
+            font-size: 6px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            width: parent.width;
+            height: parent.height;
+        }
+    }
+}
+
 // Compact quick-access chip used by the SFTP shortcut row.
 // The delete "×" only appears in manage mode and is intentionally tiny so it
 // does not steal space from the path bar.
@@ -825,8 +868,13 @@ export component SftpPanel inherits Rectangle {
                                         }
                                     }
 
+                                    FileKindIcon {
+                                        is-dir: true;
+                                        kind: "dir";
+                                    }
+
                                     Text {
-                                        text: node.path == "/" ? "📁 " + @tr("根目录") : "📁 " + node.path;
+                                        text: node.path == "/" ? @tr("根目录") : node.path;
                                         color: node.path == root.current-path ? Theme.accent : Theme.text-primary;
                                         font-size: Theme.fs-xs;
                                         horizontal-stretch: 1;
@@ -1069,8 +1117,13 @@ export component SftpPanel inherits Rectangle {
                                             width: parent.width; height: parent.height;
                                         }
                                     }
+                                    FileKindIcon {
+                                        is-dir: entry.is-dir;
+                                        kind: entry.kind;
+                                    }
+
                                     Text {
-                                        text: entry.kind == "dead-link" ? "⚠ " + entry.name : (entry.kind == "symlink-dir" ? "📁↗ " + entry.name : (entry.kind == "symlink-file" ? "📄↗ " + entry.name : (entry.is-dir ? "📁 " + entry.name : "📄 " + entry.name)));
+                                        text: entry.name;
                                         color: entry.kind == "dead-link" ? Theme.text-muted : (entry.is-dir ? Theme.accent : Theme.text-primary);
                                         font-size: Theme.fs-sm;
                                         horizontal-stretch: 1;
