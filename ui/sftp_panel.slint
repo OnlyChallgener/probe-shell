@@ -9,6 +9,7 @@ export struct SftpEntry {
     name: string,
     full-path: string,
     is-dir: bool,
+    kind: string,      // file / dir / symlink-file / symlink-dir / dead-link
     size: string,
     modified: string,
     mode: int,        // POSIX permission bits, for the chmod dialog (#84)
@@ -783,7 +784,6 @@ export component SftpPanel inherits Rectangle {
                                     double-clicked => {
                                         if (!root.search-mode) { root.tree-expand(node.path); }
                                     }
-                                    double-clicked => { root.navigate(".."); }
                                     pointer-event(ev) => {
                                         if (ev.kind == PointerEventKind.down
                                                 && ev.button == PointerEventButton.right) {
@@ -1015,6 +1015,8 @@ export component SftpPanel inherits Rectangle {
                                             root.search-restore-path = "";
                                             file-search.text = "";
                                             root.search-changed("");
+                                        } else if (entry.kind == "dead-link") {
+                                            root.toolbar-tip = @tr("死链接，无法打开");
                                         } else if (entry.is-dir) {
                                             root.navigate(entry.full-path);
                                         } else {
@@ -1068,8 +1070,8 @@ export component SftpPanel inherits Rectangle {
                                         }
                                     }
                                     Text {
-                                        text: entry.is-dir ? "📁 " + entry.name : "📄 " + entry.name;
-                                        color: entry.is-dir ? Theme.accent : Theme.text-primary;
+                                        text: entry.kind == "dead-link" ? "⚠ " + entry.name : (entry.kind == "symlink-dir" ? "📁↗ " + entry.name : (entry.kind == "symlink-file" ? "📄↗ " + entry.name : (entry.is-dir ? "📁 " + entry.name : "📄 " + entry.name)));
+                                        color: entry.kind == "dead-link" ? Theme.text-muted : (entry.is-dir ? Theme.accent : Theme.text-primary);
                                         font-size: Theme.fs-sm;
                                         horizontal-stretch: 1;
                                         overflow: elide;
@@ -1084,8 +1086,8 @@ export component SftpPanel inherits Rectangle {
                                         vertical-alignment: center;
                                     }
                                     if root.show-size-col : Text {
-                                        text: entry.is-dir ? @tr("文件夹") : entry.size;
-                                        color: Theme.text-secondary; font-size: Theme.fs-xs;
+                                        text: entry.kind == "dead-link" ? @tr("死链接") : (entry.kind == "symlink-dir" ? @tr("链接目录") : (entry.kind == "symlink-file" ? @tr("链接文件") : (entry.is-dir ? @tr("文件夹") : entry.size)));
+                                        color: entry.kind == "dead-link" ? Theme.text-muted : Theme.text-secondary; font-size: Theme.fs-xs;
                                         width: 72px; horizontal-alignment: right; vertical-alignment: center;
                                     }
                                     if root.show-mode-col : Text {

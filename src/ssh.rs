@@ -30,6 +30,9 @@ pub struct RemoteEntry {
     pub name: String,
     pub full_path: String,
     pub is_dir: bool,
+    /// Entry kind used by the file panel for precise icons / disabled states.
+    /// Values: file, dir, symlink-file, symlink-dir, dead-link.
+    pub kind: String,
     /// Raw size in bytes (0 for directories or unknown).
     pub size: u64,
     /// Modification time as Unix timestamp (seconds, u32 = SFTP wire format).

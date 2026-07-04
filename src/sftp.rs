@@ -35,6 +35,10 @@ use crate::config::{AuthMethod, Session};
 use crate::i18n::t;
 use crate::ssh::{format_mtime, format_size, RemoteEntry, RemoteTreeNode, SessionEvent};
 
+const SFTP_DIR_TIMEOUT: Duration = Duration::from_secs(22);
+const SFTP_STAT_TIMEOUT: Duration = Duration::from_secs(8);
+const SSH_BROWSER_EXEC_TIMEOUT: Duration = Duration::from_secs(18);
+
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
@@ -1184,22 +1188,31 @@ async fn exec_capture_browser(
     handle: &client::Handle<SftpClientHandler>,
     cmd: &str,
 ) -> Result<(u32, Vec<u8>, Vec<u8>)> {
-    match exec_capture(handle, cmd).await {
-        Ok(r) => Ok(r),
-        Err(e) => {
+    match tokio::time::timeout(SSH_BROWSER_EXEC_TIMEOUT, exec_capture(handle, cmd)).await {
+        Ok(Ok(r)) => Ok(r),
+        Ok(Err(e)) => {
             let text = format!("{e:#}").to_lowercase();
             if text.contains("open exec channel")
                 || text.contains("administratively prohibited")
                 || text.contains("channel open")
             {
-                tokio::time::sleep(std::time::Duration::from_millis(180)).await;
-                exec_capture(handle, cmd)
-                    .await
-                    .with_context(|| "retry after exec channel failure")
+                tokio::time::sleep(Duration::from_millis(260)).await;
+                match tokio::time::timeout(SSH_BROWSER_EXEC_TIMEOUT, exec_capture(handle, cmd)).await {
+                    Ok(Ok(r)) => Ok(r),
+                    Ok(Err(e)) => Err(e).with_context(|| "retry after exec channel failure"),
+                    Err(_) => Err(anyhow!(
+                        "Connection Timeout: exec channel exceeded {}s after retry",
+                        SSH_BROWSER_EXEC_TIMEOUT.as_secs()
+                    )),
+                }
             } else {
                 Err(e)
             }
         }
+        Err(_) => Err(anyhow!(
+            "Connection Timeout: exec channel exceeded {}s",
+            SSH_BROWSER_EXEC_TIMEOUT.as_secs()
+        )),
     }
 }
 
@@ -1478,11 +1491,7 @@ async fn emit_shell_dir(
             )));
         }
         Err(e) => {
-            let _ = events.send(SessionEvent::SftpError(format!(
-                "{} {}: {e}",
-                t("无法访问", "Cannot open"),
-                path
-            )));
+            let _ = events.send(SessionEvent::SftpError(list_error_msg(path, &e)));
         }
     }
 }
@@ -1528,7 +1537,10 @@ async fn shell_list_dir(
             "for f in .[!.]* ..?* *; do ",
             "[ -e \"$f\" ] || continue; ",
             "[ \"$f\" = . ] && continue; [ \"$f\" = .. ] && continue; ",
-            "if [ -d \"$f\" ]; then typ=d; else typ=f; fi; ",
+            "if [ -L \"$f\" ]; then ",
+            "  if [ ! -e \"$f\" ]; then typ=dead; ",
+            "  elif [ -d \"$f\" ]; then typ=ld; else typ=lf; fi; ",
+            "elif [ -d \"$f\" ]; then typ=d; else typ=f; fi; ",
             "sz=$(stat -c %s \"$f\" 2>/dev/null || wc -c < \"$f\" 2>/dev/null || echo 0); ",
             "mt=$(stat -c %Y \"$f\" 2>/dev/null || echo 0); ",
             "md=$(stat -c %a \"$f\" 2>/dev/null || echo 0); ",
@@ -1564,10 +1576,18 @@ async fn shell_list_dir(
             format!("{}/{}", path.trim_end_matches('/'), name)
         };
         let mode = u32::from_str_radix(mode_txt, 8).unwrap_or(0);
+        let (is_dir, kind) = match typ {
+            "d" => (true, "dir"),
+            "ld" => (true, "symlink-dir"),
+            "lf" => (false, "symlink-file"),
+            "dead" => (false, "dead-link"),
+            _ => (false, "file"),
+        };
         entries.push(RemoteEntry {
             name,
             full_path,
-            is_dir: typ == "d",
+            is_dir,
+            kind: kind.to_string(),
             size,
             modified,
             mode,
@@ -1978,11 +1998,20 @@ fn spawn_edit_watcher(
 fn list_error_msg(path: &str, e: &impl std::fmt::Display) -> String {
     let raw = e.to_string();
     let low = raw.to_lowercase();
-    if low.contains("permission") || low.contains("denied") {
-        format!("{}: {}", t("权限不足,无法访问", "Permission denied"), path)
+    let code = if low.contains("permission") || low.contains("denied") {
+        "Permission Denied"
+    } else if low.contains("timeout") || low.contains("timed out") {
+        "Connection Timeout"
+    } else if low.contains("no such") || low.contains("not found") {
+        "Not Found"
+    } else if low.contains("open exec channel") || low.contains("channel open") || low.contains("administratively prohibited") {
+        "Exec Channel Refused"
+    } else if low.contains("connection") || low.contains("reset") || low.contains("closed") {
+        "Connection Closed"
     } else {
-        format!("{} {}: {}", t("无法访问", "Cannot open"), path, raw)
-    }
+        "Open Failed"
+    };
+    format!("{} {} [{}]: {}", t("无法访问", "Cannot open"), path, code, raw)
 }
 
 fn normalise_remote_dir(path: &str) -> String {
@@ -2117,38 +2146,91 @@ async fn search_dir_impl(
 }
 
 async fn list_dir_impl(sftp: &SftpSession, path: &str) -> Result<Vec<RemoteEntry>> {
-    let raw = sftp
-        .read_dir(path)
-        .await
-        .with_context(|| format!("read_dir {path} failed"))?;
-
-    let mut entries: Vec<RemoteEntry> = raw
-        .into_iter()
-        .filter(|e| {
-            let n = e.file_name();
-            n != "." && n != ".."
-        })
-        .map(|e| {
-            let name = e.file_name().to_string();
-            let full_path = format!("{}/{}", path.trim_end_matches('/'), name);
-            let meta = e.metadata();
-            // Determine if entry is a directory via Unix permission bits.
-            let permissions = meta.permissions.unwrap_or(0);
-            let is_dir = (permissions & 0o170_000) == 0o040_000;
-            let size = meta.size.unwrap_or(0);
-            let modified = meta.mtime.unwrap_or(0);
-            RemoteEntry {
-                name,
-                full_path,
-                is_dir,
-                size,
-                modified,
-                mode: permissions & 0o7777,
+    let mut last_err: Option<anyhow::Error> = None;
+    let raw = {
+        let mut ok = None;
+        for attempt in 0..2 {
+            match tokio::time::timeout(SFTP_DIR_TIMEOUT, sftp.read_dir(path)).await {
+                Ok(Ok(raw)) => {
+                    ok = Some(raw);
+                    break;
+                }
+                Ok(Err(e)) => {
+                    let msg = e.to_string().to_lowercase();
+                    let err = anyhow!(e).context(format!("read_dir {path} failed"));
+                    if msg.contains("permission") || msg.contains("denied") || msg.contains("no such") {
+                        return Err(err);
+                    }
+                    last_err = Some(err);
+                }
+                Err(_) => {
+                    last_err = Some(anyhow!(
+                        "Connection Timeout: read_dir {path} exceeded {}s",
+                        SFTP_DIR_TIMEOUT.as_secs()
+                    ));
+                }
             }
-        })
-        .collect();
+            if attempt == 0 {
+                tokio::time::sleep(Duration::from_millis(260)).await;
+            }
+        }
+        ok.ok_or_else(|| last_err.unwrap_or_else(|| anyhow!("read_dir {path} failed")))?
+    };
 
-    // Sort: directories first, then files; both groups alphabetically.
+    let mut entries: Vec<RemoteEntry> = Vec::new();
+    for e in raw.into_iter().filter(|e| {
+        let n = e.file_name();
+        n != "." && n != ".."
+    }) {
+        let name = e.file_name().to_string();
+        let full_path = format!("{}/{}", path.trim_end_matches('/'), name);
+        let meta = e.metadata();
+        let permissions = meta.permissions.unwrap_or(0);
+        let file_type = permissions & 0o170_000;
+        let size = meta.size.unwrap_or(0);
+        let modified = meta.mtime.unwrap_or(0);
+
+        let mut is_dir = file_type == 0o040_000;
+        let mut kind = if is_dir {
+            "dir".to_string()
+        } else if file_type == 0o120_000 {
+            // SFTP directory listings often tell us only "this is a symlink".
+            // Do a small, timed stat of the target so the UI can show a folder
+            // symlink (small arrow) or a dead link (grey warning) before the user
+            // wastes a double-click.
+            match tokio::time::timeout(SFTP_STAT_TIMEOUT, sftp.metadata(&full_path)).await {
+                Ok(Ok(target)) => {
+                    let tperm = target.permissions.unwrap_or(0);
+                    if (tperm & 0o170_000) == 0o040_000 {
+                        is_dir = true;
+                        "symlink-dir".to_string()
+                    } else {
+                        "symlink-file".to_string()
+                    }
+                }
+                Ok(Err(_)) | Err(_) => "dead-link".to_string(),
+            }
+        } else {
+            "file".to_string()
+        };
+
+        if kind == "dead-link" {
+            is_dir = false;
+        }
+
+        entries.push(RemoteEntry {
+            name,
+            full_path,
+            is_dir,
+            kind,
+            size,
+            modified,
+            mode: permissions & 0o7777,
+        });
+    }
+
+    // Sort: directories first, then files; both groups alphabetically. Dead
+    // links stay with files so they don't look expandable.
     entries.sort_by(|a, b| match (a.is_dir, b.is_dir) {
         (true, false) => std::cmp::Ordering::Less,
         (false, true) => std::cmp::Ordering::Greater,
@@ -2156,16 +2238,6 @@ async fn list_dir_impl(sftp: &SftpSession, path: &str) -> Result<Vec<RemoteEntry
     });
 
     Ok(entries)
-}
-
-/// List only the subdirectories of `path` (no files). Used to build the tree.
-async fn list_dirs_only_impl(sftp: &SftpSession, path: &str) -> Result<Vec<(String, String)>> {
-    let entries = list_dir_impl(sftp, path).await?;
-    Ok(entries
-        .into_iter()
-        .filter(|e| e.is_dir)
-        .map(|e| (e.name, e.full_path))
-        .collect())
 }
 
 /// Emit a transfer-progress event.

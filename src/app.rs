@@ -3945,6 +3945,7 @@ fn apply_session_event_to_window(
                     name: e.name.clone().into(),
                     full_path: e.full_path.clone().into(),
                     is_dir: e.is_dir,
+                    kind: e.kind.clone().into(),
                     size: if e.is_dir {
                         "".into()
                     } else {

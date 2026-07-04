@@ -266,3 +266,8 @@ Probe Shell 会把 SFTP/SSH 文件面板里的常见操作记录到本地 `log/o
 ### v0.6.7-probe1 notes
 
 This build clarifies SFTP navigation/search state: the address bar only represents the currently opened folder, the search box has a clear/restore button, global search displays a `位置/Path` column, and double-clicking a search result locates it in the normal file list.
+
+
+### v0.6.8-probe1 文件夹访问优化
+- 软链接目录显示箭头标识，死链接显示警告标识。
+- SFTP/SSH 文件浏览增加超时与重试，失败状态会显示明确错误码。

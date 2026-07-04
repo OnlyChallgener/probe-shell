@@ -1,3 +1,9 @@
+## v0.6.8-probe1 - safer inaccessible-folder handling
+- 文件列表新增链接状态识别：软链接目录显示箭头标识，死链接显示灰色警告图标，避免误双击。
+- SFTP 目录读取增加更长超时与一次轻量重试；失败时底部状态栏显示明确错误码，如 Permission Denied / Connection Timeout / Exec Channel Refused。
+- SSH-browser exec channel 增加超时保护和重试，路由器响应慢时不再轻易卡死界面。
+- 修复左侧导航双击误触发上一级的残留处理，左侧单击/双击职责更清楚。
+
 ## v0.6.7-probe1 - global search state model
 
 - Reworked SFTP search into an explicit global/search-results mode: focusing the search box enters search mode, dims the left navigation, and recursive search uses `/` unless explicit search scopes are added with the left-side `+` buttons.
