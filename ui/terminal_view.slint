@@ -181,6 +181,8 @@ export component TerminalView inherits Rectangle {
     callback sftp-toggle-select(int);               // toggle a row's checkbox (#100)
     callback sftp-download-selected();              // download checked entries (#100)
     callback sftp-delete-selected();                // delete checked entries (#100)
+    callback sftp-copy-selected-paths();            // copy checked remote paths
+    callback sftp-clear-selected();                 // clear checked entries
     callback sftp-view(string);
     callback sftp-edit(string);
     callback sftp-open-external(string);
@@ -1507,6 +1509,8 @@ export component TerminalView inherits Rectangle {
             toggle-select(i)    => { root.sftp-toggle-select(i); }
             download-selected() => { root.sftp-download-selected(); }
             delete-selected()   => { root.sftp-delete-selected(); }
+            copy-selected-paths() => { root.sftp-copy-selected-paths(); }
+            clear-selected() => { root.sftp-clear-selected(); }
             view(path)          => { root.sftp-view(path); }
             edit(path)          => { root.sftp-edit(path); }
             open-external(path) => { root.sftp-open-external(path); }

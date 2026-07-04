@@ -137,16 +137,45 @@ fn normalize_remote_path_for_scope(path: &str) -> String {
     out
 }
 
-fn remote_path_in_scope(path: &str, scope: &str) -> bool {
-    if scope.trim().is_empty() {
-        return false;
+fn split_sftp_scope_list(scope: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for raw in scope.split(';') {
+        let p = normalize_remote_path_for_scope(raw);
+        if p.is_empty() {
+            continue;
+        }
+        if out.iter().any(|existing| path_same_or_child(&p, existing)) {
+            continue;
+        }
+        out.retain(|existing| !path_same_or_child(existing, &p));
+        out.push(p);
     }
-    let scope = normalize_remote_path_for_scope(scope);
-    if scope == "/" {
-        return true;
-    }
+    out
+}
+
+fn join_sftp_scope_list(scopes: Vec<String>) -> String {
+    scopes.join(" ; ")
+}
+
+fn path_same_or_child(path: &str, parent: &str) -> bool {
     let path = normalize_remote_path_for_scope(path);
-    path == scope || path.starts_with(&(scope + "/"))
+    let parent = normalize_remote_path_for_scope(parent);
+    parent == "/" || path == parent || path.starts_with(&(parent + "/"))
+}
+
+fn remote_path_in_scope(path: &str, scope: &str) -> bool {
+    split_sftp_scope_list(scope)
+        .iter()
+        .any(|s| path_same_or_child(path, s))
+}
+
+fn sftp_scope_status(scope: &str) -> String {
+    let scopes = split_sftp_scope_list(scope);
+    match scopes.len() {
+        0 => String::new(),
+        1 => scopes[0].clone(),
+        n => format!("{} 个目录", n),
+    }
 }
 
 fn mark_sftp_entries_for_scope(entries: &mut [SftpEntry], scope: &str) -> i32 {
@@ -3236,11 +3265,24 @@ fn collect_sftp_selected(terminals: &VecModel<TerminalState>, tab_id: &str) -> V
         if row.id.as_str() != tab_id {
             continue;
         }
-        if let Some(em) = row.sftp_entries.as_any().downcast_ref::<VecModel<SftpEntry>>() {
+        // Prefer the unfiltered model so a local search filter does not make a
+        // checked item disappear from batch operations.
+        if let Some(em) = row.sftp_all_entries.as_any().downcast_ref::<VecModel<SftpEntry>>() {
             for ei in 0..em.row_count() {
                 if let Some(e) = em.row_data(ei) {
                     if e.selected {
                         paths.push(e.full_path.to_string());
+                    }
+                }
+            }
+        }
+        if paths.is_empty() {
+            if let Some(em) = row.sftp_entries.as_any().downcast_ref::<VecModel<SftpEntry>>() {
+                for ei in 0..em.row_count() {
+                    if let Some(e) = em.row_data(ei) {
+                        if e.selected {
+                            paths.push(e.full_path.to_string());
+                        }
                     }
                 }
             }
@@ -3257,16 +3299,20 @@ fn clear_sftp_selection(terminals: &VecModel<TerminalState>, tab_id: &str) {
         if row.id.as_str() != tab_id {
             continue;
         }
-        if let Some(em) = row.sftp_entries.as_any().downcast_ref::<VecModel<SftpEntry>>() {
-            for ei in 0..em.row_count() {
-                if let Some(mut e) = em.row_data(ei) {
-                    if e.selected {
-                        e.selected = false;
-                        em.set_row_data(ei, e);
+        let clear_model = |model: &ModelRc<SftpEntry>| {
+            if let Some(em) = model.as_any().downcast_ref::<VecModel<SftpEntry>>() {
+                for ei in 0..em.row_count() {
+                    if let Some(mut e) = em.row_data(ei) {
+                        if e.selected {
+                            e.selected = false;
+                            em.set_row_data(ei, e);
+                        }
                     }
                 }
             }
-        }
+        };
+        clear_model(&row.sftp_entries);
+        clear_model(&row.sftp_all_entries);
         let mut r = row.clone();
         r.sftp_selected_count = 0;
         terminals.set_row_data(ti, r);
@@ -5326,11 +5372,19 @@ fn wire_sftp_callbacks(
                 if row.id.as_str() != tab_id.as_str() {
                     continue;
                 }
-                let next_scope = if row.sftp_tree_scope.as_str() == path.as_str() {
-                    String::new()
+                let clicked = normalize_remote_path_for_scope(path.as_str());
+                let mut scopes = split_sftp_scope_list(row.sftp_tree_scope.as_str());
+                if scopes.iter().any(|s| s == &clicked) {
+                    scopes.retain(|s| s != &clicked && !path_same_or_child(s, &clicked));
                 } else {
-                    path.to_string()
-                };
+                    // Parent scopes already cover this folder; keep only the parent
+                    // so recursive multi-scope searches do not rescan child paths.
+                    if !scopes.iter().any(|s| path_same_or_child(&clicked, s)) {
+                        scopes.retain(|s| !path_same_or_child(s, &clicked));
+                        scopes.push(clicked);
+                    }
+                }
+                let next_scope = join_sftp_scope_list(scopes);
                 row.sftp_tree_scope = next_scope.clone().into();
 
                 let mut all_entries = collect_sftp_entries(&row.sftp_all_entries);
@@ -5384,14 +5438,39 @@ fn wire_sftp_callbacks(
                 }
                 if let Some(em) = row.sftp_entries.as_any().downcast_ref::<VecModel<SftpEntry>>() {
                     let i = idx as usize;
+                    let mut changed_path = String::new();
+                    let mut changed_value = false;
                     if let Some(mut e) = em.row_data(i) {
                         e.selected = !e.selected;
+                        changed_path = e.full_path.to_string();
+                        changed_value = e.selected;
                         em.set_row_data(i, e);
                     }
+                    if !changed_path.is_empty() {
+                        if let Some(allm) = row.sftp_all_entries.as_any().downcast_ref::<VecModel<SftpEntry>>() {
+                            for ai in 0..allm.row_count() {
+                                if let Some(mut ae) = allm.row_data(ai) {
+                                    if ae.full_path.as_str() == changed_path.as_str() {
+                                        ae.selected = changed_value;
+                                        allm.set_row_data(ai, ae);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
                     let mut n = 0;
-                    for ei in 0..em.row_count() {
-                        if em.row_data(ei).map(|x| x.selected).unwrap_or(false) {
-                            n += 1;
+                    if let Some(allm) = row.sftp_all_entries.as_any().downcast_ref::<VecModel<SftpEntry>>() {
+                        for ai in 0..allm.row_count() {
+                            if allm.row_data(ai).map(|x| x.selected).unwrap_or(false) {
+                                n += 1;
+                            }
+                        }
+                    } else {
+                        for ei in 0..em.row_count() {
+                            if em.row_data(ei).map(|x| x.selected).unwrap_or(false) {
+                                n += 1;
+                            }
                         }
                     }
                     let mut r = row.clone();
@@ -5467,6 +5546,34 @@ fn wire_sftp_callbacks(
             clear_sftp_selection(tm, tab_id.as_str());
         });
     }
+    // SFTP multi-select: copy checked remote paths to clipboard.
+    {
+        let weak = window.as_weak();
+        window.on_sftp_copy_selected_paths(move |tab_id: SharedString| {
+            let Some(w) = weak.upgrade() else { return };
+            let terminals = w.get_terminals();
+            let Some(tm) = terminals.as_any().downcast_ref::<VecModel<TerminalState>>() else {
+                return;
+            };
+            let paths = collect_sftp_selected(tm, tab_id.as_str());
+            if !paths.is_empty() {
+                clipboard_set_text(paths.join("\n"));
+            }
+        });
+    }
+    // SFTP multi-select: clear checked entries.
+    {
+        let weak = window.as_weak();
+        window.on_sftp_clear_selected(move |tab_id: SharedString| {
+            let Some(w) = weak.upgrade() else { return };
+            let terminals = w.get_terminals();
+            let Some(tm) = terminals.as_any().downcast_ref::<VecModel<TerminalState>>() else {
+                return;
+            };
+            clear_sftp_selection(tm, tab_id.as_str());
+        });
+    }
+
     // SFTP multi-select: delete all checked entries (confirmed in the UI) (#100).
     {
         let sftp_handles = sftp_handles.clone();

@@ -662,6 +662,8 @@ export component AppWindow inherits Window {
     callback sftp-toggle-select(string /* tab-id */, int /* row */);   // (#100)
     callback sftp-download-selected(string /* tab-id */);              // (#100)
     callback sftp-delete-selected(string /* tab-id */);               // (#100)
+    callback sftp-copy-selected-paths(string /* tab-id */);           // copy selected paths
+    callback sftp-clear-selected(string /* tab-id */);                // clear selected entries
     callback sftp-view(string /* tab-id */, string /* path */);
     callback sftp-edit(string /* tab-id */, string /* path */);
     callback sftp-open-external(string /* tab-id */, string /* path */);
@@ -1200,6 +1202,8 @@ export component AppWindow inherits Window {
                     sftp-toggle-tree-scope(path) => { root.sftp-toggle-tree-scope(term.id, path); }
                     sftp-toggle-select(i) => { root.sftp-toggle-select(term.id, i); }
                     sftp-download-selected() => { root.sftp-download-selected(term.id); }
+                    sftp-copy-selected-paths() => { root.sftp-copy-selected-paths(term.id); }
+                    sftp-clear-selected() => { root.sftp-clear-selected(term.id); }
                     // Confirm before deleting the checked entries (#100), reusing
                     // the delete-confirm dialog in batch mode.
                     sftp-delete-selected() => {

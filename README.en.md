@@ -84,6 +84,14 @@ When reporting a crash, include both files if possible.
 
 The UI changes are intentionally small: one search field, one privacy button and clearer session rows with elided text, to avoid overlap and clipping.
 
+
+## v0.6.5 File Manager Improvements
+
+- Multiple checked folders can be used as recursive search scopes.
+- The SFTP panel adds Lucky-style quick locations: root, HOME, ETC, VAR, TMP, WWW, OVERLAY.
+- Checked files expose safe batch actions: copy paths, download, clear selection.
+- Recursive search still runs in the background and can be cancelled.
+
 ## Features
 
 ### Done

@@ -117,6 +117,8 @@ export component SftpPanel inherits Rectangle {
     callback toggle-select(int);    // toggle a row's multi-select checkbox (#100)
     callback download-selected();   // download all checked entries (#100)
     callback delete-selected();     // delete all checked entries (#100)
+    callback copy-selected-paths(); // copy all checked remote paths
+    callback clear-selected();      // clear checked file-list entries
     callback view(string);          // open read-only in the built-in viewer
     callback edit(string);          // open writable in the built-in editor
     callback open-external(string);     // open with the OS default app (#81)
@@ -425,36 +427,32 @@ export component SftpPanel inherits Rectangle {
                     }
                 }
 
-                // Batch actions on checked entries — only when something's checked (#100).
-                if root.selected-count > 0 : Text {
-                    text: "✓" + root.selected-count;
-                    color: Theme.accent;
-                    font-size: Theme.fs-sm;
-                    vertical-alignment: center;
-                }
+                // Batch actions on checked entries — shown only when needed.
+                // Safe actions are emphasized; destructive delete stays behind confirmation.
                 if root.selected-count > 0 : Rectangle {
-                    width: 24px; height: 22px;
+                    width: 168px; height: 24px;
                     border-radius: Theme.radius-sm;
-                    background: dls-ta.has-hover ? Theme.bg-hover : transparent;
-                    dls-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("下载已勾选项目") : ""; }
-                        clicked => { root.download-selected(); }
+                    background: Theme.accent.with-alpha(0.12);
+                    HorizontalLayout {
+                        padding-left: 8px; padding-right: 6px; spacing: 6px;
+                        Text { text: "✓ " + root.selected-count + @tr(" 项"); color: Theme.accent; font-size: Theme.fs-xs; vertical-alignment: center; }
+                        Rectangle { width: 1px; background: Theme.border-subtle; }
+                        Rectangle {
+                            width: 48px; height: parent.height;
+                            cp-sel-ta := TouchArea { mouse-cursor: pointer; clicked => { root.copy-selected-paths(); } }
+                            Text { text: @tr("复制"); color: Theme.text-primary; font-size: Theme.fs-xs; vertical-alignment: center; horizontal-alignment: center; }
+                        }
+                        Rectangle {
+                            width: 36px; height: parent.height;
+                            dl-sel-ta := TouchArea { mouse-cursor: pointer; clicked => { root.download-selected(); } }
+                            Text { text: @tr("下载"); color: Theme.text-primary; font-size: Theme.fs-xs; vertical-alignment: center; horizontal-alignment: center; }
+                        }
+                        Rectangle {
+                            width: 36px; height: parent.height;
+                            clr-sel-ta := TouchArea { mouse-cursor: pointer; clicked => { root.clear-selected(); } }
+                            Text { text: @tr("清除"); color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; horizontal-alignment: center; }
+                        }
                     }
-                    Text { text: "\u{E2C4}"; font-family: "Material Icons"; color: Theme.text-secondary;
-                           font-size: Theme.fs-md; horizontal-alignment: center; vertical-alignment: center; }
-                }
-                if root.selected-count > 0 : Rectangle {
-                    width: 24px; height: 22px;
-                    border-radius: Theme.radius-sm;
-                    background: dels-ta.has-hover ? Theme.danger.with-alpha(0.18) : transparent;
-                    dels-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("删除已勾选项目") : ""; }
-                        clicked => { root.delete-selected(); }
-                    }
-                    Text { text: "\u{E872}"; font-family: "Material Icons"; color: Theme.danger;
-                           font-size: Theme.fs-md; horizontal-alignment: center; vertical-alignment: center; }
                 }
 
                 Rectangle {
@@ -485,6 +483,33 @@ export component SftpPanel inherits Rectangle {
                     Text { text: root.collapsed ? "\u{E5CE}" : "\u{E5CF}"; font-family: "Material Icons";
                            color: Theme.text-secondary; font-size: Theme.fs-md;
                            horizontal-alignment: center; vertical-alignment: center; }
+                }
+            }
+        }
+
+        // --- Quick access bar, inspired by Lucky SSH file manager ---------
+        Rectangle {
+            height: 28px;
+            background: Theme.bg-panel-alt;
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                spacing: 6px;
+                SftpMenuItem { width: 58px; label: @tr("根目录"); clicked => { root.navigate("/"); } }
+                SftpMenuItem { width: 54px; label: "HOME"; clicked => { root.navigate("/root"); } }
+                SftpMenuItem { width: 46px; label: "ETC"; clicked => { root.navigate("/etc"); } }
+                SftpMenuItem { width: 46px; label: "VAR"; clicked => { root.navigate("/var"); } }
+                SftpMenuItem { width: 46px; label: "TMP"; clicked => { root.navigate("/tmp"); } }
+                SftpMenuItem { width: 50px; label: "WWW"; clicked => { root.navigate("/www"); } }
+                SftpMenuItem { width: 70px; label: "OVERLAY"; clicked => { root.navigate("/overlay"); } }
+                Rectangle { horizontal-stretch: 1; }
+                Text {
+                    text: root.tree-scope != "" ? @tr("搜索范围: ") + root.tree-scope : @tr("搜索范围: 当前目录");
+                    color: Theme.text-muted;
+                    font-size: Theme.fs-xs;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    width: 360px;
                 }
             }
         }
@@ -1010,7 +1035,8 @@ export component SftpPanel inherits Rectangle {
                     ? "提示: " + root.toolbar-tip
                     : root.status
                         + (root.tree-active-path != "" ? "  ·  已选中: " + root.tree-active-path : "")
-                        + (root.tree-scope != "" ? "  ·  搜索范围: " + root.tree-scope : "");
+                        + (root.tree-scope != "" ? "  ·  搜索范围: " + root.tree-scope : "")
+                        + (root.selected-count > 0 ? "  ·  已勾选: " + root.selected-count + " 项" : "");
                 color: Theme.text-muted;
                 font-size: Theme.fs-xs;
                 vertical-alignment: center;

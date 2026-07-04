@@ -582,7 +582,9 @@ async fn run_sftp(
                 }
                 let cancel = Arc::new(AtomicBool::new(false));
                 search_cancel = Some(cancel.clone());
-                let root = normalise_remote_dir(&root);
+                let roots = split_search_roots(&root);
+                let label = search_roots_label(&roots);
+                let result_path = roots.first().cloned().unwrap_or_else(|| "/".to_string());
                 let query = query.trim().to_string();
                 let sftp = sftp.clone();
                 let events = events.clone();
@@ -590,48 +592,41 @@ async fn run_sftp(
                     let _ = events.send(SessionEvent::SftpStatus(format!(
                         "{}: {}{}",
                         t("搜索中", "Searching"),
-                        root,
+                        label,
                         if query.is_empty() { "".to_string() } else { format!("  ·  {query}") }
                     )));
-                    match search_dir_impl(&sftp, &root, &query, 400, 900, cancel.clone(), &events).await {
-                        Ok(entries) => {
-                            if cancel.load(Ordering::Relaxed) {
-                                let _ = events.send(SessionEvent::SftpStatus(format!(
-                                    "{}: {}",
-                                    t("搜索已停止", "Search stopped"),
-                                    root
-                                )));
-                                return;
-                            }
-                            let count = entries.len();
-                            let _ = events.send(SessionEvent::SftpEntries {
-                                path: root.clone(),
-                                entries,
-                            });
-                            let _ = events.send(SessionEvent::SftpStatus(format!(
-                                "{}: {}  ·  {}",
-                                t("搜索完成", "Search complete"),
-                                root,
-                                count
-                            )));
+                    let mut all = Vec::new();
+                    for root in roots.iter() {
+                        if cancel.load(Ordering::Relaxed) {
+                            break;
                         }
-                        Err(e) => {
-                            if cancel.load(Ordering::Relaxed) {
-                                let _ = events.send(SessionEvent::SftpStatus(format!(
-                                    "{}: {}",
-                                    t("搜索已停止", "Search stopped"),
-                                    root
-                                )));
-                            } else {
-                                let _ = events.send(SessionEvent::SftpError(format!(
-                                    "{} {}: {}",
-                                    t("搜索失败", "Search failed"),
-                                    root,
-                                    e
-                                )));
-                            }
+                        match search_dir_impl(&sftp, root, &query, 400usize.saturating_sub(all.len()), 900, cancel.clone(), &events).await {
+                            Ok(mut entries) => all.append(&mut entries),
+                            Err(_) => continue,
+                        }
+                        if all.len() >= 400 {
+                            break;
                         }
                     }
+                    if cancel.load(Ordering::Relaxed) {
+                        let _ = events.send(SessionEvent::SftpStatus(format!(
+                            "{}: {}",
+                            t("搜索已停止", "Search stopped"),
+                            label
+                        )));
+                        return;
+                    }
+                    let count = all.len();
+                    let _ = events.send(SessionEvent::SftpEntries {
+                        path: result_path.clone(),
+                        entries: all,
+                    });
+                    let _ = events.send(SessionEvent::SftpStatus(format!(
+                        "{}: {}  ·  {}",
+                        t("搜索完成", "Search complete"),
+                        label,
+                        count
+                    )));
                 });
             }
 
@@ -1261,7 +1256,9 @@ async fn run_ssh_file_browser(
                 }
                 let cancel = Arc::new(AtomicBool::new(false));
                 search_cancel = Some(cancel.clone());
-                let root = normalise_remote_dir(&root);
+                let roots = split_search_roots(&root);
+                let label = search_roots_label(&roots);
+                let result_path = roots.first().cloned().unwrap_or_else(|| "/".to_string());
                 let query = query.trim().to_string();
                 let handle = handle.clone();
                 let events = events.clone();
@@ -1269,48 +1266,41 @@ async fn run_ssh_file_browser(
                     let _ = events.send(SessionEvent::SftpStatus(format!(
                         "{}: {}{}",
                         t("搜索中", "Searching"),
-                        root,
+                        label,
                         if query.is_empty() { "".to_string() } else { format!("  ·  {query}") }
                     )));
-                    match shell_search_dir_impl(&handle, &root, &query, 400, 900, cancel.clone(), &events).await {
-                        Ok(entries) => {
-                            if cancel.load(Ordering::Relaxed) {
-                                let _ = events.send(SessionEvent::SftpStatus(format!(
-                                    "{}: {}",
-                                    t("搜索已停止", "Search stopped"),
-                                    root
-                                )));
-                                return;
-                            }
-                            let count = entries.len();
-                            let _ = events.send(SessionEvent::SftpEntries {
-                                path: root.clone(),
-                                entries,
-                            });
-                            let _ = events.send(SessionEvent::SftpStatus(format!(
-                                "{}: {}  ·  {}",
-                                t("搜索完成", "Search complete"),
-                                root,
-                                count
-                            )));
+                    let mut all = Vec::new();
+                    for root in roots.iter() {
+                        if cancel.load(Ordering::Relaxed) {
+                            break;
                         }
-                        Err(e) => {
-                            if cancel.load(Ordering::Relaxed) {
-                                let _ = events.send(SessionEvent::SftpStatus(format!(
-                                    "{}: {}",
-                                    t("搜索已停止", "Search stopped"),
-                                    root
-                                )));
-                            } else {
-                                let _ = events.send(SessionEvent::SftpError(format!(
-                                    "{} {}: {}",
-                                    t("搜索失败", "Search failed"),
-                                    root,
-                                    e
-                                )));
-                            }
+                        match shell_search_dir_impl(&handle, root, &query, 400usize.saturating_sub(all.len()), 900, cancel.clone(), &events).await {
+                            Ok(mut entries) => all.append(&mut entries),
+                            Err(_) => continue,
+                        }
+                        if all.len() >= 400 {
+                            break;
                         }
                     }
+                    if cancel.load(Ordering::Relaxed) {
+                        let _ = events.send(SessionEvent::SftpStatus(format!(
+                            "{}: {}",
+                            t("搜索已停止", "Search stopped"),
+                            label
+                        )));
+                        return;
+                    }
+                    let count = all.len();
+                    let _ = events.send(SessionEvent::SftpEntries {
+                        path: result_path.clone(),
+                        entries: all,
+                    });
+                    let _ = events.send(SessionEvent::SftpStatus(format!(
+                        "{}: {}  ·  {}",
+                        t("搜索完成", "Search complete"),
+                        label,
+                        count
+                    )));
                 });
             }
             SftpCommand::CancelSearch => {
@@ -2001,6 +1991,39 @@ fn normalise_remote_dir(path: &str) -> String {
             out.pop();
         }
         if out.starts_with('/') { out } else { format!("/{out}") }
+    }
+}
+
+fn split_search_roots(root: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for raw in root.split(';') {
+        let p = normalise_remote_dir(raw);
+        if p.is_empty() || p == ".." {
+            continue;
+        }
+        if out.iter().any(|existing| remote_path_same_or_child(&p, existing)) {
+            continue;
+        }
+        out.retain(|existing| !remote_path_same_or_child(existing, &p));
+        out.push(p);
+    }
+    if out.is_empty() {
+        out.push("/".to_string());
+    }
+    out
+}
+
+fn remote_path_same_or_child(path: &str, parent: &str) -> bool {
+    let path = normalise_remote_dir(path);
+    let parent = normalise_remote_dir(parent);
+    parent == "/" || path == parent || path.starts_with(&(parent + "/"))
+}
+
+fn search_roots_label(roots: &[String]) -> String {
+    if roots.len() == 1 {
+        roots[0].clone()
+    } else {
+        format!("{} {}", roots.len(), t("个目录", "folders"))
     }
 }
 

@@ -24,6 +24,14 @@ Probe Shell 基于原开源项目重命名和改造，继续遵循 `MIT OR Apach
   <em>多标签页终端（htop 全屏渲染）+ 底部 SFTP 文件浏览 + 远端资源监控</em>
 </p>
 
+
+## v0.6.5 文件管理增强
+
+- 支持目录树多选作为递归搜索范围。
+- SFTP 文件面板增加快捷访问栏：根目录、HOME、ETC、VAR、TMP、WWW、OVERLAY。
+- 勾选文件后提供复制路径、下载、清除选择等安全批量操作。
+- 搜索仍为后台任务，可停止，不应阻塞目录展开和标签切换。
+
 ## 下载与安装
 
 当前 Probe Shell 预览版的 GitHub Actions 默认只构建 **Windows x86_64**。

@@ -1,6 +1,6 @@
 [package]
 name = "probe-shell"
-version = "0.6.4"
+version = "0.6.5"
 edition = "2021"
 authors = ["Probe Shell contributors"]
 description = "Probe Shell: a lightweight SSH terminal and router-friendly file browser written in Rust + Slint"
