@@ -222,3 +222,8 @@ This build coalesces repeated saved-session clicks and guards failed connection 
 - 左侧会话单击：切换到已打开的 SSH/Telnet 页面；未打开时只打开一个页面。
 - 左侧会话双击：强制新开一个 SSH/Telnet 页面，并自动追加 `#2/#3` 标签名。
 - 文件搜索保留后台异步执行与停止按钮，搜索中仍可展开目录和切换标签。
+
+### 操作日志 / Operation log
+
+Probe Shell 会把 SFTP/SSH 文件面板里的常见操作记录到本地 `log/operations.log`，包括上传、下载、搜索、新建、删除、重命名、权限修改、查看、编辑和保存。日志只记录时间、行为和路径，不记录文件内容、密码或私钥。文件面板工具栏里的“操作日志”图标可以直接打开该日志文件。
+

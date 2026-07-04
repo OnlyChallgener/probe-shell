@@ -675,6 +675,7 @@ export component AppWindow inherits Window {
     in-out property <string> sftp-prompt-value;  // user input
     callback sftp-prompt-submit(string /* tab */, string /* kind */, string /* target */, string /* value */);
     callback sftp-copy-path(string);             // put the path on the clipboard
+    callback open-operation-log();                // open local operations.log
 
     // Visual chmod dialog (#84). Rust decomposes the current mode into nine
     // bools when opening and recomposes on apply (Slint has no bitwise ops).
@@ -1244,6 +1245,7 @@ export component AppWindow inherits Window {
                         root.sftp-prompt-value = "";
                         root.sftp-prompt-open = true;
                     }
+                    sftp-open-operation-log() => { root.open-operation-log(); }
                     paste-from-clipboard() => { root.paste-from-clipboard(term.id); }
                     copy-terminal-text() => { root.copy-terminal-text(term.id); }
                     clear-terminal() => { root.clear-terminal(term.id); }

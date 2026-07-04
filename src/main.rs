@@ -16,6 +16,7 @@ mod errlog;
 mod forward;
 mod i18n;
 mod known_hosts;
+mod operation_log;
 mod panes;
 mod proxy;
 mod serial;

@@ -109,11 +109,13 @@ impl SftpHandle {
         let _ = self.commands.send(SftpCommand::RefreshDir(path));
     }
     pub fn download(&self, remote: String, local_dir: String) {
+        crate::operation_log::record_sftp("下载", &remote);
         let _ = self
             .commands
             .send(SftpCommand::Download { remote, local_dir });
     }
     pub fn download_archive(&self, remote_dir: String, names: Vec<String>, local_dir: String) {
+        crate::operation_log::record("打包下载", &remote_dir, "请求", &format!("{} 项", names.len()));
         let _ = self.commands.send(SftpCommand::DownloadArchive {
             remote_dir,
             names,
@@ -124,6 +126,7 @@ impl SftpHandle {
         let _ = self.commands.send(SftpCommand::CancelTransfer(id));
     }
     pub fn upload(&self, local: String, remote_dir: String) {
+        crate::operation_log::record("上传", &remote_dir, "请求", &local);
         let _ = self
             .commands
             .send(SftpCommand::Upload { local, remote_dir });
@@ -132,33 +135,43 @@ impl SftpHandle {
         let _ = self.commands.send(SftpCommand::ToggleTreeNode(path));
     }
     pub fn search(&self, root: String, query: String) {
+        crate::operation_log::record("搜索", &root, "请求", &query);
         let _ = self.commands.send(SftpCommand::Search { root, query });
     }
     pub fn cancel_search(&self) {
+        crate::operation_log::record("停止搜索", "", "请求", "");
         let _ = self.commands.send(SftpCommand::CancelSearch);
     }
     pub fn delete(&self, path: String) {
+        crate::operation_log::record_sftp("删除", &path);
         let _ = self.commands.send(SftpCommand::Delete(path));
     }
     pub fn open_temp(&self, remote: String, edit: bool) {
+        crate::operation_log::record_sftp(if edit { "外部编辑" } else { "外部查看" }, &remote);
         let _ = self.commands.send(SftpCommand::OpenTemp { remote, edit });
     }
     pub fn rename(&self, from: String, to: String) {
+        crate::operation_log::record("重命名", &from, "请求", &format!("-> {to}"));
         let _ = self.commands.send(SftpCommand::Rename { from, to });
     }
     pub fn chmod(&self, path: String, mode: u32) {
+        crate::operation_log::record("修改权限", &path, "请求", &format!("{:o}", mode & 0o7777));
         let _ = self.commands.send(SftpCommand::Chmod { path, mode });
     }
     pub fn mkdir(&self, path: String) {
+        crate::operation_log::record_sftp("新建文件夹", &path);
         let _ = self.commands.send(SftpCommand::MkDir(path));
     }
     pub fn touch(&self, path: String) {
+        crate::operation_log::record_sftp("新建文件", &path);
         let _ = self.commands.send(SftpCommand::TouchFile(path));
     }
     pub fn read_text(&self, remote: String, edit: bool) {
+        crate::operation_log::record_sftp(if edit { "内置编辑" } else { "查看" }, &remote);
         let _ = self.commands.send(SftpCommand::ReadText { remote, edit });
     }
     pub fn write_text(&self, remote: String, content: String) {
+        crate::operation_log::record_sftp("保存编辑", &remote);
         let _ = self.commands.send(SftpCommand::WriteText { remote, content });
     }
     pub fn close(&self) {

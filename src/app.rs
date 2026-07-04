@@ -5585,6 +5585,11 @@ fn wire_sftp_callbacks(
             clipboard_set_text(path.to_string());
         });
     }
+    {
+        window.on_open_operation_log(move || {
+            crate::operation_log::open_log_file();
+        });
+    }
 
     // Visual chmod dialog (#84): decompose the current mode into nine bools on
     // open, recompose on apply (Slint has no bitwise ops).
