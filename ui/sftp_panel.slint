@@ -12,6 +12,7 @@ export struct SftpEntry {
     size: string,
     modified: string,
     mode: int,        // POSIX permission bits, for the chmod dialog (#84)
+    mode-text: string,
     selected: bool,   // multi-select checkbox state (#100)
 }
 
@@ -59,6 +60,7 @@ export component SftpPanel inherits Rectangle {
     in property <[SftpEntry]>    entries;
     in property <string>  status: @tr("SFTP not connected");
     in property <bool>    loading: false;
+    in property <bool>    search-running: false;
     in property <[SftpTreeNode]> tree-nodes: [];
     in property <bool> collapsed: false;   // when true only the toolbar shows
     in property <string> search-query: ""; // file/folder search text, filtered in Rust
@@ -79,7 +81,8 @@ export component SftpPanel inherits Rectangle {
     // widths: checkbox+padding+spacing 36px, Size col 76px, Modified 120px.
     property <length> list-w: root.show-tree ? root.width - root.tree-width - 6px : root.width;
     property <length> name-min: 180px;     // narrower than this → start dropping columns
-    property <bool> show-size-col: root.show-tree || (root.list-w - 36px - 76px - 120px > root.name-min);
+    property <bool> show-size-col: root.show-tree || (root.list-w - 36px - 76px - 62px - 120px > root.name-min);
+    property <bool> show-mode-col: root.show-tree || (root.list-w - 36px - 62px - 120px > root.name-min);
     property <bool> show-modified-col: root.show-tree || (root.list-w - 36px - 120px > root.name-min);
     property <int> selected-row: -1;       // clicked/highlighted file-list row (#70)
     in property <int> selected-count;      // number of checked entries (#100)
@@ -282,42 +285,39 @@ export component SftpPanel inherits Rectangle {
                     }
                 }
 
-                // Scoped search: if a directory in the tree is checked, search there;
-                // otherwise search the current path. Kept as a compact icon so it
-                // doesn't crowd the path bar (#probe-folder-search).
+                // Search / stop merged into one button: while a recursive search is
+                // active it turns red and cancels; otherwise it starts a scoped search.
                 Rectangle {
-                    width: 24px; height: 22px;
+                    width: root.search-running ? 42px : 24px; height: 22px;
                     border-radius: Theme.radius-sm;
-                    background: fs-ta.has-hover ? Theme.bg-hover : transparent;
-                    fs-ta := TouchArea {
+                    background: search-action-ta.has-hover
+                        ? (root.search-running ? Theme.danger.with-alpha(0.18) : Theme.bg-hover)
+                        : transparent;
+                    search-action-ta := TouchArea {
                         mouse-cursor: pointer;
-                        changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("搜索文件/文件夹（递归）") : ""; }
+                        changed has-hover => {
+                            root.toolbar-tip = self.has-hover
+                                ? (root.search-running ? @tr("停止正在运行的搜索") : @tr("搜索文件/文件夹（递归）"))
+                                : "";
+                        }
                         clicked => {
-                            root.search-folder(
-                                root.tree-scope != "" ? root.tree-scope : root.current-path,
-                                file-search.text
-                            );
+                            if (root.search-running) {
+                                root.cancel-search();
+                            } else {
+                                root.search-folder(
+                                    root.tree-scope != "" ? root.tree-scope : root.current-path,
+                                    file-search.text
+                                );
+                            }
                         }
                     }
-                    Text { text: "\u{F02F}"; font-family: "Material Icons";
-                           color: root.tree-scope != "" ? Theme.accent : Theme.text-secondary;
-                           font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
-                }
-
-                // Stop an active recursive search. Always available: if no search is running
-                // Rust will just report "当前没有正在运行的搜索". Keeping the button visible
-                // avoids the confusing "where do I stop it" state while a remote walk is busy.
-                Rectangle {
-                    width: 34px; height: 22px;
-                    border-radius: Theme.radius-sm;
-                    background: stop-search-ta.has-hover ? Theme.danger.with-alpha(0.18) : transparent;
-                    stop-search-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("停止正在运行的文件搜索") : ""; }
-                        clicked => { root.cancel-search(); }
+                    Text {
+                        text: root.search-running ? @tr("停止") : "\u{F02F}";
+                        font-family: root.search-running ? Theme.ui-font-family : "Material Icons";
+                        color: root.search-running ? Theme.danger : (root.tree-scope != "" ? Theme.accent : Theme.text-secondary);
+                        font-size: root.search-running ? Theme.fs-xs : Theme.fs-sm;
+                        horizontal-alignment: center; vertical-alignment: center;
                     }
-                    Text { text: @tr("停止"); color: Theme.danger; font-size: Theme.fs-xs;
-                           horizontal-alignment: center; vertical-alignment: center; }
                 }
 
                 // Open the local operation log. The log records file operations
@@ -439,17 +439,17 @@ export component SftpPanel inherits Rectangle {
                         Rectangle { width: 1px; background: Theme.border-subtle; }
                         Rectangle {
                             width: 48px; height: parent.height;
-                            cp-sel-ta := TouchArea { mouse-cursor: pointer; clicked => { root.copy-selected-paths(); } }
+                            cp-sel-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("复制已勾选项目的完整路径") : ""; } clicked => { root.copy-selected-paths(); } }
                             Text { text: @tr("复制"); color: Theme.text-primary; font-size: Theme.fs-xs; vertical-alignment: center; horizontal-alignment: center; }
                         }
                         Rectangle {
                             width: 36px; height: parent.height;
-                            dl-sel-ta := TouchArea { mouse-cursor: pointer; clicked => { root.download-selected(); } }
+                            dl-sel-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("下载已勾选文件") : ""; } clicked => { root.download-selected(); } }
                             Text { text: @tr("下载"); color: Theme.text-primary; font-size: Theme.fs-xs; vertical-alignment: center; horizontal-alignment: center; }
                         }
                         Rectangle {
                             width: 36px; height: parent.height;
-                            clr-sel-ta := TouchArea { mouse-cursor: pointer; clicked => { root.clear-selected(); } }
+                            clr-sel-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("清除所有勾选") : ""; } clicked => { root.clear-selected(); } }
                             Text { text: @tr("清除"); color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; horizontal-alignment: center; }
                         }
                     }
@@ -489,27 +489,47 @@ export component SftpPanel inherits Rectangle {
 
         // --- Quick access bar, inspired by Lucky SSH file manager ---------
         Rectangle {
-            height: 28px;
+            height: 26px;
             background: Theme.bg-panel-alt;
             HorizontalLayout {
                 padding-left: 8px;
                 padding-right: 8px;
-                spacing: 6px;
-                SftpMenuItem { width: 58px; label: @tr("根目录"); clicked => { root.navigate("/"); } }
-                SftpMenuItem { width: 54px; label: "HOME"; clicked => { root.navigate("/root"); } }
-                SftpMenuItem { width: 46px; label: "ETC"; clicked => { root.navigate("/etc"); } }
-                SftpMenuItem { width: 46px; label: "VAR"; clicked => { root.navigate("/var"); } }
-                SftpMenuItem { width: 46px; label: "TMP"; clicked => { root.navigate("/tmp"); } }
-                SftpMenuItem { width: 50px; label: "WWW"; clicked => { root.navigate("/www"); } }
-                SftpMenuItem { width: 70px; label: "OVERLAY"; clicked => { root.navigate("/overlay"); } }
+                spacing: 4px;
+                SftpMenuItem { width: 44px; label: @tr("根"); clicked => { root.navigate("/"); } }
+                SftpMenuItem { width: 46px; label: "HOME"; clicked => { root.navigate("/root"); } }
+                SftpMenuItem { width: 38px; label: "ETC"; clicked => { root.navigate("/etc"); } }
+                SftpMenuItem { width: 38px; label: "VAR"; clicked => { root.navigate("/var"); } }
+                SftpMenuItem { width: 38px; label: "TMP"; clicked => { root.navigate("/tmp"); } }
+                SftpMenuItem { width: 42px; label: "WWW"; clicked => { root.navigate("/www"); } }
+                SftpMenuItem { width: 60px; label: "OVER"; clicked => { root.navigate("/overlay"); } }
+                Rectangle {
+                    width: 22px; height: 22px; border-radius: Theme.radius-sm;
+                    background: qa-add-ta.has-hover ? Theme.bg-hover : transparent;
+                    qa-add-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("添加当前目录到快捷访问（当前版本复制路径，后续持久化）") : ""; }
+                        clicked => { root.copy-path(root.current-path); }
+                    }
+                    Text { text: "+"; color: Theme.accent; font-size: Theme.fs-md; horizontal-alignment: center; vertical-alignment: center; }
+                }
+                Rectangle {
+                    width: 22px; height: 22px; border-radius: Theme.radius-sm;
+                    background: qa-manage-ta.has-hover ? Theme.bg-hover : transparent;
+                    qa-manage-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("管理快捷访问预留：当前版本先复制当前目录") : ""; }
+                        clicked => { root.copy-path(root.current-path); }
+                    }
+                    Text { text: "\u{E8B8}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: Theme.fs-xs; horizontal-alignment: center; vertical-alignment: center; }
+                }
                 Rectangle { horizontal-stretch: 1; }
                 Text {
                     text: root.tree-scope != "" ? @tr("搜索范围: ") + root.tree-scope : @tr("搜索范围: 当前目录");
                     color: Theme.text-muted;
-                    font-size: Theme.fs-xs;
+                    font-size: 10px;
                     vertical-alignment: center;
                     overflow: elide;
-                    width: 360px;
+                    width: 320px;
                 }
             }
         }
@@ -590,9 +610,9 @@ export component SftpPanel inherits Rectangle {
                                     // the selection/search scope; it does not open or
                                     // expand the directory.
                                     Rectangle {
-                                        width: 16px;
+                                        width: 13px;
                                         y: (parent.height - self.height) / 2;
-                                        height: 16px;
+                                        height: 13px;
                                         border-radius: 3px;
                                         border-width: 1px;
                                         border-color: node.checked ? Theme.accent : Theme.border-strong;
@@ -607,7 +627,7 @@ export component SftpPanel inherits Rectangle {
                                             text: "\u{E5CA}";
                                             font-family: "Material Icons";
                                             color: #ffffff;
-                                            font-size: 13px;
+                                            font-size: 10px;
                                             horizontal-alignment: center;
                                             vertical-alignment: center;
                                             width: parent.width; height: parent.height;
@@ -650,6 +670,15 @@ export component SftpPanel inherits Rectangle {
                                             mouse-cursor: pointer;
                                             clicked => { root.tree-active-path = node.path; }
                                             double-clicked => { root.navigate(node.path); }
+                                            pointer-event(ev) => {
+                                                if (ev.kind == PointerEventKind.down
+                                                        && ev.button == PointerEventButton.right) {
+                                                    root.tree-menu-target = node.path;
+                                                    root.tree-menu-x = self.absolute-position.x + self.mouse-x - tree-area.absolute-position.x;
+                                                    root.tree-menu-y = self.absolute-position.y + self.mouse-y - tree-area.absolute-position.y;
+                                                    tree-menu.show();
+                                                }
+                                            }
                                         }
                                         Text {
                                             text: node.depth == 0 ? "/" : node.name;
@@ -784,6 +813,8 @@ export component SftpPanel inherits Rectangle {
                                horizontal-stretch: 1; vertical-alignment: center; }
                         if root.show-size-col : Text { text: @tr("Size"); color: Theme.text-muted; font-size: Theme.fs-xs;
                                width: 72px; horizontal-alignment: right; vertical-alignment: center; }
+                        if root.show-mode-col : Text { text: @tr("权限"); color: Theme.text-muted; font-size: Theme.fs-xs;
+                               width: 56px; horizontal-alignment: right; vertical-alignment: center; }
                         if root.show-modified-col : Text { text: @tr("Modified"); color: Theme.text-muted; font-size: Theme.fs-xs;
                                width: 116px; horizontal-alignment: right; vertical-alignment: center; }
                     }
@@ -902,6 +933,11 @@ export component SftpPanel inherits Rectangle {
                                         text: entry.is-dir ? "" : entry.size;
                                         color: Theme.text-secondary; font-size: Theme.fs-xs;
                                         width: 72px; horizontal-alignment: right; vertical-alignment: center;
+                                    }
+                                    if root.show-mode-col : Text {
+                                        text: entry.mode-text;
+                                        color: Theme.text-muted; font-size: Theme.fs-xs;
+                                        width: 56px; horizontal-alignment: right; vertical-alignment: center;
                                     }
                                     if root.show-modified-col : Text {
                                         text: entry.modified;
@@ -1046,4 +1082,30 @@ export component SftpPanel inherits Rectangle {
             }
         }
     }
+
+    // Visible hover tooltip for compact toolbar icons. The status bar still shows
+    // the same hint, but this small bubble is much easier to notice.
+    if root.toolbar-tip != "" : Rectangle {
+        x: min(root.width - self.width - 12px, max(12px, root.width - 320px));
+        y: 34px;
+        width: 300px;
+        height: 28px;
+        border-radius: Theme.radius-sm;
+        background: Theme.bg-panel;
+        border-width: 1px;
+        border-color: Theme.border-strong;
+        drop-shadow-blur: 12px;
+        drop-shadow-color: #00000060;
+        Text {
+            x: 10px;
+            width: parent.width - 20px;
+            height: parent.height;
+            text: root.toolbar-tip;
+            color: Theme.text-primary;
+            font-size: Theme.fs-xs;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+
 }

@@ -104,6 +104,7 @@ export component TerminalView inherits Rectangle {
     in property <[SftpEntry]> sftp-entries;
     in property <string>  sftp-status: "";
     in property <bool>    sftp-loading: false;
+    in property <bool>    sftp-search-running: false;
     in property <string>  sftp-search-query: "";
     in property <[SftpTreeNode]> sftp-tree-nodes: [];
     in property <string> sftp-tree-scope: "";
@@ -1481,6 +1482,7 @@ export component TerminalView inherits Rectangle {
             entries:       root.sftp-entries;
             status:        root.sftp-status;
             loading:       root.sftp-loading;
+            search-running: root.sftp-search-running;
             search-query:  root.sftp-search-query;
             tree-nodes:    root.sftp-tree-nodes;
             tree-scope:    root.sftp-tree-scope;

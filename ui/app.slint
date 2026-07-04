@@ -66,6 +66,7 @@ export struct TerminalState {
     sftp-all-entries: [SftpEntry],   // full listing for local search
     sftp-status: string,
     sftp-loading: bool,
+    sftp-search-running: bool,
     sftp-search: string,
     sftp-tree-nodes: [SftpTreeNode],
     sftp-tree-scope: string,       // recursive folder selection/search scope
@@ -1162,6 +1163,7 @@ export component AppWindow inherits Window {
                     sftp-entries: term.sftp-entries;
                     sftp-status: term.sftp-status;
                     sftp-loading: term.sftp-loading;
+                    sftp-search-running: term.sftp-search-running;
                     sftp-search-query: term.sftp-search;
                     sftp-tree-nodes: term.sftp-tree-nodes;
                     sftp-tree-scope: term.sftp-tree-scope;

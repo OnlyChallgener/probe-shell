@@ -140,6 +140,9 @@ fn normalize_remote_path_for_scope(path: &str) -> String {
 fn split_sftp_scope_list(scope: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for raw in scope.split(';') {
+        if raw.trim().is_empty() {
+            continue;
+        }
         let p = normalize_remote_path_for_scope(raw);
         if p.is_empty() {
             continue;
@@ -176,6 +179,24 @@ fn sftp_scope_status(scope: &str) -> String {
         1 => scopes[0].clone(),
         n => format!("{} 个目录", n),
     }
+}
+
+fn is_sftp_search_running_status(msg: &str) -> bool {
+    let m = msg.trim();
+    m.contains("搜索中")
+        || m.contains("正在搜索")
+        || m.contains("Searching")
+        || m.contains("Scanning")
+}
+
+fn is_sftp_search_finished_status(msg: &str) -> bool {
+    let m = msg.trim();
+    m.contains("搜索完成")
+        || m.contains("搜索已停止")
+        || m.contains("当前没有正在运行")
+        || m.contains("Search complete")
+        || m.contains("Search stopped")
+        || m.contains("No active search")
 }
 
 fn mark_sftp_entries_for_scope(entries: &mut [SftpEntry], scope: &str) -> i32 {
@@ -2693,6 +2714,7 @@ fn wire_session_callbacks(
                     t("此会话类型不支持 SFTP", "SFTP not available for this session").into()
                 },
                 sftp_loading: has_sftp,
+                sftp_search_running: false,
                 sftp_search: "".into(),
                 sftp_tree_nodes: ModelRc::from(
                     std::rc::Rc::new(VecModel::<SftpTreeNode>::default()),
@@ -3930,6 +3952,7 @@ fn apply_session_event_to_window(
                     },
                     modified: format_mtime(e.modified).into(),
                     mode: (e.mode & 0o7777) as i32,
+                    mode_text: format!("{:04o}", e.mode & 0o7777).into(),
                     selected: false,
                 })
                 .collect();
@@ -3947,7 +3970,16 @@ fn apply_session_event_to_window(
             });
         }
         SessionEvent::SftpStatus(msg) => {
-            update_terminal(&|t| t.sftp_status = msg.clone().into());
+            let running = is_sftp_search_running_status(msg.as_str());
+            let finished = is_sftp_search_finished_status(msg.as_str());
+            update_terminal(&|t| {
+                t.sftp_status = msg.clone().into();
+                if running {
+                    t.sftp_search_running = true;
+                } else if finished {
+                    t.sftp_search_running = false;
+                }
+            });
         }
         SessionEvent::SftpError(msg) => {
             // Show the reason and stop the spinner; leave the current listing in
@@ -3955,6 +3987,7 @@ fn apply_session_event_to_window(
             update_terminal(&|t| {
                 t.sftp_status = msg.clone().into();
                 t.sftp_loading = false;
+                t.sftp_search_running = false;
             });
         }
         SessionEvent::SftpFileText {
