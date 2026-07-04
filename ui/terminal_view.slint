@@ -106,6 +106,7 @@ export component TerminalView inherits Rectangle {
     in property <bool>    sftp-loading: false;
     in property <string>  sftp-search-query: "";
     in property <[SftpTreeNode]> sftp-tree-nodes: [];
+    in property <string> sftp-tree-scope: "";
 
     // Per-session now (#v0.5): the AppWindow stores these in each TerminalState
     // and writes back via the set-* callbacks, so each tab/pane keeps its own SFTP
@@ -172,7 +173,9 @@ export component TerminalView inherits Rectangle {
     callback sftp-refresh(string);
     callback sftp-search-changed(string);
     callback sftp-search-folder(string, string);
+    callback sftp-cancel-search();
     callback sftp-tree-expand(string);
+    callback sftp-toggle-tree-scope(string);
     callback sftp-delete(string);
     in property <int> sftp-selected-count;          // checked-entry count (#100)
     callback sftp-toggle-select(int);               // toggle a row's checkbox (#100)
@@ -1477,6 +1480,7 @@ export component TerminalView inherits Rectangle {
             loading:       root.sftp-loading;
             search-query:  root.sftp-search-query;
             tree-nodes:    root.sftp-tree-nodes;
+            tree-scope:    root.sftp-tree-scope;
             selected-count: root.sftp-selected-count;
             toggle-collapsed => {
                 if (root.sftp-collapsed) {
@@ -1495,7 +1499,9 @@ export component TerminalView inherits Rectangle {
             refresh(path)       => { root.sftp-refresh(path); }
             search-changed(q)   => { root.sftp-search-changed(q); }
             search-folder(path, q) => { root.sftp-search-folder(path, q); }
+            cancel-search()    => { root.sftp-cancel-search(); }
             tree-expand(path)   => { root.sftp-tree-expand(path); }
+            toggle-tree-scope(path) => { root.sftp-toggle-tree-scope(path); }
             delete(path)        => { root.sftp-delete(path); }
             toggle-select(i)    => { root.sftp-toggle-select(i); }
             download-selected() => { root.sftp-download-selected(); }

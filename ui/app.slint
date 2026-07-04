@@ -68,6 +68,7 @@ export struct TerminalState {
     sftp-loading: bool,
     sftp-search: string,
     sftp-tree-nodes: [SftpTreeNode],
+    sftp-tree-scope: string,       // recursive folder selection/search scope
     sftp-selected-count: int,   // checked entries in the SFTP panel (#100)
     sftp-collapsed: bool,       // SFTP panel minimised — per session (#v0.5)
     sftp-panel-height: length,  // SFTP panel extent (bottom dock) — per session
@@ -581,6 +582,7 @@ export component AppWindow inherits Window {
     in-out property <string> batch-import-text;       // the textarea content
     callback batch-import-confirm(string /* pasted text */);
     callback connect-session(string /* session-id */);
+    callback open-new-session(string /* session-id */);
     callback edit-session(string /* session-id */);
     callback duplicate-session(string /* session-id */);
     callback move-session(string /* session-id */, string /* group */);
@@ -651,8 +653,11 @@ export component AppWindow inherits Window {
     callback sftp-search(string /* tab-id */, string /* query */);
     // Search recursively from a checked/current folder.
     callback sftp-search-folder(string /* tab-id */, string /* root dir */, string /* query */);
+    // Stop the active recursive file search for this tab.
+    callback sftp-cancel-search(string /* tab-id */);
     // Toggle expand/collapse of a tree node (also navigates to that directory).
     callback sftp-tree-expand(string /* tab-id */, string /* path */);
+    callback sftp-toggle-tree-scope(string /* tab-id */, string /* path */);
     callback sftp-delete(string /* tab-id */, string /* path */);
     callback sftp-toggle-select(string /* tab-id */, int /* row */);   // (#100)
     callback sftp-download-selected(string /* tab-id */);              // (#100)
@@ -831,6 +836,7 @@ export component AppWindow inherits Window {
                 new-session => { root.new-session-clicked(); }
                 import-ssh-config => { root.import-ssh-config(); }
                 connect-session(id) => { root.connect-session(id); }
+                open-new-session(id) => { root.open-new-session(id); }
                 edit-session(id) => { root.edit-session(id); }
                 duplicate-session(id) => { root.duplicate-session(id); }
                 move-session(id, group) => { root.move-session(id, group); }
@@ -1102,6 +1108,7 @@ export component AppWindow inherits Window {
                     new-session => { root.new-session-clicked(); }
                     import-ssh-config => { root.import-ssh-config(); }
                     connect-session(id) => { root.connect-session(id); }
+                    open-new-session(id) => { root.open-new-session(id); }
                     edit-session(id) => { root.edit-session(id); }
                     duplicate-session(id) => { root.duplicate-session(id); }
                     move-session(id, group) => { root.move-session(id, group); }
@@ -1154,6 +1161,7 @@ export component AppWindow inherits Window {
                     sftp-loading: term.sftp-loading;
                     sftp-search-query: term.sftp-search;
                     sftp-tree-nodes: term.sftp-tree-nodes;
+                    sftp-tree-scope: term.sftp-tree-scope;
                     sftp-selected-count: term.sftp-selected-count;
                     quick-commands: root.quick-commands;
                     command-history: root.command-history;
@@ -1186,7 +1194,9 @@ export component AppWindow inherits Window {
                     sftp-refresh(path) => { root.sftp-refresh(term.id, path); }
                     sftp-search-changed(q) => { root.sftp-search(term.id, q); }
                     sftp-search-folder(path, q) => { root.sftp-search-folder(term.id, path, q); }
+                    sftp-cancel-search() => { root.sftp-cancel-search(term.id); }
                     sftp-tree-expand(path) => { root.sftp-tree-expand(term.id, path); }
+                    sftp-toggle-tree-scope(path) => { root.sftp-toggle-tree-scope(term.id, path); }
                     sftp-toggle-select(i) => { root.sftp-toggle-select(term.id, i); }
                     sftp-download-selected() => { root.sftp-download-selected(term.id); }
                     // Confirm before deleting the checked entries (#100), reusing

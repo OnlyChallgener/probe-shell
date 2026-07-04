@@ -21,6 +21,7 @@ export struct SftpTreeNode {
     depth: int,
     expanded: bool,
     has-children: bool,
+    checked: bool,     // true when covered by the recursive tree selection scope
 }
 
 // One row of the file-list right-click context menu.
@@ -61,6 +62,7 @@ export component SftpPanel inherits Rectangle {
     in property <[SftpTreeNode]> tree-nodes: [];
     in property <bool> collapsed: false;   // when true only the toolbar shows
     in property <string> search-query: ""; // file/folder search text, filtered in Rust
+    in property <string> tree-scope: "";   // recursive folder selection / search scope, owned by Rust
     in property <bool> show-tree: true;    // hide the directory tree when narrow (#dock)
     in property <bool> compact: false;     // side-docked + collapsed → render nothing but a clean strip (#dock)
     // User-resizable directory tree width. This is intentionally local to the
@@ -94,7 +96,7 @@ export component SftpPanel inherits Rectangle {
     // Directory-tree selection is separate from the right file-list checkbox.
     // It acts as a search scope: check one folder in the tree, then use the
     // small folder-search button or press Enter in the search box (#probe-folder-search).
-    property <string> tree-selected-path: "";
+    property <string> tree-active-path: ""; // single-clicked tree row; selection only, not navigation
     property <length> tree-menu-x;
     property <length> tree-menu-y;
     property <string> tree-menu-target;
@@ -107,7 +109,9 @@ export component SftpPanel inherits Rectangle {
     callback refresh(string);
     callback search-changed(string); // filter files/folders in current directory
     callback search-folder(string /* root dir */, string /* query */); // recursive search from a selected/current folder
-    callback tree-expand(string);   // toggle expand/collapse + navigate
+    callback cancel-search();       // stop the currently running recursive search
+    callback tree-expand(string);   // toggle expand/collapse only; never navigates
+    callback toggle-tree-scope(string); // recursive checkbox selection/search scope
     callback delete(string);        // remove a remote file/dir
     callback toggle-select(int);    // toggle a row's multi-select checkbox (#100)
     callback download-selected();   // download all checked entries (#100)
@@ -247,7 +251,7 @@ export component SftpPanel inherits Rectangle {
                         // Enter performs a scoped search: checked tree folder first, otherwise current path.
                         accepted => {
                             root.search-folder(
-                                root.tree-selected-path != "" ? root.tree-selected-path : root.current-path,
+                                root.tree-scope != "" ? root.tree-scope : root.current-path,
                                 self.text
                             );
                         }
@@ -267,7 +271,7 @@ export component SftpPanel inherits Rectangle {
                         x: 24px;
                         width: parent.width - 30px;
                         height: parent.height;
-                        text: root.tree-selected-path != "" ? @tr("Search checked folder") : @tr("Search files");
+                        text: root.tree-scope != "" ? @tr("搜索勾选目录") : @tr("搜索当前目录");
                         color: Theme.text-muted;
                         font-size: Theme.fs-xs;
                         vertical-alignment: center;
@@ -285,14 +289,29 @@ export component SftpPanel inherits Rectangle {
                         mouse-cursor: pointer;
                         clicked => {
                             root.search-folder(
-                                root.tree-selected-path != "" ? root.tree-selected-path : root.current-path,
+                                root.tree-scope != "" ? root.tree-scope : root.current-path,
                                 file-search.text
                             );
                         }
                     }
                     Text { text: "\u{F02F}"; font-family: "Material Icons";
-                           color: root.tree-selected-path != "" ? Theme.accent : Theme.text-secondary;
+                           color: root.tree-scope != "" ? Theme.accent : Theme.text-secondary;
                            font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                }
+
+                // Stop an active recursive search. Always available: if no search is running
+                // Rust will just report "当前没有正在运行的搜索". Keeping the button visible
+                // avoids the confusing "where do I stop it" state while a remote walk is busy.
+                Rectangle {
+                    width: 34px; height: 22px;
+                    border-radius: Theme.radius-sm;
+                    background: stop-search-ta.has-hover ? Theme.danger.with-alpha(0.18) : transparent;
+                    stop-search-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.cancel-search(); }
+                    }
+                    Text { text: @tr("停止"); color: Theme.danger; font-size: Theme.fs-xs;
+                           horizontal-alignment: center; vertical-alignment: center; }
                 }
 
                 // Copy the current path to the clipboard.
@@ -481,7 +500,7 @@ export component SftpPanel inherits Rectangle {
                                     ? Theme.bg-hover
                                     : (node.path == root.current-path
                                         ? #4a90e230
-                                        : (node.path == root.tree-selected-path
+                                        : (node.path == root.tree-active-path
                                             ? #4a90e218
                                             : (mod(i, 2) == 0 ? transparent : #ffffff08)));
 
@@ -489,7 +508,7 @@ export component SftpPanel inherits Rectangle {
                                     width: parent.width;
                                     height: parent.height;
                                     mouse-cursor: pointer;
-                                    clicked => { root.tree-expand(node.path); }
+                                    clicked => { /* Row body is handled by its own hit area; keep the row TouchArea for right-click only. */ }
                                     pointer-event(ev) => {
                                         if (ev.kind == PointerEventKind.down
                                                 && ev.button == PointerEventButton.right) {
@@ -508,26 +527,24 @@ export component SftpPanel inherits Rectangle {
                                     // Depth indent spacer
                                     Rectangle { width: node.depth * 12px; }
 
-                                    // Search-scope checkbox. It is intentionally
-                                    // single-select: one checked folder means
-                                    // "search from here". Clicking again clears it.
+                                    // Recursive folder selection. This only changes
+                                    // the selection/search scope; it does not open or
+                                    // expand the directory.
                                     Rectangle {
                                         width: 16px;
                                         y: (parent.height - self.height) / 2;
                                         height: 16px;
                                         border-radius: 3px;
                                         border-width: 1px;
-                                        border-color: node.path == root.tree-selected-path ? Theme.accent : Theme.border-strong;
-                                        background: node.path == root.tree-selected-path ? Theme.accent : transparent;
+                                        border-color: node.checked ? Theme.accent : Theme.border-strong;
+                                        background: node.checked ? Theme.accent : transparent;
                                         tree-cb-ta := TouchArea {
                                             width: parent.width;
                                             height: parent.height;
                                             mouse-cursor: pointer;
-                                            clicked => {
-                                                root.tree-selected-path = root.tree-selected-path == node.path ? "" : node.path;
-                                            }
+                                            clicked => { root.toggle-tree-scope(node.path); }
                                         }
-                                        if node.path == root.tree-selected-path : Text {
+                                        if node.checked : Text {
                                             text: "\u{E5CA}";
                                             font-family: "Material Icons";
                                             color: #ffffff;
@@ -538,28 +555,54 @@ export component SftpPanel inherits Rectangle {
                                         }
                                     }
 
-                                    // Expand/collapse arrow
-                                    Text {
-                                        width: 14px;
-                                        text: node.has-children
-                                            ? (node.expanded ? "▼" : "▶")
-                                            : " ";
-                                        color: Theme.text-muted;
-                                        font-size: 9px;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
+                                    // Expand/collapse arrow. Single click here only
+                                    // expands/collapses the tree; it never changes the
+                                    // current address or file list.
+                                    Rectangle {
+                                        width: 16px;
+                                        height: parent.height;
+                                        arrow-ta := TouchArea {
+                                            width: parent.width;
+                                            height: parent.height;
+                                            mouse-cursor: node.has-children ? pointer : default;
+                                            clicked => { if (node.has-children) { root.tree-expand(node.path); } }
+                                        }
+                                        Text {
+                                            width: parent.width;
+                                            height: parent.height;
+                                            text: node.has-children
+                                                ? (node.expanded ? "▼" : "▶")
+                                                : " ";
+                                            color: arrow-ta.has-hover ? Theme.accent : Theme.text-muted;
+                                            font-size: 9px;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
                                     }
 
-                                    // Folder name
-                                    Text {
-                                        text: node.depth == 0 ? "/" : node.name;
-                                        color: node.path == root.current-path
-                                            ? Theme.accent
-                                            : Theme.text-primary;
-                                        font-size: Theme.fs-sm;
+                                    // Folder name. Single click selects this directory
+                                    // only; double click opens it and updates the path bar.
+                                    Rectangle {
                                         horizontal-stretch: 1;
-                                        overflow: elide;
-                                        vertical-alignment: center;
+                                        height: parent.height;
+                                        name-ta := TouchArea {
+                                            width: parent.width;
+                                            height: parent.height;
+                                            mouse-cursor: pointer;
+                                            clicked => { root.tree-active-path = node.path; }
+                                            double-clicked => { root.navigate(node.path); }
+                                        }
+                                        Text {
+                                            text: node.depth == 0 ? "/" : node.name;
+                                            color: node.path == root.current-path
+                                                ? Theme.accent
+                                                : Theme.text-primary;
+                                            font-size: Theme.fs-sm;
+                                            width: parent.width;
+                                            height: parent.height;
+                                            overflow: elide;
+                                            vertical-alignment: center;
+                                        }
                                     }
                                 }
                             }
@@ -929,7 +972,9 @@ export component SftpPanel inherits Rectangle {
             background: Theme.bg-panel-alt;
             Text {
                 x: 8px;
-                text: root.status;
+                text: root.status
+                    + (root.tree-active-path != "" ? "  ·  已选中: " + root.tree-active-path : "")
+                    + (root.tree-scope != "" ? "  ·  搜索范围: " + root.tree-scope : "");
                 color: Theme.text-muted;
                 font-size: Theme.fs-xs;
                 vertical-alignment: center;

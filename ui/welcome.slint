@@ -24,6 +24,7 @@ export struct SessionInfo {
 component SessionRow inherits Rectangle {
     in property <SessionInfo> session;
     callback connect();
+    callback open-new();
     callback edit();
     callback duplicate();
     callback move-to-group(string);
@@ -41,25 +42,34 @@ component SessionRow inherits Rectangle {
     property <length> ctx-x;
     property <length> ctx-y;
 
-    // Guard against double-click/repeat-click reentrancy. A session row click
-    // starts tab/model mutations and can also fail asynchronously; firing the
-    // same connect callback twice in the same UI tick used to create races and
-    // crash on failed records. Keep the row responsive, but coalesce repeated
-    // clicks into one connect/navigation request.
-    property <bool> connect-lock: false;
+    // Single click and double click are intentionally separated.
+    // Single click is delayed briefly and switches to the existing tab.
+    // A second click during that window cancels the single-click action and
+    // opens a fresh SSH/Telnet tab. This prevents the old race where a double
+    // click executed both "switch" and "connect" paths and could crash on
+    // failed sessions.
+    property <bool> click-pending: false;
 
-    connect-lock-timer := Timer {
-        interval: 900ms;
-        running: root.connect-lock;
-        triggered => { root.connect-lock = false; self.running = false; }
+    single-click-timer := Timer {
+        interval: 240ms;
+        running: root.click-pending;
+        triggered => {
+            if (root.click-pending) {
+                root.click-pending = false;
+                root.connect();
+            }
+            self.running = false;
+        }
     }
 
     touch := TouchArea {
         mouse-cursor: pointer;
         clicked => {
-            if (!root.connect-lock) {
-                root.connect-lock = true;
-                root.connect();
+            if (root.click-pending) {
+                root.click-pending = false;
+                root.open-new();
+            } else {
+                root.click-pending = true;
             }
         }
         pointer-event(e) => {
@@ -254,6 +264,7 @@ export component Welcome inherits Rectangle {
     callback new-session();
     callback import-ssh-config();
     callback connect-session(string);
+    callback open-new-session(string);
     callback edit-session(string);
     callback duplicate-session(string);
     callback move-session(string /* id */, string /* group */);
@@ -540,6 +551,7 @@ export component Welcome inherits Rectangle {
                             session: session;
                             all-sessions: root.sessions;
                             connect => { root.connect-session(session.id); }
+                            open-new => { root.open-new-session(session.id); }
                             edit => { root.edit-session(session.id); }
                             duplicate => { root.duplicate-session(session.id); }
                             move-to-group(g) => { root.move-session(session.id, g); }

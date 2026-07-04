@@ -207,3 +207,18 @@ This build coalesces repeated saved-session clicks and guards failed connection 
 - When a tree folder is checked, pressing Enter in the SFTP search box or clicking the search icon searches from that folder.
 - The existing current-directory local filter is preserved and does not add extra server requests while typing.
 
+
+
+### v0.6.4 Probe Shell 搜索交互说明
+
+- 文件搜索现在在后台运行，搜索期间可以继续切换会话、展开目录、刷新当前目录。
+- 工具栏提供“停止”按钮，用于取消当前递归搜索。
+- 底部状态栏会显示当前搜索范围和正在扫描的目录。
+- 勾选目录树中的文件夹只表示搜索范围；不勾选时默认搜索当前路径。
+
+
+### v0.6.4-probe2 交互修复
+
+- 左侧会话单击：切换到已打开的 SSH/Telnet 页面；未打开时只打开一个页面。
+- 左侧会话双击：强制新开一个 SSH/Telnet 页面，并自动追加 `#2/#3` 标签名。
+- 文件搜索保留后台异步执行与停止按钮，搜索中仍可展开目录和切换标签。

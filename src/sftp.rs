@@ -55,6 +55,9 @@ pub enum SftpCommand {
     /// bounded so a router flash filesystem or slow WAN session cannot freeze
     /// the UI by walking the whole system forever.
     Search { root: String, query: String },
+    /// Cancel the currently running bounded recursive search. Search runs on a
+    /// separate task so directory navigation/refresh can continue while it is active.
+    CancelSearch,
     /// Download a remote file to a local directory.
     Download { remote: String, local_dir: String },
     /// Multi-select download (#100): tar the named entries under `remote_dir`
@@ -130,6 +133,9 @@ impl SftpHandle {
     }
     pub fn search(&self, root: String, query: String) {
         let _ = self.commands.send(SftpCommand::Search { root, query });
+    }
+    pub fn cancel_search(&self) {
+        let _ = self.commands.send(SftpCommand::CancelSearch);
     }
     pub fn delete(&self, path: String) {
         let _ = self.commands.send(SftpCommand::Delete(path));
@@ -489,6 +495,9 @@ async fn run_sftp(
     }
 
     // --- Command loop -------------------------------------------------------
+    // Keep long recursive searches off the command loop. Otherwise a router search
+    // makes navigation/refresh feel frozen until the walk finishes.
+    let mut search_cancel: Option<Arc<AtomicBool>> = None;
     while let Some(cmd) = commands.recv().await {
         match cmd {
             SftpCommand::Close => break,
@@ -555,36 +564,70 @@ async fn run_sftp(
             }
 
             SftpCommand::Search { root, query } => {
+                if let Some(cancel) = search_cancel.take() {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+                let cancel = Arc::new(AtomicBool::new(false));
+                search_cancel = Some(cancel.clone());
                 let root = normalise_remote_dir(&root);
                 let query = query.trim().to_string();
-                let _ = events.send(SessionEvent::SftpStatus(format!(
-                    "{} {}{}",
-                    t("搜索", "Searching"),
-                    root,
-                    if query.is_empty() { "".to_string() } else { format!("  ·  {query}") }
-                )));
-                match search_dir_impl(&sftp, &root, &query, 400, 900).await {
-                    Ok(entries) => {
-                        let count = entries.len();
-                        let _ = events.send(SessionEvent::SftpEntries {
-                            path: root.clone(),
-                            entries,
-                        });
-                        let _ = events.send(SessionEvent::SftpStatus(format!(
-                            "{}: {}  ·  {}",
-                            t("搜索完成", "Search complete"),
-                            root,
-                            count
-                        )));
+                let sftp = sftp.clone();
+                let events = events.clone();
+                tokio::spawn(async move {
+                    let _ = events.send(SessionEvent::SftpStatus(format!(
+                        "{}: {}{}",
+                        t("搜索中", "Searching"),
+                        root,
+                        if query.is_empty() { "".to_string() } else { format!("  ·  {query}") }
+                    )));
+                    match search_dir_impl(&sftp, &root, &query, 400, 900, cancel.clone(), &events).await {
+                        Ok(entries) => {
+                            if cancel.load(Ordering::Relaxed) {
+                                let _ = events.send(SessionEvent::SftpStatus(format!(
+                                    "{}: {}",
+                                    t("搜索已停止", "Search stopped"),
+                                    root
+                                )));
+                                return;
+                            }
+                            let count = entries.len();
+                            let _ = events.send(SessionEvent::SftpEntries {
+                                path: root.clone(),
+                                entries,
+                            });
+                            let _ = events.send(SessionEvent::SftpStatus(format!(
+                                "{}: {}  ·  {}",
+                                t("搜索完成", "Search complete"),
+                                root,
+                                count
+                            )));
+                        }
+                        Err(e) => {
+                            if cancel.load(Ordering::Relaxed) {
+                                let _ = events.send(SessionEvent::SftpStatus(format!(
+                                    "{}: {}",
+                                    t("搜索已停止", "Search stopped"),
+                                    root
+                                )));
+                            } else {
+                                let _ = events.send(SessionEvent::SftpError(format!(
+                                    "{} {}: {}",
+                                    t("搜索失败", "Search failed"),
+                                    root,
+                                    e
+                                )));
+                            }
+                        }
                     }
-                    Err(e) => {
-                        let _ = events.send(SessionEvent::SftpError(format!(
-                            "{} {}: {}",
-                            t("搜索失败", "Search failed"),
-                            root,
-                            e
-                        )));
-                    }
+                });
+            }
+
+            SftpCommand::CancelSearch => {
+                if let Some(cancel) = search_cancel.take() {
+                    cancel.store(true, Ordering::Relaxed);
+                    let _ = events.send(SessionEvent::SftpStatus(t("正在停止搜索...", "Stopping search...").into()));
+                } else {
+                    let _ = events.send(SessionEvent::SftpStatus(t("当前没有正在运行的搜索", "No active search").into()));
                 }
             }
 
@@ -1177,6 +1220,9 @@ async fn run_ssh_file_browser(
     tree_expanded.insert("/".to_string());
     emit_tree(&tree_dirs, &tree_expanded, &events);
 
+    // Same rule as real SFTP mode: recursive search must never block the file
+    // browser command loop. This keeps folder expansion and refresh responsive.
+    let mut search_cancel: Option<Arc<AtomicBool>> = None;
     while let Some(cmd) = commands.recv().await {
         match cmd {
             SftpCommand::Close => break,
@@ -1197,36 +1243,69 @@ async fn run_ssh_file_browser(
                 emit_tree(&tree_dirs, &tree_expanded, &events);
             }
             SftpCommand::Search { root, query } => {
+                if let Some(cancel) = search_cancel.take() {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+                let cancel = Arc::new(AtomicBool::new(false));
+                search_cancel = Some(cancel.clone());
                 let root = normalise_remote_dir(&root);
                 let query = query.trim().to_string();
-                let _ = events.send(SessionEvent::SftpStatus(format!(
-                    "{} {}{}",
-                    t("搜索", "Searching"),
-                    root,
-                    if query.is_empty() { "".to_string() } else { format!("  ·  {query}") }
-                )));
-                match shell_search_dir_impl(&handle, &root, &query, 400, 900).await {
-                    Ok(entries) => {
-                        let count = entries.len();
-                        let _ = events.send(SessionEvent::SftpEntries {
-                            path: root.clone(),
-                            entries,
-                        });
-                        let _ = events.send(SessionEvent::SftpStatus(format!(
-                            "{}: {}  ·  {}",
-                            t("搜索完成", "Search complete"),
-                            root,
-                            count
-                        )));
+                let handle = handle.clone();
+                let events = events.clone();
+                tokio::spawn(async move {
+                    let _ = events.send(SessionEvent::SftpStatus(format!(
+                        "{}: {}{}",
+                        t("搜索中", "Searching"),
+                        root,
+                        if query.is_empty() { "".to_string() } else { format!("  ·  {query}") }
+                    )));
+                    match shell_search_dir_impl(&handle, &root, &query, 400, 900, cancel.clone(), &events).await {
+                        Ok(entries) => {
+                            if cancel.load(Ordering::Relaxed) {
+                                let _ = events.send(SessionEvent::SftpStatus(format!(
+                                    "{}: {}",
+                                    t("搜索已停止", "Search stopped"),
+                                    root
+                                )));
+                                return;
+                            }
+                            let count = entries.len();
+                            let _ = events.send(SessionEvent::SftpEntries {
+                                path: root.clone(),
+                                entries,
+                            });
+                            let _ = events.send(SessionEvent::SftpStatus(format!(
+                                "{}: {}  ·  {}",
+                                t("搜索完成", "Search complete"),
+                                root,
+                                count
+                            )));
+                        }
+                        Err(e) => {
+                            if cancel.load(Ordering::Relaxed) {
+                                let _ = events.send(SessionEvent::SftpStatus(format!(
+                                    "{}: {}",
+                                    t("搜索已停止", "Search stopped"),
+                                    root
+                                )));
+                            } else {
+                                let _ = events.send(SessionEvent::SftpError(format!(
+                                    "{} {}: {}",
+                                    t("搜索失败", "Search failed"),
+                                    root,
+                                    e
+                                )));
+                            }
+                        }
                     }
-                    Err(e) => {
-                        let _ = events.send(SessionEvent::SftpError(format!(
-                            "{} {}: {}",
-                            t("搜索失败", "Search failed"),
-                            root,
-                            e
-                        )));
-                    }
+                });
+            }
+            SftpCommand::CancelSearch => {
+                if let Some(cancel) = search_cancel.take() {
+                    cancel.store(true, Ordering::Relaxed);
+                    let _ = events.send(SessionEvent::SftpStatus(t("正在停止搜索...", "Stopping search...").into()));
+                } else {
+                    let _ = events.send(SessionEvent::SftpStatus(t("当前没有正在运行的搜索", "No active search").into()));
                 }
             }
             SftpCommand::MkDir(path) => {
@@ -1498,17 +1577,33 @@ async fn shell_search_dir_impl(
     query: &str,
     max_results: usize,
     max_dirs: usize,
+    cancel: Arc<AtomicBool>,
+    events: &UnboundedSender<SessionEvent>,
 ) -> Result<Vec<RemoteEntry>> {
     let q = query.trim().to_lowercase();
     let base = normalise_remote_dir(root);
     let mut stack = vec![base.clone()];
     let mut visited_dirs = 0usize;
     let mut out = Vec::new();
+    let mut last_status = Instant::now();
 
     while let Some(dir) = stack.pop() {
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
         visited_dirs += 1;
         if visited_dirs > max_dirs || out.len() >= max_results {
             break;
+        }
+        if visited_dirs == 1 || last_status.elapsed() >= Duration::from_millis(350) {
+            let _ = events.send(SessionEvent::SftpStatus(format!(
+                "{}: {}  ·  {} {}",
+                t("搜索中", "Searching"),
+                dir,
+                t("已扫描目录", "dirs"),
+                visited_dirs
+            )));
+            last_status = Instant::now();
         }
 
         let entries = match shell_list_dir(handle, &dir).await {
@@ -1902,17 +1997,33 @@ async fn search_dir_impl(
     query: &str,
     max_results: usize,
     max_dirs: usize,
+    cancel: Arc<AtomicBool>,
+    events: &UnboundedSender<SessionEvent>,
 ) -> Result<Vec<RemoteEntry>> {
     let q = query.trim().to_lowercase();
     let base = normalise_remote_dir(root);
     let mut stack = vec![base.clone()];
     let mut visited_dirs = 0usize;
     let mut out = Vec::new();
+    let mut last_status = Instant::now();
 
     while let Some(dir) = stack.pop() {
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
         visited_dirs += 1;
         if visited_dirs > max_dirs || out.len() >= max_results {
             break;
+        }
+        if visited_dirs == 1 || last_status.elapsed() >= Duration::from_millis(350) {
+            let _ = events.send(SessionEvent::SftpStatus(format!(
+                "{}: {}  ·  {} {}",
+                t("搜索中", "Searching"),
+                dir,
+                t("已扫描目录", "dirs"),
+                visited_dirs
+            )));
+            last_status = Instant::now();
         }
 
         let entries = match list_dir_impl(sftp, &dir).await {

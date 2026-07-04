@@ -122,6 +122,50 @@ fn filter_sftp_entries(entries: &[SftpEntry], query: &str) -> Vec<SftpEntry> {
         .collect()
 }
 
+fn normalize_remote_path_for_scope(path: &str) -> String {
+    let p = path.trim();
+    if p.is_empty() || p == "." {
+        return "/".to_string();
+    }
+    let mut out = p.replace('\\', "/");
+    while out.len() > 1 && out.ends_with('/') {
+        out.pop();
+    }
+    if !out.starts_with('/') {
+        out.insert(0, '/');
+    }
+    out
+}
+
+fn remote_path_in_scope(path: &str, scope: &str) -> bool {
+    if scope.trim().is_empty() {
+        return false;
+    }
+    let scope = normalize_remote_path_for_scope(scope);
+    if scope == "/" {
+        return true;
+    }
+    let path = normalize_remote_path_for_scope(path);
+    path == scope || path.starts_with(&(scope + "/"))
+}
+
+fn mark_sftp_entries_for_scope(entries: &mut [SftpEntry], scope: &str) -> i32 {
+    if scope.trim().is_empty() {
+        for e in entries.iter_mut() {
+            e.selected = false;
+        }
+        return 0;
+    }
+    let mut count = 0;
+    for e in entries.iter_mut() {
+        e.selected = remote_path_in_scope(e.full_path.as_str(), scope);
+        if e.selected {
+            count += 1;
+        }
+    }
+    count
+}
+
 fn current_sftp_search(terminals: &VecModel<TerminalState>, tab_id: &str) -> String {
     for i in 0..terminals.row_count() {
         if let Some(row) = terminals.row_data(i) {
@@ -2448,34 +2492,13 @@ fn wire_session_callbacks(
         let local_net_hist = local_net_hist.clone();
         let sftp_follow_cd = sftp_follow_cd.clone();
         let connect_debounce = connect_debounce.clone();
-        window.on_connect_session(move |id: SharedString| {
-            let id = id.to_string();
-
-            // Debounce by saved-session id. This is deliberately Rust-side in
-            // addition to the Slint row guard, because the callback can be
-            // invoked from multiple places (left list, duplicate/reconnect flows,
-            // future command palette) and failed-record clicks used to crash when
-            // two connect attempts overlapped.
-            {
-                let now = std::time::Instant::now();
-                let mut debounce = connect_debounce.borrow_mut();
-                debounce.retain(|_, last| now.duration_since(*last) < std::time::Duration::from_secs(3));
-                if debounce
-                    .get(&id)
-                    .map(|last| now.duration_since(*last) < std::time::Duration::from_millis(900))
-                    .unwrap_or(false)
-                {
-                    tracing::debug!(session_id = %id, "connect request ignored by debounce");
-                    return;
-                }
-                debounce.insert(id.clone(), now);
-            }
-
+        let open_saved_session = Rc::new(move |id: String, force_new: bool| {
             let session = match store.borrow().get(&id).cloned() {
                 Some(s) => s,
                 None => return,
             };
 
+            if !force_new {
             // If this saved session is already open, switch to its existing tab
             // instead of spawning duplicate pages forever. This makes the left
             // quick-connect list behave like a navigator: click once to open,
@@ -2532,9 +2555,45 @@ fn wire_session_callbacks(
                 }
                 return;
             }
+            }
+
+            // Debounce only real tab creation, not normal navigation to an existing
+            // tab. This keeps single-click switching responsive while still
+            // preventing double-click/key-repeat races from spawning duplicate
+            // failing connection workers.
+            {
+                let now = std::time::Instant::now();
+                let debounce_key = if force_new {
+                    format!("new:{}", id)
+                } else {
+                    format!("open:{}", id)
+                };
+                let mut debounce = connect_debounce.borrow_mut();
+                debounce.retain(|_, last| now.duration_since(*last) < std::time::Duration::from_secs(3));
+                if debounce
+                    .get(&debounce_key)
+                    .map(|last| now.duration_since(*last) < std::time::Duration::from_millis(650))
+                    .unwrap_or(false)
+                {
+                    tracing::debug!(session_id = %id, force_new = force_new, "connect request ignored by tab-create debounce");
+                    return;
+                }
+                debounce.insert(debounce_key, now);
+            }
 
             let tab_id = format!("term-{}", uuid::Uuid::new_v4());
-            let tab_title = session.name.clone();
+            let same_session_tabs = {
+                let statuses = tab_statuses.lock().unwrap();
+                statuses
+                    .values()
+                    .filter(|st| st.session_id == id)
+                    .count()
+            };
+            let tab_title = if same_session_tabs == 0 {
+                session.name.clone()
+            } else {
+                format!("{} #{}", session.name, same_session_tabs + 1)
+            };
 
             // Connection label shown in the sidebar / status line, per transport.
             let conn_label = match session.kind {
@@ -2609,6 +2668,7 @@ fn wire_session_callbacks(
                 sftp_tree_nodes: ModelRc::from(
                     std::rc::Rc::new(VecModel::<SftpTreeNode>::default()),
                 ),
+                sftp_tree_scope: "".into(),
                 sftp_selected_count: 0,
                 sftp_collapsed: sftp_collapsed_default,
                 sftp_panel_height: sftp_h_default,
@@ -2667,6 +2727,16 @@ fn wire_session_callbacks(
                 sftp_follow_cd: sftp_follow_cd.clone(),
             };
             start_session_in_tab(&tab_id, session, &ctx);
+        });
+
+        let open_saved_session_click = open_saved_session.clone();
+        window.on_connect_session(move |id: SharedString| {
+            open_saved_session_click(id.to_string(), false);
+        });
+
+        let open_saved_session_new = open_saved_session.clone();
+        window.on_open_new_session(move |id: SharedString| {
+            open_saved_session_new(id.to_string(), true);
         });
     }
 
@@ -3801,7 +3871,7 @@ fn apply_session_event_to_window(
             });
         }
         SessionEvent::SftpEntries { path, entries } => {
-            let slint_entries: Vec<SftpEntry> = entries
+            let base_entries: Vec<SftpEntry> = entries
                 .iter()
                 .map(|e| SftpEntry {
                     name: e.name.clone().into(),
@@ -3818,14 +3888,16 @@ fn apply_session_event_to_window(
                 })
                 .collect();
             let q = current_sftp_search(terminals, tab_id);
-            let all_model = sftp_entries_model(slint_entries.clone());
-            let model = sftp_entries_model(filter_sftp_entries(&slint_entries, &q));
             update_terminal(&|t| {
+                let mut slint_entries = base_entries.clone();
+                let selected_count = mark_sftp_entries_for_scope(&mut slint_entries, t.sftp_tree_scope.as_str());
+                let all_model = sftp_entries_model(slint_entries.clone());
+                let model = sftp_entries_model(filter_sftp_entries(&slint_entries, &q));
                 t.sftp_path = path.clone().into();
-                t.sftp_all_entries = all_model.clone();
-                t.sftp_entries = model.clone();
+                t.sftp_all_entries = all_model;
+                t.sftp_entries = model;
                 t.sftp_loading = false;
-                t.sftp_selected_count = 0;
+                t.sftp_selected_count = selected_count;
             });
         }
         SessionEvent::SftpStatus(msg) => {
@@ -3877,18 +3949,21 @@ fn apply_session_event_to_window(
             }
         }
         SessionEvent::SftpTreeUpdate(nodes) => {
-            let slint_nodes: Vec<SftpTreeNode> = nodes
-                .iter()
-                .map(|n| SftpTreeNode {
-                    path: n.path.clone().into(),
-                    name: n.name.clone().into(),
-                    depth: n.depth as i32,
-                    expanded: n.expanded,
-                    has_children: n.has_children,
-                })
-                .collect();
-            let model = ModelRc::from(std::rc::Rc::new(VecModel::from(slint_nodes)));
-            update_terminal(&|t| t.sftp_tree_nodes = model.clone());
+            update_terminal(&|t| {
+                let scope = t.sftp_tree_scope.to_string();
+                let slint_nodes: Vec<SftpTreeNode> = nodes
+                    .iter()
+                    .map(|n| SftpTreeNode {
+                        path: n.path.clone().into(),
+                        name: n.name.clone().into(),
+                        depth: n.depth as i32,
+                        expanded: n.expanded,
+                        has_children: n.has_children,
+                        checked: remote_path_in_scope(&n.path, &scope),
+                    })
+                    .collect();
+                t.sftp_tree_nodes = ModelRc::from(std::rc::Rc::new(VecModel::from(slint_nodes)));
+            });
         }
         SessionEvent::SftpTransfer {
             id,
@@ -5208,21 +5283,73 @@ fn wire_sftp_callbacks(
         });
     }
 
-    // Toggle tree node expand/collapse and navigate to that directory.
+    // Stop a recursive file search without closing the SSH/SFTP worker.
     {
         let sftp_handles = sftp_handles.clone();
-        let sftp_last_cwd = sftp_last_cwd.clone();
+        window.on_sftp_cancel_search(move |tab_id: SharedString| {
+            let tab_id = tab_id.to_string();
+            if let Ok(handles) = sftp_handles.lock() {
+                if let Some(h) = handles.get(&tab_id) {
+                    h.cancel_search();
+                }
+            }
+        });
+    }
+
+    // Toggle a directory tree node expand/collapse only. Opening a directory is
+    // handled by double-clicking the folder name or by typing Enter in the path bar.
+    {
+        let sftp_handles = sftp_handles.clone();
         window.on_sftp_tree_expand(move |tab_id: SharedString, path: SharedString| {
             let tab_id = tab_id.to_string();
             let path = path.to_string();
-            // Forget the followed cwd (see on_sftp_navigate): tree navigation
-            // must never permanently disable cd-follow.
-            sftp_last_cwd.lock().unwrap().remove(&tab_id);
             if let Ok(handles) = sftp_handles.lock() {
                 if let Some(h) = handles.get(&tab_id) {
-                    h.toggle_tree_node(path.clone());
-                    h.list_dir(path);
+                    h.toggle_tree_node(path);
                 }
+            }
+        });
+    }
+
+    // Toggle recursive tree selection/search scope. This never navigates or expands;
+    // it only updates checkmarks and the batch/search scope shown in the status bar.
+    {
+        let weak = window.as_weak();
+        window.on_sftp_toggle_tree_scope(move |tab_id: SharedString, path: SharedString| {
+            let Some(w) = weak.upgrade() else { return };
+            let terminals = w.get_terminals();
+            let Some(tm) = terminals.as_any().downcast_ref::<VecModel<TerminalState>>() else {
+                return;
+            };
+            for ti in 0..tm.row_count() {
+                let Some(mut row) = tm.row_data(ti) else { continue };
+                if row.id.as_str() != tab_id.as_str() {
+                    continue;
+                }
+                let next_scope = if row.sftp_tree_scope.as_str() == path.as_str() {
+                    String::new()
+                } else {
+                    path.to_string()
+                };
+                row.sftp_tree_scope = next_scope.clone().into();
+
+                let mut all_entries = collect_sftp_entries(&row.sftp_all_entries);
+                let selected_count = mark_sftp_entries_for_scope(&mut all_entries, &next_scope);
+                let filtered = filter_sftp_entries(&all_entries, row.sftp_search.as_str());
+                row.sftp_all_entries = sftp_entries_model(all_entries);
+                row.sftp_entries = sftp_entries_model(filtered);
+                row.sftp_selected_count = selected_count;
+
+                let mut nodes = Vec::new();
+                for i in 0..row.sftp_tree_nodes.row_count() {
+                    if let Some(mut n) = row.sftp_tree_nodes.row_data(i) {
+                        n.checked = remote_path_in_scope(n.path.as_str(), &next_scope);
+                        nodes.push(n);
+                    }
+                }
+                row.sftp_tree_nodes = ModelRc::from(Rc::new(VecModel::from(nodes)));
+                tm.set_row_data(ti, row);
+                break;
             }
         });
     }
