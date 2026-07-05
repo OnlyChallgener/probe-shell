@@ -193,6 +193,7 @@ export component TerminalView inherits Rectangle {
     callback sftp-rename-request(string, string);
     callback sftp-chmod-request(string, string, int);
     callback sftp-copy-path(string);
+    callback sftp-copy-status(string);
     callback sftp-new-folder(string);
     callback sftp-new-file(string);
     callback sftp-open-operation-log();
@@ -1522,6 +1523,7 @@ export component TerminalView inherits Rectangle {
             rename-request(path, name) => { root.sftp-rename-request(path, name); }
             chmod-request(path, name, mode) => { root.sftp-chmod-request(path, name, mode); }
             copy-path(path)     => { root.sftp-copy-path(path); }
+            copy-status(text)   => { root.sftp-copy-status(text); }
             new-folder(dir)     => { root.sftp-new-folder(dir); }
             new-file(dir)       => { root.sftp-new-file(dir); }
             open-operation-log() => { root.sftp-open-operation-log(); }
