@@ -299,6 +299,68 @@ fn emit_tree(
     let _ = events.send(SessionEvent::SftpTreeUpdate(nodes));
 }
 
+
+/// Ensure the left tree is expanded down to `path`. This keeps the tree in sync
+/// with the right file list after navigation such as /dev/pts: / and /dev are
+/// expanded and /dev/pts becomes visible/highlightable without changing the
+/// right-side listing.
+async fn ensure_tree_path(
+    sftp: &SftpSession,
+    path: &str,
+    tree_dirs: &mut std::collections::HashMap<String, Vec<(String, String)>>,
+    tree_expanded: &mut std::collections::HashSet<String>,
+) {
+    let target = normalize_tree_path(path);
+    if !tree_dirs.contains_key("/") {
+        let dirs = list_dirs_only_impl(sftp, "/").await.unwrap_or_default();
+        tree_dirs.insert("/".to_string(), dirs);
+    }
+    tree_expanded.insert("/".to_string());
+    if target == "/" {
+        return;
+    }
+
+    let mut current = "/".to_string();
+    for segment in target.trim_start_matches('/').split('/') {
+        if segment.is_empty() {
+            continue;
+        }
+        let child = format!("{}/{}", current.trim_end_matches('/'), segment);
+        if !tree_dirs.contains_key(&current) {
+            let dirs = list_dirs_only_impl(sftp, &current).await.unwrap_or_default();
+            tree_dirs.insert(current.clone(), dirs);
+        }
+        let found = tree_dirs
+            .get(&current)
+            .map(|c| c.iter().any(|(_, p)| p == &child))
+            .unwrap_or(false);
+        if !found {
+            break;
+        }
+        if !tree_dirs.contains_key(&child) {
+            let dirs = list_dirs_only_impl(sftp, &child).await.unwrap_or_default();
+            tree_dirs.insert(child.clone(), dirs);
+        }
+        tree_expanded.insert(child.clone());
+        current = child;
+    }
+}
+
+fn normalize_tree_path(path: &str) -> String {
+    let p = path.trim();
+    if p.is_empty() || p == "." {
+        return "/".to_string();
+    }
+    let mut out = p.replace('\\', "/");
+    while out.len() > 1 && out.ends_with('/') {
+        out.pop();
+    }
+    if !out.starts_with('/') {
+        out.insert(0, '/');
+    }
+    out
+}
+
 /// Re-fetch a directory's sub-directories into the tree cache, but only if that
 /// directory is already known to the tree (root or previously expanded) — so a
 /// mutation under a collapsed/unknown branch doesn't graft unrelated nodes in.
@@ -529,6 +591,8 @@ async fn run_sftp(
                             path: path.clone(),
                             entries,
                         });
+                        ensure_tree_path(&sftp, &path, &mut tree_dirs, &mut tree_expanded).await;
+                        emit_tree(&tree_dirs, &tree_expanded, &events);
                         let _ = events.send(SessionEvent::SftpStatus(path));
                     }
                     Err(e) => {
@@ -565,7 +629,18 @@ async fn run_sftp(
             }
 
             SftpCommand::ToggleTreeNode(path) => {
-                if tree_expanded.contains(&path) {
+                if path == "/" {
+                    if tree_expanded.contains("/") {
+                        // Root double-click again: collapse all first-level folders.
+                        tree_expanded.clear();
+                    } else {
+                        // Root double-click: refresh and show first-level folders only;
+                        // do not touch the right file list.
+                        let dirs = list_dirs_only_impl(&sftp, "/").await.unwrap_or_default();
+                        tree_dirs.insert("/".to_string(), dirs);
+                        tree_expanded.insert("/".to_string());
+                    }
+                } else if tree_expanded.contains(&path) {
                     // Collapse this node and all descendants.
                     let prefix = format!("{}/", path.trim_end_matches('/'));
                     tree_expanded.retain(|p| p != &path && !p.starts_with(&prefix));
@@ -577,9 +652,7 @@ async fn run_sftp(
                     }
                     tree_expanded.insert(path.clone());
                 }
-                let mut nodes = Vec::new();
-                build_tree_nodes("/", 0, &tree_expanded, &tree_dirs, &mut nodes);
-                let _ = events.send(SessionEvent::SftpTreeUpdate(nodes));
+                emit_tree(&tree_dirs, &tree_expanded, &events);
             }
 
             SftpCommand::Search { root, query } => {
@@ -1216,6 +1289,42 @@ async fn exec_capture_browser(
     }
 }
 
+
+async fn ensure_shell_tree_path(
+    handle: &client::Handle<SftpClientHandler>,
+    path: &str,
+    tree_dirs: &mut std::collections::HashMap<String, Vec<(String, String)>>,
+    tree_expanded: &mut std::collections::HashSet<String>,
+) {
+    let target = normalize_tree_path(path);
+    if !tree_dirs.contains_key("/") {
+        let dirs = shell_list_dirs_only(handle, "/").await.unwrap_or_default();
+        tree_dirs.insert("/".to_string(), dirs);
+    }
+    tree_expanded.insert("/".to_string());
+    if target == "/" { return; }
+    let mut current = "/".to_string();
+    for segment in target.trim_start_matches('/').split('/') {
+        if segment.is_empty() { continue; }
+        let child = format!("{}/{}", current.trim_end_matches('/'), segment);
+        if !tree_dirs.contains_key(&current) {
+            let dirs = shell_list_dirs_only(handle, &current).await.unwrap_or_default();
+            tree_dirs.insert(current.clone(), dirs);
+        }
+        let found = tree_dirs
+            .get(&current)
+            .map(|c| c.iter().any(|(_, p)| p == &child))
+            .unwrap_or(false);
+        if !found { break; }
+        if !tree_dirs.contains_key(&child) {
+            let dirs = shell_list_dirs_only(handle, &child).await.unwrap_or_default();
+            tree_dirs.insert(child.clone(), dirs);
+        }
+        tree_expanded.insert(child.clone());
+        current = child;
+    }
+}
+
 /// Fallback browser for servers that do not provide the `sftp` subsystem.
 ///
 /// This is intentionally conservative: it uses POSIX shell commands over SSH to
@@ -1247,6 +1356,7 @@ async fn run_ssh_file_browser(
     let root_dirs = shell_list_dirs_only(&handle, "/").await.unwrap_or_default();
     tree_dirs.insert("/".to_string(), root_dirs);
     tree_expanded.insert("/".to_string());
+    ensure_shell_tree_path(&handle, &home, &mut tree_dirs, &mut tree_expanded).await;
     emit_tree(&tree_dirs, &tree_expanded, &events);
 
     // Same rule as real SFTP mode: recursive search must never block the file
@@ -1257,9 +1367,19 @@ async fn run_ssh_file_browser(
             SftpCommand::Close => break,
             SftpCommand::ListDir(path) | SftpCommand::RefreshDir(path) => {
                 emit_shell_dir(&handle, &events, &path).await;
+                ensure_shell_tree_path(&handle, &path, &mut tree_dirs, &mut tree_expanded).await;
+                emit_tree(&tree_dirs, &tree_expanded, &events);
             }
             SftpCommand::ToggleTreeNode(path) => {
-                if tree_expanded.contains(&path) {
+                if path == "/" {
+                    if tree_expanded.contains("/") {
+                        tree_expanded.clear();
+                    } else {
+                        let dirs = shell_list_dirs_only(&handle, "/").await.unwrap_or_default();
+                        tree_dirs.insert("/".to_string(), dirs);
+                        tree_expanded.insert("/".to_string());
+                    }
+                } else if tree_expanded.contains(&path) {
                     let prefix = format!("{}/", path.trim_end_matches('/'));
                     tree_expanded.retain(|p| p != &path && !p.starts_with(&prefix));
                 } else {

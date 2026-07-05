@@ -62,6 +62,7 @@ export struct TerminalState {
 
     // SFTP panel state
     sftp-path: string,
+    sftp-back-path: string,          // previous SFTP directory for the ← history button
     sftp-entries: [SftpEntry],       // filtered visible listing
     sftp-all-entries: [SftpEntry],   // full listing for local search
     sftp-status: string,
@@ -644,6 +645,7 @@ export component AppWindow inherits Window {
     // --- SFTP callbacks ---------------------------------------------------
     // Navigate to a new remote directory (or ".." to go up).
     callback sftp-navigate(string /* tab-id */, string /* path */);
+    callback sftp-navigate-back(string /* tab-id */);
     callback sftp-locate-result(string /* tab-id */, string /* path */, bool /* is-dir */);
     // Trigger a download: Rust opens a save-folder dialog then transfers.
     callback sftp-download(string /* tab-id */, string /* remote-path */);
@@ -660,6 +662,8 @@ export component AppWindow inherits Window {
     // Toggle expand/collapse of a tree node (also navigates to that directory).
     callback sftp-tree-expand(string /* tab-id */, string /* path */);
     callback sftp-toggle-tree-scope(string /* tab-id */, string /* path */);
+    callback sftp-set-tree-scope(string /* tab-id */, string /* path */);
+    callback sftp-clear-tree-scope(string /* tab-id */);
     callback sftp-delete(string /* tab-id */, string /* path */);
     callback sftp-toggle-select(string /* tab-id */, int /* row */);   // (#100)
     callback sftp-download-selected(string /* tab-id */);              // (#100)
@@ -1162,6 +1166,7 @@ export component AppWindow inherits Window {
                     sftp-saved-height: term.sftp-saved-height;
                     set-sftp-saved-height(v) => { root.set-pane-sftp-saved-height(term.id, v); }
                     sftp-path: term.sftp-path;
+                    sftp-back-path: term.sftp-back-path;
                     sftp-entries: term.sftp-entries;
                     sftp-status: term.sftp-status;
                     sftp-loading: term.sftp-loading;
@@ -1196,6 +1201,7 @@ export component AppWindow inherits Window {
                     send-key(key, ctrl, alt, shift) => { root.send-key(term.id, key, ctrl, alt, shift) }
                     terminal-resize(w, h) => { root.terminal-resize(term.id, w, h) }
                     sftp-navigate(path) => { root.sftp-navigate(term.id, path); }
+                    sftp-navigate-back() => { root.sftp-navigate-back(term.id); }
                     sftp-locate-result(path, is_dir) => { root.sftp-locate-result(term.id, path, is_dir); }
                     sftp-download(path) => { root.sftp-download(term.id, path); }
                     sftp-upload-clicked(dir, folder) => { root.sftp-upload-clicked(term.id, dir, folder); }
@@ -1205,6 +1211,8 @@ export component AppWindow inherits Window {
                     sftp-cancel-search() => { root.sftp-cancel-search(term.id); }
                     sftp-tree-expand(path) => { root.sftp-tree-expand(term.id, path); }
                     sftp-toggle-tree-scope(path) => { root.sftp-toggle-tree-scope(term.id, path); }
+                    sftp-set-tree-scope(path) => { root.sftp-set-tree-scope(term.id, path); }
+                    sftp-clear-tree-scope() => { root.sftp-clear-tree-scope(term.id); }
                     sftp-toggle-select(i) => { root.sftp-toggle-select(term.id, i); }
                     sftp-download-selected() => { root.sftp-download-selected(term.id); }
                     sftp-copy-selected-paths() => { root.sftp-copy-selected-paths(term.id); }

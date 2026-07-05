@@ -101,6 +101,7 @@ export component TerminalView inherits Rectangle {
     in property <[TermMatch]> selection;    // drag-selection highlight rectangles
 
     in property <string>  sftp-path: "/";
+    in property <string>  sftp-back-path: "";
     in property <[SftpEntry]> sftp-entries;
     in property <string>  sftp-status: "";
     in property <bool>    sftp-loading: false;
@@ -169,6 +170,7 @@ export component TerminalView inherits Rectangle {
     callback send-key(string, bool, bool, bool);
     callback terminal-resize(float, float);
     callback sftp-navigate(string);
+    callback sftp-navigate-back();
     callback sftp-locate-result(string, bool);
     callback sftp-download(string);
     callback sftp-upload-clicked(string, bool);
@@ -178,6 +180,8 @@ export component TerminalView inherits Rectangle {
     callback sftp-cancel-search();
     callback sftp-tree-expand(string);
     callback sftp-toggle-tree-scope(string);
+    callback sftp-set-tree-scope(string);
+    callback sftp-clear-tree-scope();
     callback sftp-delete(string);
     in property <int> sftp-selected-count;          // checked-entry count (#100)
     callback sftp-toggle-select(int);               // toggle a row's checkbox (#100)
@@ -1481,6 +1485,7 @@ export component TerminalView inherits Rectangle {
             }
             collapsed:     root.sftp-collapsed;
             current-path:  root.sftp-path;
+            back-path:     root.sftp-back-path;
             entries:       root.sftp-entries;
             status:        root.sftp-status;
             loading:       root.sftp-loading;
@@ -1501,6 +1506,7 @@ export component TerminalView inherits Rectangle {
                 }
             }
             navigate(path)      => { root.sftp-navigate(path); }
+            navigate-back()     => { root.sftp-navigate-back(); }
             locate-result(path, is_dir) => { root.sftp-locate-result(path, is_dir); }
             download(path)      => { root.sftp-download(path); }
             upload-clicked(dir, folder) => { root.sftp-upload-clicked(dir, folder); }
@@ -1510,6 +1516,8 @@ export component TerminalView inherits Rectangle {
             cancel-search()    => { root.sftp-cancel-search(); }
             tree-expand(path)   => { root.sftp-tree-expand(path); }
             toggle-tree-scope(path) => { root.sftp-toggle-tree-scope(path); }
+            set-tree-scope(path) => { root.sftp-set-tree-scope(path); }
+            clear-tree-scope()  => { root.sftp-clear-tree-scope(); }
             delete(path)        => { root.sftp-delete(path); }
             toggle-select(i)    => { root.sftp-toggle-select(i); }
             download-selected() => { root.sftp-download-selected(); }

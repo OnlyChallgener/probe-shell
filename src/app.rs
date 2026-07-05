@@ -216,6 +216,26 @@ fn mark_sftp_entries_for_scope(entries: &mut [SftpEntry], scope: &str) -> i32 {
     count
 }
 
+fn apply_sftp_tree_scope_to_row(row: &mut TerminalState, next_scope: &str) {
+    row.sftp_tree_scope = next_scope.to_string().into();
+
+    let mut all_entries = collect_sftp_entries(&row.sftp_all_entries);
+    let selected_count = mark_sftp_entries_for_scope(&mut all_entries, next_scope);
+    let filtered = filter_sftp_entries(&all_entries, row.sftp_search.as_str());
+    row.sftp_all_entries = sftp_entries_model(all_entries);
+    row.sftp_entries = sftp_entries_model(filtered);
+    row.sftp_selected_count = selected_count;
+
+    let mut nodes = Vec::new();
+    for i in 0..row.sftp_tree_nodes.row_count() {
+        if let Some(mut n) = row.sftp_tree_nodes.row_data(i) {
+            n.checked = remote_path_in_scope(n.path.as_str(), next_scope);
+            nodes.push(n);
+        }
+    }
+    row.sftp_tree_nodes = ModelRc::from(Rc::new(VecModel::from(nodes)));
+}
+
 fn current_sftp_search(terminals: &VecModel<TerminalState>, tab_id: &str) -> String {
     for i in 0..terminals.row_count() {
         if let Some(row) = terminals.row_data(i) {
@@ -2702,6 +2722,7 @@ fn wire_session_callbacks(
                 find_matches: ModelRc::from(std::rc::Rc::new(VecModel::<TermMatch>::default())),
                 selection: ModelRc::from(std::rc::Rc::new(VecModel::<TermMatch>::default())),
                 sftp_path: "/".into(),
+                sftp_back_path: "".into(),
                 sftp_entries: ModelRc::from(
                     std::rc::Rc::new(VecModel::<SftpEntry>::default()),
                 ),
@@ -5113,25 +5134,42 @@ fn wire_sftp_callbacks(
             let tab_id = tab_id.to_string();
             // A pasted path may carry trailing whitespace / newline (#54).
             let path = path.trim();
-            let resolved = if path == ".." {
-                let current = weak.upgrade().and_then(|w| {
-                    let terminals_rc = w.get_terminals();
-                    let terminals = terminals_rc
-                        .as_any()
-                        .downcast_ref::<VecModel<TerminalState>>()?;
-                    for i in 0..terminals.row_count() {
-                        if let Some(row) = terminals.row_data(i) {
-                            if row.id.as_str() == tab_id {
-                                return Some(row.sftp_path.to_string());
-                            }
+            let current_path = weak.upgrade().and_then(|w| {
+                let terminals_rc = w.get_terminals();
+                let terminals = terminals_rc
+                    .as_any()
+                    .downcast_ref::<VecModel<TerminalState>>()?;
+                for i in 0..terminals.row_count() {
+                    if let Some(row) = terminals.row_data(i) {
+                        if row.id.as_str() == tab_id {
+                            return Some(row.sftp_path.to_string());
                         }
                     }
-                    None
-                });
-                parent_path(&current.unwrap_or_else(|| "/".to_string()))
+                }
+                None
+            });
+            let resolved = if path == ".." {
+                parent_path(&current_path.clone().unwrap_or_else(|| "/".to_string()))
             } else {
                 path.to_string()
             };
+            if let Some(w) = weak.upgrade() {
+                let terminals_rc = w.get_terminals();
+                if let Some(terminals) = terminals_rc.as_any().downcast_ref::<VecModel<TerminalState>>() {
+                    for i in 0..terminals.row_count() {
+                        if let Some(mut row) = terminals.row_data(i) {
+                            if row.id.as_str() == tab_id {
+                                let current = current_path.clone().unwrap_or_else(|| row.sftp_path.to_string());
+                                if !current.is_empty() && normalize_remote_path_for_scope(&current) != normalize_remote_path_for_scope(&resolved) {
+                                    row.sftp_back_path = current.into();
+                                    terminals.set_row_data(i, row);
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
             // Forget the followed cwd so the next OSC 7 — even at an unchanged
             // directory — snaps the panel back to the shell's cwd; manual
             // navigation never permanently disables cd-follow.
@@ -5139,6 +5177,45 @@ fn wire_sftp_callbacks(
             if let Ok(handles) = sftp_handles.lock() {
                 if let Some(h) = handles.get(&tab_id) {
                     h.list_dir(resolved);
+                }
+            }
+        });
+    }
+
+    // Return to the previous SFTP directory. This is navigation history, not parent directory.
+    {
+        let sftp_handles = sftp_handles.clone();
+        let sftp_last_cwd = sftp_last_cwd.clone();
+        let weak = window.as_weak();
+        window.on_sftp_navigate_back(move |tab_id: SharedString| {
+            let tab_id = tab_id.to_string();
+            let mut target = String::new();
+            let mut current = String::new();
+            if let Some(w) = weak.upgrade() {
+                let terminals_rc = w.get_terminals();
+                if let Some(terminals) = terminals_rc.as_any().downcast_ref::<VecModel<TerminalState>>() {
+                    for i in 0..terminals.row_count() {
+                        if let Some(mut row) = terminals.row_data(i) {
+                            if row.id.as_str() == tab_id {
+                                target = row.sftp_back_path.to_string();
+                                current = row.sftp_path.to_string();
+                                if !target.is_empty() {
+                                    row.sftp_back_path = current.clone().into();
+                                    terminals.set_row_data(i, row);
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            if target.is_empty() || normalize_remote_path_for_scope(&target) == normalize_remote_path_for_scope(&current) {
+                return;
+            }
+            sftp_last_cwd.lock().unwrap().remove(&tab_id);
+            if let Ok(handles) = sftp_handles.lock() {
+                if let Some(h) = handles.get(&tab_id) {
+                    h.list_dir(target);
                 }
             }
         });
@@ -5358,10 +5435,12 @@ fn wire_sftp_callbacks(
                 for i in 0..terminals.row_count() {
                     if let Some(mut row) = terminals.row_data(i) {
                         if row.id.as_str() == tab_id {
-                            let all = collect_sftp_entries(&row.sftp_all_entries);
+                            let mut all = collect_sftp_entries(&row.sftp_all_entries);
                             row.sftp_search = query.clone().into();
+                            let selected_count = mark_sftp_entries_for_scope(&mut all, row.sftp_tree_scope.as_str());
+                            row.sftp_all_entries = sftp_entries_model(all.clone());
                             row.sftp_entries = sftp_entries_model(filter_sftp_entries(&all, &query));
-                            row.sftp_selected_count = 0;
+                            row.sftp_selected_count = selected_count;
                             terminals.set_row_data(i, row);
                             break;
                         }
@@ -5455,23 +5534,42 @@ fn wire_sftp_callbacks(
                     }
                 }
                 let next_scope = join_sftp_scope_list(scopes);
-                row.sftp_tree_scope = next_scope.clone().into();
+                apply_sftp_tree_scope_to_row(&mut row, &next_scope);
+                tm.set_row_data(ti, row);
+                break;
+            }
+        });
+    }
 
-                let mut all_entries = collect_sftp_entries(&row.sftp_all_entries);
-                let selected_count = mark_sftp_entries_for_scope(&mut all_entries, &next_scope);
-                let filtered = filter_sftp_entries(&all_entries, row.sftp_search.as_str());
-                row.sftp_all_entries = sftp_entries_model(all_entries);
-                row.sftp_entries = sftp_entries_model(filtered);
-                row.sftp_selected_count = selected_count;
+    // Set one recursive tree search scope exactly (used by root single-click for global search).
+    {
+        let weak = window.as_weak();
+        window.on_sftp_set_tree_scope(move |tab_id: SharedString, path: SharedString| {
+            let Some(w) = weak.upgrade() else { return };
+            let terminals = w.get_terminals();
+            let Some(tm) = terminals.as_any().downcast_ref::<VecModel<TerminalState>>() else { return };
+            let next_scope = normalize_remote_path_for_scope(path.as_str());
+            for ti in 0..tm.row_count() {
+                let Some(mut row) = tm.row_data(ti) else { continue };
+                if row.id.as_str() != tab_id.as_str() { continue; }
+                apply_sftp_tree_scope_to_row(&mut row, &next_scope);
+                tm.set_row_data(ti, row);
+                break;
+            }
+        });
+    }
 
-                let mut nodes = Vec::new();
-                for i in 0..row.sftp_tree_nodes.row_count() {
-                    if let Some(mut n) = row.sftp_tree_nodes.row_data(i) {
-                        n.checked = remote_path_in_scope(n.path.as_str(), &next_scope);
-                        nodes.push(n);
-                    }
-                }
-                row.sftp_tree_nodes = ModelRc::from(Rc::new(VecModel::from(nodes)));
+    // Clear recursive tree search scope/checkmarks (search box × uses this).
+    {
+        let weak = window.as_weak();
+        window.on_sftp_clear_tree_scope(move |tab_id: SharedString| {
+            let Some(w) = weak.upgrade() else { return };
+            let terminals = w.get_terminals();
+            let Some(tm) = terminals.as_any().downcast_ref::<VecModel<TerminalState>>() else { return };
+            for ti in 0..tm.row_count() {
+                let Some(mut row) = tm.row_data(ti) else { continue };
+                if row.id.as_str() != tab_id.as_str() { continue; }
+                apply_sftp_tree_scope_to_row(&mut row, "");
                 tm.set_row_data(ti, row);
                 break;
             }
