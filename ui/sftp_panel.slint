@@ -827,9 +827,9 @@ export component SftpPanel inherits Rectangle {
                                     mouse-cursor: pointer;
                                     clicked => {
                                         if (node.path == "/") {
-                                            // Root single-click selects global search scope only; it must not jump the right file list.
+                                            // Root single-click only moves the tree cursor; it must not
+                                            // select global scope, start/cancel search, or navigate the file list.
                                             root.tree-active-path = "/";
-                                            root.set-tree-scope("/");
                                         } else if (!root.search-mode) {
                                             root.tree-active-path = node.path;
                                             // If root/global scope was selected before, opening a concrete
@@ -840,7 +840,23 @@ export component SftpPanel inherits Rectangle {
                                         }
                                     }
                                     double-clicked => {
-                                        if (!root.search-mode) { root.tree-expand(node.path); }
+                                        if (node.path == "/") {
+                                            root.tree-active-path = "/";
+                                            if (root.tree-scope == "/" || root.search-mode || root.search-running) {
+                                                if (root.search-running) { root.cancel-search(); }
+                                                file-search.text = "";
+                                                root.search-changed("");
+                                                root.clear-tree-scope();
+                                                root.search-mode = false;
+                                                root.navigate(root.search-restore-path != "" ? root.search-restore-path : root.current-path);
+                                                root.search-restore-path = "";
+                                            } else {
+                                                root.set-tree-scope("/");
+                                                file-search.focus();
+                                            }
+                                        } else if (!root.search-mode) {
+                                            root.tree-expand(node.path);
+                                        }
                                     }
                                     pointer-event(ev) => {
                                         if (ev.kind == PointerEventKind.down
@@ -864,17 +880,8 @@ export component SftpPanel inherits Rectangle {
 
                                 HorizontalLayout {
                                     spacing: 4px;
-                                    padding-left: 6px + node.depth * 16px;
-                                    padding-right: 6px;
-
-                                    Text {
-                                        width: 12px;
-                                        text: node.has-children ? (node.expanded ? "▾" : "▸") : "";
-                                        color: Theme.text-muted;
-                                        font-size: 10px;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
+                                    padding-left: 4px + node.depth * 8px;
+                                    padding-right: 4px;
 
                                     // Small plus button: add/remove this folder as a search scope.
                                     Rectangle {
