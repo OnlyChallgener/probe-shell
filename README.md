@@ -1,3 +1,8 @@
+
+### Shell 集成默认关闭
+
+Probe Shell 不再默认向远端 shell 注入 PROMPT_COMMAND / cwd 跟踪脚本，也不默认启动远端资源监控循环。这样在 OpenWrt、BusyBox、Dropbear、路由器等环境中，SSH 登录后不会再出现大段自动注入命令。
+
 # Probe Shell
 
 **简体中文** | [English](./README.en.md)
@@ -271,3 +276,13 @@ This build clarifies SFTP navigation/search state: the address bar only represen
 ### v0.6.8-probe1 文件夹访问优化
 - 软链接目录显示箭头标识，死链接显示警告标识。
 - SFTP/SSH 文件浏览增加超时与重试，失败状态会显示明确错误码。
+
+
+## v0.6.9-probe1
+
+- Refined SFTP file-panel state rules: the address bar only represents the right-side current directory; search focus no longer automatically forces global-search mode.
+- Quick directory bar now defaults to only Root; custom quick folders are added/removed from the settings card, with up to five custom entries.
+- Removed the quick-bar `+` shortcut to avoid mixing search-scope and shortcut-save behavior.
+- Added a copy-to-clipboard handler for the SFTP bottom status line.
+- Lowered the default/restored window size clamp for high-DPI displays.
+- Right-click “Open directory” exits search mode before navigating, preventing accidental gray/search state.

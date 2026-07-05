@@ -743,10 +743,17 @@ async fn run_session(
         session.user, session.host
     )));
 
+    // Shell integration is intentionally disabled by default in Probe Shell.
+    // It previously injected PROMPT_COMMAND / cwd tracking code into the remote
+    // shell, which is noisy on OpenWrt / BusyBox and can look like a malicious
+    // script.  Keep the code path inert unless a future explicit opt-in feature
+    // re-enables it.
+    let shell_integration_enabled = false;
+
     // Whether we have already injected the PROMPT_COMMAND setup.
     // We wait for the first non-empty data chunk (the initial shell prompt)
     // before sending so the command doesn't interleave with banner text.
-    let mut prompt_injected = false;
+    let mut prompt_injected = !shell_integration_enabled;
     // True from injecting PROMPT_SETUP until the echoed setup line has been
     // received and stripped; output is buffered (not shown) during that window.
     let mut suppress_echo = false;
@@ -822,7 +829,7 @@ async fn run_session(
     // Skip the resource monitor entirely when shell integration is off (a
     // non-POSIX / Windows server) — the /proc-based loop only spews errors there
     // (#140).
-    let mut mon_channel = if session.disable_shell_integration {
+    let mut mon_channel = if !shell_integration_enabled {
         None
     } else {
         match handle.channel_open_session().await {
@@ -987,7 +994,7 @@ async fn run_session(
                         // (e.g. a Windows pwsh/cmd server) (#140).
                         if !prompt_injected
                             && !chunk.trim().is_empty()
-                            && !session.disable_shell_integration
+                            && shell_integration_enabled
                         {
                             prompt_injected = true;
                             suppress_echo = true;

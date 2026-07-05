@@ -1,3 +1,21 @@
+
+
+## v0.6.9-probe1
+
+- Refined SFTP file-panel state rules: the address bar only represents the right-side current directory; search focus no longer automatically forces global-search mode.
+- Quick directory bar now defaults to only Root; custom quick folders are added/removed from the settings card, with up to five custom entries.
+- Removed the quick-bar `+` shortcut to avoid mixing search-scope and shortcut-save behavior.
+- Added a copy-to-clipboard handler for the SFTP bottom status line.
+- Lowered the default/restored window size clamp for high-DPI displays.
+- Right-click “Open directory” exits search mode before navigating, preventing accidental gray/search state.
+
+## v0.6.8-probe4
+
+- 默认彻底关闭 SSH Shell 集成注入。
+- 不再自动向远端发送 PROMPT_COMMAND / cwd 跟踪脚本。
+- 不再默认启动远端 /proc 资源监控循环，避免 OpenWrt / BusyBox 终端出现大段注入命令。
+- 新建会话默认 `disable_shell_integration = true`，旧会话也会被 SSH 运行层强制按关闭处理。
+
 ## v0.6.8-probe2 - cleaner file-kind icons
 
 ## v0.6.8-probe3

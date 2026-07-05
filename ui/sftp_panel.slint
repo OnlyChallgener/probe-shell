@@ -125,7 +125,7 @@ component QuickAccessButton inherits Rectangle {
         font-size: 9px;
         vertical-alignment: center;
         horizontal-alignment: center;
-        overflow: elide;
+        overflow: clip;
     }
     if root.editing : Rectangle {
         x: parent.width - 13px;
@@ -205,13 +205,14 @@ export component SftpPanel inherits Rectangle {
     property <bool> qa-add-open: false;
     property <string> qa-manual-path: "";
     property <string> qa-manual-label: "";
+    property <string> qa-manual-group: "";
     property <bool> qa-show-root: true;
-    property <bool> qa-show-home: true;
-    property <bool> qa-show-etc: true;
-    property <bool> qa-show-var: true;
-    property <bool> qa-show-tmp: true;
-    property <bool> qa-show-www: true;
-    property <bool> qa-show-over: true;
+    property <bool> qa-show-home: false;
+    property <bool> qa-show-etc: false;
+    property <bool> qa-show-var: false;
+    property <bool> qa-show-tmp: false;
+    property <bool> qa-show-www: false;
+    property <bool> qa-show-over: false;
     property <string> qa1-path: ""; property <string> qa1-label: "";
     property <string> qa2-path: ""; property <string> qa2-label: "";
     property <string> qa3-path: ""; property <string> qa3-label: "";
@@ -248,6 +249,7 @@ export component SftpPanel inherits Rectangle {
     callback new-folder(string /* parent dir */);
     callback new-file(string /* parent dir */);
     callback open-operation-log();
+    callback copy-status(string);
     // Drag-to-dock: empty areas of the panel are a grab handle; coordinates are
     // reported in window space so the parent can compute the target edge (#dock).
     callback dock-drag-move(length /* abs-x */, length /* abs-y */);
@@ -371,10 +373,7 @@ export component SftpPanel inherits Rectangle {
                         vertical-alignment: center;
                         single-line: true;
                         changed has-focus => {
-                            if (self.has-focus && !root.search-mode) {
-                                root.search-restore-path = root.current-path;
-                                root.search-mode = true;
-                            }
+                            root.toolbar-tip = self.has-focus ? @tr("输入关键词后按 Enter 搜索；点 X 可退出搜索结果") : "";
                         }
                         // Typing filters the current visible listing only. Press Enter or the search button
                         // to enter bounded global search results.
@@ -385,7 +384,7 @@ export component SftpPanel inherits Rectangle {
                         accepted => {
                             if (!root.search-mode) { root.search-restore-path = root.current-path; root.search-mode = true; }
                             root.search-folder(
-                                root.tree-scope != "" ? root.tree-scope : "/",
+                                root.tree-scope != "" ? root.tree-scope : root.current-path,
                                 self.text
                             );
                         }
@@ -405,7 +404,7 @@ export component SftpPanel inherits Rectangle {
                         x: 24px;
                         width: parent.width - 30px;
                         height: parent.height;
-                        text: root.tree-scope != "" ? @tr("搜索范围") : @tr("全局搜索");
+                        text: root.tree-scope != "" ? @tr("搜索指定范围") : @tr("目录搜索");
                         color: Theme.text-muted;
                         font-size: Theme.fs-xs;
                         vertical-alignment: center;
@@ -454,7 +453,7 @@ export component SftpPanel inherits Rectangle {
                                 root.cancel-search();
                             } else {
                                 root.search-folder(
-                                    root.tree-scope != "" ? root.tree-scope : "/",
+                                    root.tree-scope != "" ? root.tree-scope : root.current-path,
                                     file-search.text
                                 );
                             }
@@ -661,29 +660,6 @@ export component SftpPanel inherits Rectangle {
                 if root.qa4-path != "" : QuickAccessButton { width: 56px; label: root.qa4-label; path: root.qa4-path; editing: false; clicked => { root.navigate(root.qa4-path); } remove => { } }
                 if root.qa5-path != "" : QuickAccessButton { width: 56px; label: root.qa5-label; path: root.qa5-path; editing: false; clicked => { root.navigate(root.qa5-path); } remove => { } }
 
-                // + only quick-adds the search scope collected from the left list's small + buttons.
-                Rectangle {
-                    width: 20px; height: 20px; border-radius: Theme.radius-sm;
-                    background: qa-add-ta.has-hover ? Theme.bg-hover : transparent;
-                    qa-add-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("把左侧 + 加入的搜索范围保存为快捷目录") : ""; }
-                        clicked => {
-                            if (root.tree-scope != "") {
-                                if (root.qa1-path == "") { root.qa1-path = root.tree-scope; root.qa1-label = @tr("搜索范围"); }
-                                else if (root.qa2-path == "") { root.qa2-path = root.tree-scope; root.qa2-label = @tr("搜索范围"); }
-                                else if (root.qa3-path == "") { root.qa3-path = root.tree-scope; root.qa3-label = @tr("搜索范围"); }
-                                else if (root.qa4-path == "") { root.qa4-path = root.tree-scope; root.qa4-label = @tr("搜索范围"); }
-                                else if (root.qa5-path == "") { root.qa5-path = root.tree-scope; root.qa5-label = @tr("搜索范围"); }
-                                else { root.toolbar-tip = @tr("最多只能添加 5 个自定义快捷目录"); }
-                            } else {
-                                root.toolbar-tip = @tr("请先点左侧目录旁边的 + 加入搜索范围");
-                            }
-                        }
-                    }
-                    Text { text: "+"; color: Theme.accent; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
-                }
-
                 Rectangle {
                     width: 20px; height: 20px; border-radius: Theme.radius-sm;
                     background: qa-manage-ta.has-hover || root.quick-edit-mode ? Theme.bg-hover : transparent;
@@ -694,6 +670,7 @@ export component SftpPanel inherits Rectangle {
                             root.quick-edit-mode = !root.quick-edit-mode;
                             root.qa-manual-path = root.current-path;
                             root.qa-manual-label = "";
+                            root.qa-manual-group = "";
                         }
                     }
                     Text { text: "\u{E8B8}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
@@ -715,7 +692,7 @@ export component SftpPanel inherits Rectangle {
         }
 
         if root.quick-edit-mode : Rectangle {
-            height: 156px;
+            height: 188px;
             background: Theme.bg-panel;
             border-width: 1px;
             border-color: Theme.border-subtle;
@@ -723,14 +700,19 @@ export component SftpPanel inherits Rectangle {
                 padding: 8px;
                 spacing: 6px;
                 Text { text: @tr("管理快捷目录"); color: Theme.text-primary; font-size: Theme.fs-sm; }
-                Text { text: @tr("手动添加快捷目录"); color: Theme.text-secondary; font-size: Theme.fs-xs; }
+                Text { text: @tr("快捷目录设置（最多 5 个，自定义备注最多 6 个字）"); color: Theme.text-secondary; font-size: Theme.fs-xs; }
                 HorizontalLayout { height: 24px; spacing: 6px;
+                    Rectangle { width: 96px; border-radius: Theme.radius-sm; border-width: 1px; border-color: Theme.border-subtle; background: Theme.bg-root;
+                        TextInput { x: 8px; width: parent.width - 16px; height: parent.height; text <=> root.qa-manual-label; single-line: true; font-size: Theme.fs-sm; color: Theme.text-primary; vertical-alignment: center; }
+                        Text { x: 8px; text: root.qa-manual-label == "" ? @tr("名称/备注") : ""; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; height: parent.height; }
+                    }
+                    Rectangle { width: 88px; border-radius: Theme.radius-sm; border-width: 1px; border-color: Theme.border-subtle; background: Theme.bg-root;
+                        TextInput { x: 8px; width: parent.width - 16px; height: parent.height; text <=> root.qa-manual-group; single-line: true; font-size: Theme.fs-sm; color: Theme.text-primary; vertical-alignment: center; }
+                        Text { x: 8px; text: root.qa-manual-group == "" ? @tr("分组") : ""; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; height: parent.height; }
+                    }
                     Rectangle { horizontal-stretch: 1; border-radius: Theme.radius-sm; border-width: 1px; border-color: Theme.border-subtle; background: Theme.bg-root;
                         TextInput { x: 8px; width: parent.width - 16px; height: parent.height; text <=> root.qa-manual-path; single-line: true; font-size: Theme.fs-sm; color: Theme.text-primary; vertical-alignment: center; }
-                    }
-                    Rectangle { width: 110px; border-radius: Theme.radius-sm; border-width: 1px; border-color: Theme.border-subtle; background: Theme.bg-root;
-                        TextInput { x: 8px; width: parent.width - 16px; height: parent.height; text <=> root.qa-manual-label; single-line: true; font-size: Theme.fs-sm; color: Theme.text-primary; vertical-alignment: center; }
-                        Text { x: 8px; text: root.qa-manual-label == "" ? @tr("备注") : ""; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; height: parent.height; }
+                        Text { x: 8px; text: root.qa-manual-path == "" ? @tr("目录地址，例如 /etc/config") : ""; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; height: parent.height; }
                     }
                     Rectangle { width: 56px; border-radius: Theme.radius-sm; background: Theme.accent;
                         TouchArea { mouse-cursor: pointer; clicked => {
@@ -747,7 +729,7 @@ export component SftpPanel inherits Rectangle {
                     }
                 }
                 HorizontalLayout { height: 74px; spacing: 6px;
-                    if root.qa-show-root : QuickAccessButton { width: 58px; label: @tr("根目录×"); path: "/"; clicked => { root.qa-show-root = false; } remove => { } }
+                    if root.qa-show-root : QuickAccessButton { width: 58px; label: @tr("根目录"); path: "/"; clicked => { root.navigate("/"); } remove => { } }
                     if root.qa-show-home : QuickAccessButton { width: 52px; label: "HOME×"; path: "/root"; clicked => { root.qa-show-home = false; } remove => { } }
                     if root.qa-show-etc : QuickAccessButton { width: 44px; label: "ETC×"; path: "/etc"; clicked => { root.qa-show-etc = false; } remove => { } }
                     if root.qa-show-var : QuickAccessButton { width: 44px; label: "VAR×"; path: "/var"; clicked => { root.qa-show-var = false; } remove => { } }
@@ -821,6 +803,7 @@ export component SftpPanel inherits Rectangle {
                                     clicked => {
                                         if (!root.search-mode) {
                                             root.tree-active-path = node.path;
+                                            // Left navigation single click is "enter/open".
                                             root.navigate(node.path);
                                         }
                                     }
@@ -903,7 +886,7 @@ export component SftpPanel inherits Rectangle {
                                 spacing: 1px;
                                 SftpMenuItem {
                                     label: @tr("打开目录");
-                                    clicked => { root.navigate(root.tree-menu-target); }
+                                    clicked => { root.search-mode = false; file-search.text = ""; root.search-changed(""); root.tree-active-path = root.tree-menu-target; root.navigate(root.tree-menu-target); }
                                 }
                                 SftpMenuItem {
                                     label: @tr("加入/移出搜索范围");
@@ -911,7 +894,7 @@ export component SftpPanel inherits Rectangle {
                                 }
                                 SftpMenuItem {
                                     label: @tr("在此搜索");
-                                    clicked => { root.search-folder(root.tree-menu-target, file-search.text); }
+                                    clicked => { root.tree-active-path = root.tree-menu-target; root.search-mode = true; root.search-restore-path = root.current-path; file-search.text = root.tree-menu-target; root.search-folder(root.tree-menu-target, file-search.text); }
                                 }
                                 SftpMenuItem {
                                     label: @tr("复制路径");
@@ -1275,7 +1258,14 @@ export component SftpPanel inherits Rectangle {
         Rectangle {
             height: 18px;
             background: Theme.bg-panel-alt;
-            Text {
+            status-ta := TouchArea {
+                width: parent.width;
+                height: parent.height;
+                mouse-cursor: pointer;
+                changed has-hover => { if (self.has-hover) { root.toolbar-tip = @tr("点击复制底部状态文字"); } }
+                clicked => { root.copy-status(status-text.text); }
+            }
+            status-text := Text {
                 x: 8px;
                 text: root.toolbar-tip != ""
                     ? "提示: " + root.toolbar-tip

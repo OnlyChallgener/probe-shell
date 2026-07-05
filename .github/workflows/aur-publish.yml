@@ -1,0 +1,21 @@
+name: Publish to AUR
+
+# Disabled for Probe Shell Windows preview builds.
+# Keeping this workflow as a harmless manual stub avoids accidental AUR release
+# failures and avoids invalid `secrets.*` expressions in workflow conditions.
+
+"on":
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  disabled:
+    name: AUR publishing disabled
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip
+        run: |
+          echo "AUR publishing is disabled for the current Probe Shell preview."
+          echo "Only the Windows x86_64 portable ZIP is built by the Release workflow."

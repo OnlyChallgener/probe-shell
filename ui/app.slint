@@ -220,10 +220,10 @@ export component AppWindow inherits Window {
     // Frameless when we draw our own title bar (#119); Rust sets custom-titlebar
     // true on Windows/Linux. Slint maps no-frame → winit set_decorations(false).
     no-frame: root.custom-titlebar;
-    min-width: 1080px;
-    min-height: 680px;
-    preferred-width: 1280px;
-    preferred-height: 760px;
+    min-width: 960px;
+    min-height: 620px;
+    preferred-width: 1180px;
+    preferred-height: 720px;
     // Always-opaque base; the wallpaper Image (when active) covers it and panels
     // frost over the image. Using window-base (not bg-root) keeps the window
     // itself opaque even though bg-root turns translucent in immersive mode.
@@ -679,6 +679,7 @@ export component AppWindow inherits Window {
     in-out property <string> sftp-prompt-value;  // user input
     callback sftp-prompt-submit(string /* tab */, string /* kind */, string /* target */, string /* value */);
     callback sftp-copy-path(string);             // put the path on the clipboard
+    callback sftp-copy-status(string);           // copy SFTP status line text
     callback open-operation-log();                // open local operations.log
 
     // Visual chmod dialog (#84). Rust decomposes the current mode into nine
@@ -1239,6 +1240,7 @@ export component AppWindow inherits Window {
                         root.sftp-chmod-open(term.id, path, name, mode);
                     }
                     sftp-copy-path(path) => { root.sftp-copy-path(path); }
+                    sftp-copy-status(text) => { root.sftp-copy-status(text); }
                     sftp-new-folder(dir) => {
                         root.sftp-prompt-kind = "mkdir";
                         root.sftp-prompt-tab = term.id;

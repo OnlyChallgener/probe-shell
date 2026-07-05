@@ -616,9 +616,9 @@ pub fn run() -> Result<()> {
         // builds saved 1440×900 (or even a maximized physical size), which made the
         // right status panel run off-screen on Windows high-DPI displays.
         let (ww, wh) = s.window_size();
-        let (mut ww, mut wh) = if ww > 0.0 && wh > 0.0 { (ww, wh) } else { (1280.0, 760.0) };
-        ww = ww.clamp(1080.0, 1280.0);
-        wh = wh.clamp(680.0, 760.0);
+        let (mut ww, mut wh) = if ww > 0.0 && wh > 0.0 { (ww, wh) } else { (1180.0, 720.0) };
+        ww = ww.clamp(960.0, 1180.0);
+        wh = wh.clamp(620.0, 720.0);
         window
             .window()
             .set_size(slint::LogicalSize::new(ww, wh));
@@ -5760,6 +5760,11 @@ fn wire_sftp_callbacks(
     {
         window.on_sftp_copy_path(move |path: SharedString| {
             clipboard_set_text(path.to_string());
+        });
+    }
+    {
+        window.on_sftp_copy_status(move |text: SharedString| {
+            clipboard_set_text(text.to_string());
         });
     }
     {

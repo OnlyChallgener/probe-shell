@@ -1,3 +1,8 @@
+
+### Shell integration disabled by default
+
+Probe Shell no longer injects PROMPT_COMMAND / cwd tracking scripts into the remote shell by default, and it does not start the remote resource monitor loop by default. This avoids noisy injected commands on OpenWrt, BusyBox, Dropbear and router environments.
+
 # Probe Shell
 
 [简体中文](./README.md) | **English**
@@ -272,3 +277,13 @@ This build clarifies SFTP navigation/search state: the address bar only represen
 ### v0.6.8-probe1 folder-access polish
 - Symlink folders show an arrow marker; dead links show a disabled warning icon.
 - SFTP/SSH-browser operations now use guarded timeouts and clearer error codes.
+
+
+## v0.6.9-probe1
+
+- Refined SFTP file-panel state rules: the address bar only represents the right-side current directory; search focus no longer automatically forces global-search mode.
+- Quick directory bar now defaults to only Root; custom quick folders are added/removed from the settings card, with up to five custom entries.
+- Removed the quick-bar `+` shortcut to avoid mixing search-scope and shortcut-save behavior.
+- Added a copy-to-clipboard handler for the SFTP bottom status line.
+- Lowered the default/restored window size clamp for high-DPI displays.
+- Right-click “Open directory” exits search mode before navigating, preventing accidental gray/search state.

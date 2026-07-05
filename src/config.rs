@@ -475,7 +475,8 @@ impl Session {
             parity: default_parity(),
             flow_control: default_flow(),
             forwards: Vec::new(),
-            disable_shell_integration: false,
+            // New sessions are safe by default: no remote PROMPT_COMMAND / monitor scripts.
+            disable_shell_integration: true,
             note: String::new(),
         }
     }
