@@ -2739,6 +2739,7 @@ fn wire_session_callbacks(
                 sftp_loading: has_sftp,
                 sftp_search_running: false,
                 sftp_search: "".into(),
+                sftp_search_root: "".into(),
                 sftp_tree_nodes: ModelRc::from(
                     std::rc::Rc::new(VecModel::<SftpTreeNode>::default()),
                 ),
@@ -3957,6 +3958,7 @@ fn apply_session_event_to_window(
                 t.sftp_status = crate::i18n::t("文件连接已断开", "File connection disconnected").into();
                 t.sftp_loading = false;
                 t.sftp_search_running = false;
+                t.sftp_search_root = "".into();
             });
             if let Some(st) = statuses.lock().unwrap().get_mut(tab_id) {
                 st.state = 2;
@@ -4040,7 +4042,7 @@ fn apply_session_event_to_window(
                 t.sftp_selected_count = selected_count;
             });
         }
-        SessionEvent::SftpSearchEntries { root: _, query, entries } => {
+        SessionEvent::SftpSearchEntries { root, query, entries } => {
             let base_entries: Vec<SftpEntry> = entries
                 .iter()
                 .map(|e| SftpEntry {
@@ -4060,11 +4062,15 @@ fn apply_session_event_to_window(
                 })
                 .collect();
             let query = query.clone();
+            let root = root.clone();
             update_terminal(&|t| {
                 // If the user has pressed X/Stop or started another search, ignore
                 // late results from the old background task. This fixes stale
                 // global/current search results overwriting the restored folder.
-                if !t.sftp_search_running || t.sftp_search.as_str() != query.as_str() {
+                if !t.sftp_search_running
+                    || t.sftp_search.as_str() != query.as_str()
+                    || t.sftp_search_root.as_str() != root.as_str()
+                {
                     return;
                 }
                 let mut slint_entries = base_entries.clone();
@@ -4075,6 +4081,8 @@ fn apply_session_event_to_window(
                 t.sftp_entries = model;
                 t.sftp_loading = false;
                 t.sftp_selected_count = selected_count;
+                t.sftp_search_running = false;
+                t.sftp_status = format!("{}: {}  ·  {}", crate::i18n::t("搜索完成", "Search complete"), sftp_scope_status(&root), t.sftp_entries.row_count()).into();
             });
         }
         SessionEvent::SftpStatus(msg) => {
@@ -4085,15 +4093,10 @@ fn apply_session_event_to_window(
                 // immediately. Ignore late "搜索中" progress messages from the
                 // background walker, otherwise the stop button turns red again
                 // and it looks like the cancelled search is still active.
-                if running && !t.sftp_search_running {
+                if (running || finished) && !t.sftp_search_running {
                     return;
                 }
                 t.sftp_status = msg.clone().into();
-                if running {
-                    t.sftp_search_running = true;
-                } else if finished {
-                    t.sftp_search_running = false;
-                }
             });
         }
         SessionEvent::SftpError(msg) => {
@@ -4103,6 +4106,7 @@ fn apply_session_event_to_window(
                 t.sftp_status = msg.clone().into();
                 t.sftp_loading = false;
                 t.sftp_search_running = false;
+                t.sftp_search_root = "".into();
             });
         }
         SessionEvent::SftpFileText {
@@ -5253,6 +5257,9 @@ fn wire_sftp_callbacks(
                                 let current = current_path.clone().unwrap_or_else(|| row.sftp_path.to_string());
                                 if !current.is_empty() && normalize_remote_path_for_scope(&current) != normalize_remote_path_for_scope(&resolved) {
                                     row.sftp_back_path = current.into();
+                                    row.sftp_search_running = false;
+                                    row.sftp_search_root = "".into();
+                                    row.sftp_tree_scope = "".into();
                                     terminals.set_row_data(i, row);
                                 }
                                 break;
@@ -5267,6 +5274,7 @@ fn wire_sftp_callbacks(
             sftp_last_cwd.lock().unwrap().remove(&tab_id);
             if let Ok(handles) = sftp_handles.lock() {
                 if let Some(h) = handles.get(&tab_id) {
+                    h.cancel_search();
                     h.list_dir(resolved);
                 }
             }
@@ -5292,6 +5300,9 @@ fn wire_sftp_callbacks(
                                 current = row.sftp_path.to_string();
                                 if !target.is_empty() {
                                     row.sftp_back_path = current.clone().into();
+                                    row.sftp_search_running = false;
+                                    row.sftp_search_root = "".into();
+                                    row.sftp_tree_scope = "".into();
                                     terminals.set_row_data(i, row);
                                 }
                                 break;
@@ -5306,6 +5317,7 @@ fn wire_sftp_callbacks(
             sftp_last_cwd.lock().unwrap().remove(&tab_id);
             if let Ok(handles) = sftp_handles.lock() {
                 if let Some(h) = handles.get(&tab_id) {
+                    h.cancel_search();
                     h.list_dir(target);
                 }
             }
@@ -5528,6 +5540,7 @@ fn wire_sftp_callbacks(
                         if row.id.as_str() == tab_id {
                             let mut all = collect_sftp_entries(&row.sftp_all_entries);
                             row.sftp_search = query.clone().into();
+                            row.sftp_search_root = "".into();
                             let selected_count = mark_sftp_entries_for_scope(&mut all, row.sftp_tree_scope.as_str());
                             row.sftp_all_entries = sftp_entries_model(all.clone());
                             row.sftp_entries = sftp_entries_model(filter_sftp_entries(&all, &query));
@@ -5562,6 +5575,7 @@ fn wire_sftp_callbacks(
                         if let Some(mut row) = tm.row_data(ti) {
                             if row.id.as_str() == tab_id.as_str() {
                                 row.sftp_search = query.clone().into();
+                                row.sftp_search_root = root_dir.clone().into();
                                 row.sftp_search_running = true;
                                 row.sftp_status = format!(
                                     "{}: {}{}",
@@ -5597,6 +5611,7 @@ fn wire_sftp_callbacks(
                         if let Some(mut row) = tm.row_data(ti) {
                             if row.id.as_str() == tab_id.as_str() {
                                 row.sftp_search_running = false;
+                                row.sftp_search_root = "".into();
                                 row.sftp_status = crate::i18n::t("搜索已停止", "Search stopped").into();
                                 tm.set_row_data(ti, row);
                                 break;

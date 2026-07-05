@@ -382,7 +382,8 @@ export component SftpPanel inherits Rectangle {
                         // Typing filters the current visible listing only. Press Enter or the search button
                         // to enter bounded global search results.
                         edited => {
-                            if (!root.search-mode) { root.search-restore-path = root.current-path; root.search-mode = true; }
+                            // Plain typing only filters the current directory. Do not enter
+                            // recursive search mode until Enter or the search button is used.
                             root.search-changed(self.text);
                         }
                         accepted => {
@@ -461,6 +462,13 @@ export component SftpPanel inherits Rectangle {
                         clicked => {
                             if (root.search-running) {
                                 root.cancel-search();
+                                file-search.text = "";
+                                root.search-changed("");
+                                root.clear-tree-scope();
+                                root.tree-active-path = "";
+                                root.search-mode = false;
+                                root.navigate(root.search-restore-path != "" ? root.search-restore-path : root.current-path);
+                                root.search-restore-path = "";
                             } else {
                                 if (!root.search-mode) { root.search-restore-path = root.current-path; }
                                 root.search-mode = true;
@@ -856,8 +864,17 @@ export component SftpPanel inherits Rectangle {
 
                                 HorizontalLayout {
                                     spacing: 4px;
-                                    padding-left: 6px;
+                                    padding-left: 6px + node.depth * 16px;
                                     padding-right: 6px;
+
+                                    Text {
+                                        width: 12px;
+                                        text: node.has-children ? (node.expanded ? "▾" : "▸") : "";
+                                        color: Theme.text-muted;
+                                        font-size: 10px;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
 
                                     // Small plus button: add/remove this folder as a search scope.
                                     Rectangle {
@@ -890,7 +907,7 @@ export component SftpPanel inherits Rectangle {
                                     }
 
                                     Text {
-                                        text: node.path == "/" ? @tr("根目录") : node.path;
+                                        text: node.path == "/" ? @tr("根目录") : node.name;
                                         color: (node.path == root.current-path || node.path == root.tree-active-path || (root.tree-scope == "/" && node.path == "/")) ? Theme.accent : Theme.text-primary;
                                         font-size: Theme.fs-xs;
                                         horizontal-stretch: 1;
