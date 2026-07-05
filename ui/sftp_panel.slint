@@ -824,6 +824,10 @@ export component SftpPanel inherits Rectangle {
                                             root.set-tree-scope("/");
                                         } else if (!root.search-mode) {
                                             root.tree-active-path = node.path;
+                                            // If root/global scope was selected before, opening a concrete
+                                            // folder should return search scope to the current directory.
+                                            // Otherwise the next search still walks / and looks wrong.
+                                            if (root.tree-scope == "/") { root.clear-tree-scope(); }
                                             root.navigate(node.path);
                                         }
                                     }
@@ -915,7 +919,7 @@ export component SftpPanel inherits Rectangle {
                                 spacing: 1px;
                                 SftpMenuItem {
                                     label: @tr("打开目录");
-                                    clicked => { root.search-mode = false; file-search.text = ""; root.search-changed(""); root.tree-active-path = root.tree-menu-target; root.navigate(root.tree-menu-target); }
+                                    clicked => { root.search-mode = false; file-search.text = ""; root.search-changed(""); root.tree-active-path = root.tree-menu-target; if (root.tree-scope == "/") { root.clear-tree-scope(); } root.navigate(root.tree-menu-target); }
                                 }
                                 SftpMenuItem {
                                     label: @tr("加入/移出搜索范围");

@@ -193,6 +193,8 @@ fn is_sftp_search_finished_status(msg: &str) -> bool {
     let m = msg.trim();
     m.contains("搜索完成")
         || m.contains("搜索已停止")
+        || m.contains("正在停止搜索")
+        || m.contains("Stopping search")
         || m.contains("当前没有正在运行")
         || m.contains("Search complete")
         || m.contains("Search stopped")
@@ -2996,6 +2998,23 @@ fn start_session_in_tab(tab_id: &str, session: Session, ctx: &ConnectCtx) {
                                 ui_batch.push(SessionEvent::Output(chunk));
                             }
                         }
+                        SessionEvent::Closed(reason) => {
+                            // Terminal closed means the file-side connection must close too.
+                            // Remove and force-close the SFTP worker before the UI marks the
+                            // tab disconnected, otherwise a slow file listing/search can keep
+                            // using the old file connection and make the panel very laggy.
+                            let stale_sftp = sftp_handles_pump
+                                .lock()
+                                .ok()
+                                .and_then(|mut m| m.remove(&tab_id_pump));
+                            if let Some(h) = stale_sftp {
+                                h.close();
+                            }
+                            if let Ok(mut m) = sftp_last_cwd_pump.lock() {
+                                m.remove(&tab_id_pump);
+                            }
+                            ui_batch.push(SessionEvent::Closed(reason));
+                        }
                         other => ui_batch.push(other),
                     }
                 }
@@ -3830,6 +3849,29 @@ fn apply_session_event_to_window(
         }
     };
 
+    // Once the shell side is disconnected, the file browser must be considered
+    // disconnected too. Ignore late SFTP events from a stale/slow worker so an
+    // old directory listing/status cannot make the file panel look alive again.
+    if matches!(
+        &event,
+        SessionEvent::SftpEntries { .. }
+            | SessionEvent::SftpSearchEntries { .. }
+            | SessionEvent::SftpStatus(_)
+            | SessionEvent::SftpError(_)
+            | SessionEvent::SftpTreeUpdate(_)
+            | SessionEvent::SftpTransfer { .. }
+            | SessionEvent::SftpFileText { .. }
+    ) {
+        let disconnected = statuses
+            .lock()
+            .ok()
+            .and_then(|m| m.get(tab_id).map(|st| st.state == 2))
+            .unwrap_or(false);
+        if disconnected {
+            return;
+        }
+    }
+
     match event {
         SessionEvent::Status(status) => {
             update_terminal(&|t| t.status = status.clone().into());
@@ -3910,7 +3952,12 @@ fn apply_session_event_to_window(
             );
             update_tab(&|t| t.connected = false);
             let status_reason = reason_with_hint.lines().next().unwrap_or(reason.as_str());
-            update_terminal(&|t| t.status = format!("{} — {status_reason}", crate::i18n::t("已断开", "Disconnected")).into());
+            update_terminal(&|t| {
+                t.status = format!("{} — {status_reason}", crate::i18n::t("已断开", "Disconnected")).into();
+                t.sftp_status = crate::i18n::t("文件连接已断开", "File connection disconnected").into();
+                t.sftp_loading = false;
+                t.sftp_search_running = false;
+            });
             if let Some(st) = statuses.lock().unwrap().get_mut(tab_id) {
                 st.state = 2;
             }
@@ -3993,10 +4040,54 @@ fn apply_session_event_to_window(
                 t.sftp_selected_count = selected_count;
             });
         }
+        SessionEvent::SftpSearchEntries { root: _, query, entries } => {
+            let base_entries: Vec<SftpEntry> = entries
+                .iter()
+                .map(|e| SftpEntry {
+                    name: e.name.clone().into(),
+                    full_path: e.full_path.clone().into(),
+                    is_dir: e.is_dir,
+                    kind: e.kind.clone().into(),
+                    size: if e.is_dir {
+                        "".into()
+                    } else {
+                        format_size(e.size).into()
+                    },
+                    modified: format_mtime(e.modified).into(),
+                    mode: (e.mode & 0o7777) as i32,
+                    mode_text: format!("{:04o}", e.mode & 0o7777).into(),
+                    selected: false,
+                })
+                .collect();
+            let query = query.clone();
+            update_terminal(&|t| {
+                // If the user has pressed X/Stop or started another search, ignore
+                // late results from the old background task. This fixes stale
+                // global/current search results overwriting the restored folder.
+                if !t.sftp_search_running || t.sftp_search.as_str() != query.as_str() {
+                    return;
+                }
+                let mut slint_entries = base_entries.clone();
+                let selected_count = mark_sftp_entries_for_scope(&mut slint_entries, t.sftp_tree_scope.as_str());
+                let all_model = sftp_entries_model(slint_entries.clone());
+                let model = sftp_entries_model(slint_entries);
+                t.sftp_all_entries = all_model;
+                t.sftp_entries = model;
+                t.sftp_loading = false;
+                t.sftp_selected_count = selected_count;
+            });
+        }
         SessionEvent::SftpStatus(msg) => {
             let running = is_sftp_search_running_status(msg.as_str());
             let finished = is_sftp_search_finished_status(msg.as_str());
             update_terminal(&|t| {
+                // After the user presses X/Stop we mark the search as not running
+                // immediately. Ignore late "搜索中" progress messages from the
+                // background walker, otherwise the stop button turns red again
+                // and it looks like the cancelled search is still active.
+                if running && !t.sftp_search_running {
+                    return;
+                }
                 t.sftp_status = msg.clone().into();
                 if running {
                     t.sftp_search_running = true;
@@ -5455,10 +5546,36 @@ fn wire_sftp_callbacks(
     // ignores unreadable branches instead of failing the whole search.
     {
         let sftp_handles = sftp_handles.clone();
+        let weak = window.as_weak();
         window.on_sftp_search_folder(move |tab_id: SharedString, root_dir: SharedString, query: SharedString| {
             let tab_id = tab_id.to_string();
             let root_dir = root_dir.to_string();
             let query = query.to_string();
+            // Mark the active search immediately. The worker runs recursively in
+            // the background, so status/results can arrive after the user presses
+            // X or Stop. app.rs will only accept SearchEntries matching this
+            // still-active query; late old results are discarded.
+            if let Some(w) = weak.upgrade() {
+                let terminals = w.get_terminals();
+                if let Some(tm) = terminals.as_any().downcast_ref::<VecModel<TerminalState>>() {
+                    for ti in 0..tm.row_count() {
+                        if let Some(mut row) = tm.row_data(ti) {
+                            if row.id.as_str() == tab_id.as_str() {
+                                row.sftp_search = query.clone().into();
+                                row.sftp_search_running = true;
+                                row.sftp_status = format!(
+                                    "{}: {}{}",
+                                    crate::i18n::t("搜索中", "Searching"),
+                                    sftp_scope_status(&root_dir),
+                                    if query.trim().is_empty() { String::new() } else { format!("  ·  {}", query) }
+                                ).into();
+                                tm.set_row_data(ti, row);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
             if let Ok(handles) = sftp_handles.lock() {
                 if let Some(h) = handles.get(&tab_id) {
                     h.search(root_dir, query);
@@ -5470,8 +5587,24 @@ fn wire_sftp_callbacks(
     // Stop a recursive file search without closing the SSH/SFTP worker.
     {
         let sftp_handles = sftp_handles.clone();
+        let weak = window.as_weak();
         window.on_sftp_cancel_search(move |tab_id: SharedString| {
             let tab_id = tab_id.to_string();
+            if let Some(w) = weak.upgrade() {
+                let terminals = w.get_terminals();
+                if let Some(tm) = terminals.as_any().downcast_ref::<VecModel<TerminalState>>() {
+                    for ti in 0..tm.row_count() {
+                        if let Some(mut row) = tm.row_data(ti) {
+                            if row.id.as_str() == tab_id.as_str() {
+                                row.sftp_search_running = false;
+                                row.sftp_status = crate::i18n::t("搜索已停止", "Search stopped").into();
+                                tm.set_row_data(ti, row);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
             if let Ok(handles) = sftp_handles.lock() {
                 if let Some(h) = handles.get(&tab_id) {
                     h.cancel_search();
@@ -6374,6 +6507,10 @@ fn wire_key_input(
                         set_terminal_row(&w, tab_id.as_str(), |t| {
                             t.status =
                                 crate::i18n::t("重连中...", "Reconnecting...").into();
+                            t.sftp_status =
+                                crate::i18n::t("SFTP 连接中...", "SFTP connecting...").into();
+                            t.sftp_loading = true;
+                            t.sftp_search_running = false;
                         });
                     }
                     start_session_in_tab(tab_id.as_str(), session, &ctx);

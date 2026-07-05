@@ -179,7 +179,11 @@ impl SftpHandle {
         let _ = self.commands.send(SftpCommand::WriteText { remote, content });
     }
     pub fn close(&self) {
+        // Do not only enqueue Close: the SFTP worker may be blocked in a slow
+        // directory listing/search on flaky links. Abort the worker as well so
+        // the file-side connection drops in sync with the terminal session.
         let _ = self.commands.send(SftpCommand::Close);
+        self.join.abort();
     }
 }
 
@@ -581,7 +585,21 @@ async fn run_sftp(
     let mut search_cancel: Option<Arc<AtomicBool>> = None;
     while let Some(cmd) = commands.recv().await {
         match cmd {
-            SftpCommand::Close => break,
+            SftpCommand::Close => {
+                if let Some(cancel) = search_cancel.take() {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+                if let Ok(c) = cancels.lock() {
+                    for flag in c.values() {
+                        flag.store(true, Ordering::Relaxed);
+                    }
+                }
+                let _ = events.send(SessionEvent::SftpStatus(t(
+                    "文件连接已断开",
+                    "File connection disconnected",
+                ).into()));
+                break;
+            }
 
             SftpCommand::ListDir(path) => {
                 let _ = events.send(SessionEvent::SftpStatus(format!("{} {}...", t("加载", "Loading"), path)));
@@ -696,8 +714,9 @@ async fn run_sftp(
                         return;
                     }
                     let count = all.len();
-                    let _ = events.send(SessionEvent::SftpEntries {
-                        path: result_path.clone(),
+                    let _ = events.send(SessionEvent::SftpSearchEntries {
+                        root: result_path.clone(),
+                        query: query.clone(),
                         entries: all,
                     });
                     let _ = events.send(SessionEvent::SftpStatus(format!(
@@ -1364,7 +1383,16 @@ async fn run_ssh_file_browser(
     let mut search_cancel: Option<Arc<AtomicBool>> = None;
     while let Some(cmd) = commands.recv().await {
         match cmd {
-            SftpCommand::Close => break,
+            SftpCommand::Close => {
+                if let Some(cancel) = search_cancel.take() {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+                let _ = events.send(SessionEvent::SftpStatus(t(
+                    "文件连接已断开",
+                    "File connection disconnected",
+                ).into()));
+                break;
+            }
             SftpCommand::ListDir(path) | SftpCommand::RefreshDir(path) => {
                 emit_shell_dir(&handle, &events, &path).await;
                 ensure_shell_tree_path(&handle, &path, &mut tree_dirs, &mut tree_expanded).await;
@@ -1432,8 +1460,9 @@ async fn run_ssh_file_browser(
                         return;
                     }
                     let count = all.len();
-                    let _ = events.send(SessionEvent::SftpEntries {
-                        path: result_path.clone(),
+                    let _ = events.send(SessionEvent::SftpSearchEntries {
+                        root: result_path.clone(),
+                        query: query.clone(),
                         entries: all,
                     });
                     let _ = events.send(SessionEvent::SftpStatus(format!(

@@ -412,6 +412,14 @@ pub enum SessionEvent {
         path: String,
         entries: Vec<RemoteEntry>,
     },
+    /// Recursive SFTP search results. Kept separate from normal directory
+    /// listings so a cancelled/cleared search cannot overwrite the restored
+    /// current directory view when its background task finishes late.
+    SftpSearchEntries {
+        root: String,
+        query: String,
+        entries: Vec<RemoteEntry>,
+    },
     /// Free-form SFTP status message (progress, errors, etc.).
     SftpStatus(String),
     /// A directory listing failed (e.g. permission denied): show the message and
