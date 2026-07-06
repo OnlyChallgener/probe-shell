@@ -583,11 +583,15 @@ async fn run_sftp(
     // Keep long recursive searches off the command loop. Otherwise a router search
     // makes navigation/refresh feel frozen until the walk finishes.
     let mut search_cancel: Option<Arc<AtomicBool>> = None;
+    let mut search_task: Option<JoinHandle<()>> = None;
     while let Some(cmd) = commands.recv().await {
         match cmd {
             SftpCommand::Close => {
                 if let Some(cancel) = search_cancel.take() {
                     cancel.store(true, Ordering::Relaxed);
+                }
+                if let Some(task) = search_task.take() {
+                    task.abort();
                 }
                 if let Ok(c) = cancels.lock() {
                     for flag in c.values() {
@@ -677,15 +681,18 @@ async fn run_sftp(
                 if let Some(cancel) = search_cancel.take() {
                     cancel.store(true, Ordering::Relaxed);
                 }
+                if let Some(task) = search_task.take() {
+                    task.abort();
+                }
                 let cancel = Arc::new(AtomicBool::new(false));
                 search_cancel = Some(cancel.clone());
                 let roots = split_search_roots(&root);
                 let label = search_roots_label(&roots);
-                let result_path = roots.first().cloned().unwrap_or_else(|| "/".to_string());
+                let result_path = root.clone();
                 let query = query.trim().to_string();
                 let sftp = sftp.clone();
                 let events = events.clone();
-                tokio::spawn(async move {
+                search_task = Some(tokio::spawn(async move {
                     let _ = events.send(SessionEvent::SftpStatus(format!(
                         "{}: {}{}",
                         t("搜索中", "Searching"),
@@ -725,12 +732,15 @@ async fn run_sftp(
                         label,
                         count
                     )));
-                });
+                }));
             }
 
             SftpCommand::CancelSearch => {
                 if let Some(cancel) = search_cancel.take() {
                     cancel.store(true, Ordering::Relaxed);
+                    if let Some(task) = search_task.take() {
+                        task.abort();
+                    }
                     let _ = events.send(SessionEvent::SftpStatus(t("正在停止搜索...", "Stopping search...").into()));
                 } else {
                     let _ = events.send(SessionEvent::SftpStatus(t("当前没有正在运行的搜索", "No active search").into()));
@@ -1381,11 +1391,15 @@ async fn run_ssh_file_browser(
     // Same rule as real SFTP mode: recursive search must never block the file
     // browser command loop. This keeps folder expansion and refresh responsive.
     let mut search_cancel: Option<Arc<AtomicBool>> = None;
+    let mut search_task: Option<JoinHandle<()>> = None;
     while let Some(cmd) = commands.recv().await {
         match cmd {
             SftpCommand::Close => {
                 if let Some(cancel) = search_cancel.take() {
                     cancel.store(true, Ordering::Relaxed);
+                }
+                if let Some(task) = search_task.take() {
+                    task.abort();
                 }
                 let _ = events.send(SessionEvent::SftpStatus(t(
                     "文件连接已断开",
@@ -1423,15 +1437,18 @@ async fn run_ssh_file_browser(
                 if let Some(cancel) = search_cancel.take() {
                     cancel.store(true, Ordering::Relaxed);
                 }
+                if let Some(task) = search_task.take() {
+                    task.abort();
+                }
                 let cancel = Arc::new(AtomicBool::new(false));
                 search_cancel = Some(cancel.clone());
                 let roots = split_search_roots(&root);
                 let label = search_roots_label(&roots);
-                let result_path = roots.first().cloned().unwrap_or_else(|| "/".to_string());
+                let result_path = root.clone();
                 let query = query.trim().to_string();
                 let handle = handle.clone();
                 let events = events.clone();
-                tokio::spawn(async move {
+                search_task = Some(tokio::spawn(async move {
                     let _ = events.send(SessionEvent::SftpStatus(format!(
                         "{}: {}{}",
                         t("搜索中", "Searching"),
@@ -1471,11 +1488,14 @@ async fn run_ssh_file_browser(
                         label,
                         count
                     )));
-                });
+                }));
             }
             SftpCommand::CancelSearch => {
                 if let Some(cancel) = search_cancel.take() {
                     cancel.store(true, Ordering::Relaxed);
+                    if let Some(task) = search_task.take() {
+                        task.abort();
+                    }
                     let _ = events.send(SessionEvent::SftpStatus(t("正在停止搜索...", "Stopping search...").into()));
                 } else {
                     let _ = events.send(SessionEvent::SftpStatus(t("当前没有正在运行的搜索", "No active search").into()));
