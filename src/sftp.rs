@@ -38,6 +38,7 @@ use crate::ssh::{format_mtime, format_size, RemoteEntry, RemoteTreeNode, Session
 const SFTP_DIR_TIMEOUT: Duration = Duration::from_secs(22);
 const SFTP_STAT_TIMEOUT: Duration = Duration::from_secs(8);
 const SSH_BROWSER_EXEC_TIMEOUT: Duration = Duration::from_secs(18);
+const SFTP_MAX_RECURSIVE_NODES: usize = 20_000;
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -776,12 +777,7 @@ async fn run_sftp(
                 let cancels_done = cancels.clone();
                 tokio::spawn(async move {
                 // A directory target → recursively mirror the whole tree (#50).
-                let is_dir = sftp
-                    .metadata(&remote)
-                    .await
-                    .ok()
-                    .map(|m| (m.permissions.unwrap_or(0) & 0o170_000) == 0o040_000)
-                    .unwrap_or(false);
+                let is_dir = remote_lstat_is_dir(&sftp, &remote).await.unwrap_or(false);
                 if is_dir {
                     let dirname = base_name(&remote);
                     // #100.3: an empty folder downloads nothing — just say so
@@ -1007,15 +1003,18 @@ async fn run_sftp(
             SftpCommand::Delete(path) => {
                 let filename = base_name(&path);
                 let _ = events.send(SessionEvent::SftpStatus(format!("{} {}...", t("删除", "Deleting"), filename)));
+                if is_forbidden_remote_path(&path) {
+                    let _ = events.send(SessionEvent::SftpStatus(format!(
+                        "{}: {}",
+                        t("鍒犻櫎澶辫触", "Delete failed"),
+                        t("拒绝删除危险路径", "Refusing to delete a dangerous path")
+                    )));
+                    continue;
+                }
                 // Directories are removed recursively (a plain remove_dir only
                 // works on an empty dir, so an uploaded folder couldn't be
                 // deleted); files via remove_file.
-                let is_dir = sftp
-                    .metadata(&path)
-                    .await
-                    .ok()
-                    .map(|m| (m.permissions.unwrap_or(0) & 0o170_000) == 0o040_000)
-                    .unwrap_or(false);
+                let is_dir = remote_lstat_is_dir(&sftp, &path).await.unwrap_or(false);
                 let res: Result<()> = if is_dir {
                     remove_dir_recursive(&sftp, &path).await
                 } else {
@@ -1543,7 +1542,25 @@ async fn run_ssh_file_browser(
             }
             SftpCommand::Delete(path) => {
                 let refresh = parent_dir(&path);
-                let cmd = format!("rm -rf {}", sh_quote(&path));
+                if is_forbidden_remote_path(&path) {
+                    let _ = events.send(SessionEvent::SftpStatus(format!(
+                        "{}: {}",
+                        t("鍒犻櫎澶辫触", "Delete failed"),
+                        t("拒绝删除危险路径", "Refusing to delete a dangerous path")
+                    )));
+                    continue;
+                }
+                let cmd = format!(
+                    concat!(
+                        "p={0}; ",
+                        "[ -n \"$p\" ] && [ \"$p\" != / ] && [ \"$p\" != . ] && [ \"$p\" != .. ] || exit 64; ",
+                        "if [ -L \"$p\" ] || [ ! -d \"$p\" ]; then rm -f -- \"$p\"; ",
+                        "else find \"$p\" -xdev -depth -mindepth 1 ",
+                        "\\( -type l -o -type f -o ! -type d \\) -exec rm -f -- {{}} + -o -type d -exec rmdir -- {{}} +; ",
+                        "rmdir -- \"$p\"; fi"
+                    ),
+                    sh_quote(&path)
+                );
                 emit_shell_action(&handle, &events, &cmd, t("删除失败", "Delete failed")).await;
                 if tree_dirs.contains_key(&refresh) {
                     if let Ok(dirs) = shell_list_dirs_only(&handle, &refresh).await {
@@ -2228,6 +2245,27 @@ fn normalise_remote_dir(path: &str) -> String {
     }
 }
 
+fn is_forbidden_remote_path(path: &str) -> bool {
+    let p = path.trim();
+    if p.is_empty() || p == "/" || p == "." || p == ".." {
+        return true;
+    }
+    let trimmed = p.trim_end_matches('/');
+    trimmed.is_empty() || trimmed == "." || trimmed == ".."
+}
+
+fn mode_is_dir(permissions: Option<u32>) -> bool {
+    (permissions.unwrap_or(0) & 0o170_000) == 0o040_000
+}
+
+async fn remote_lstat_is_dir(sftp: &SftpSession, path: &str) -> Result<bool> {
+    let meta = sftp
+        .symlink_metadata(path)
+        .await
+        .with_context(|| format!("lstat {path}"))?;
+    Ok(mode_is_dir(meta.permissions))
+}
+
 fn split_search_roots(root: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for raw in root.split(';') {
@@ -2682,15 +2720,29 @@ async fn download_dir(
     let root_local = format!("{}/{}", local_parent.trim_end_matches('/'), root_name);
     // (remote_dir, local_dir) pairs still to mirror.
     let mut stack = vec![(remote_root.trim_end_matches('/').to_string(), root_local)];
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut nodes = 0usize;
     while let Some((rdir, ldir)) = stack.pop() {
+        let key = normalise_remote_dir(&rdir).to_lowercase();
+        if !visited.insert(key) {
+            continue;
+        }
+        nodes += 1;
+        if nodes > SFTP_MAX_RECURSIVE_NODES {
+            return Err(anyhow!("recursive download exceeded node limit"));
+        }
         tokio::fs::create_dir_all(&ldir)
             .await
             .with_context(|| format!("create local dir {ldir}"))?;
         for entry in list_dir_impl(sftp, &rdir).await? {
-            if entry.is_dir {
+            nodes += 1;
+            if nodes > SFTP_MAX_RECURSIVE_NODES {
+                return Err(anyhow!("recursive download exceeded node limit"));
+            }
+            if entry.is_dir && entry.kind != "symlink-dir" {
                 let child_local = format!("{}/{}", ldir, sanitize_filename(&entry.name));
                 stack.push((entry.full_path, child_local));
-            } else {
+            } else if !entry.is_dir {
                 let fname = sanitize_filename(&entry.name);
                 let lpath = format!("{}/{}", ldir, fname);
                 let id = Uuid::new_v4().to_string();
@@ -2708,14 +2760,27 @@ async fn download_dir(
 /// uploaded folder failed. We BFS to discover every sub-directory (deleting
 /// files as we go), then rmdir them deepest-first.
 async fn remove_dir_recursive(sftp: &SftpSession, root: &str) -> Result<()> {
+    if is_forbidden_remote_path(root) {
+        return Err(anyhow!("refusing to delete dangerous path"));
+    }
     let mut all_dirs = vec![root.trim_end_matches('/').to_string()];
+    let mut visited: HashSet<String> = HashSet::new();
+    visited.insert(normalise_remote_dir(root).to_lowercase());
+    let mut nodes = 1usize;
     let mut i = 0;
     while i < all_dirs.len() {
         let d = all_dirs[i].clone();
         i += 1;
         for entry in list_dir_impl(sftp, &d).await? {
-            if entry.is_dir {
-                all_dirs.push(entry.full_path);
+            nodes += 1;
+            if nodes > SFTP_MAX_RECURSIVE_NODES {
+                return Err(anyhow!("recursive delete exceeded node limit"));
+            }
+            if entry.is_dir && entry.kind != "symlink-dir" {
+                let key = normalise_remote_dir(&entry.full_path).to_lowercase();
+                if visited.insert(key) {
+                    all_dirs.push(entry.full_path);
+                }
             } else {
                 sftp.remove_file(&entry.full_path)
                     .await
@@ -2750,7 +2815,21 @@ async fn upload_dir(
     let root_name = base_name(local_root);
     let remote_root = format!("{}/{}", remote_parent.trim_end_matches('/'), root_name);
     let mut stack = vec![(local_root.to_string(), remote_root)];
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut nodes = 0usize;
     while let Some((ldir, rdir)) = stack.pop() {
+        let key = tokio::fs::canonicalize(&ldir)
+            .await
+            .unwrap_or_else(|_| Path::new(&ldir).to_path_buf())
+            .to_string_lossy()
+            .to_lowercase();
+        if !visited.insert(key) {
+            continue;
+        }
+        nodes += 1;
+        if nodes > SFTP_MAX_RECURSIVE_NODES {
+            return Err(anyhow!("recursive upload exceeded node limit"));
+        }
         // Best-effort mkdir; an error usually just means the dir already exists.
         let _ = sftp.create_dir(&rdir).await;
         let mut rd = tokio::fs::read_dir(&ldir)
@@ -2760,10 +2839,19 @@ async fn upload_dir(
             let name = entry.file_name().to_string_lossy().to_string();
             let lpath = entry.path().to_string_lossy().to_string();
             let rchild = format!("{}/{}", rdir, name);
-            let ft = entry.file_type().await.context("file type")?;
-            if ft.is_dir() {
+            let meta = tokio::fs::symlink_metadata(entry.path())
+                .await
+                .context("file type")?;
+            nodes += 1;
+            if nodes > SFTP_MAX_RECURSIVE_NODES {
+                return Err(anyhow!("recursive upload exceeded node limit"));
+            }
+            if meta.file_type().is_symlink() {
+                continue;
+            }
+            if meta.is_dir() {
                 stack.push((lpath, rchild));
-            } else if ft.is_file() {
+            } else if meta.is_file() {
                 let id = Uuid::new_v4().to_string();
                 upload_pipelined(handle, &lpath, &rchild, &name, &id, events, &no_cancel).await?;
             }
