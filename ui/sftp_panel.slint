@@ -51,9 +51,6 @@ component SftpMenuItem inherits Rectangle {
     }
 }
 
-
-
-
 // Consistent file-kind glyph used in the right file list and left navigation.
 // Avoid emoji folder+arrow combinations because they render differently on
 // Windows fonts. Empty-directory page keeps the previous 📂 empty-state icon.
@@ -107,8 +104,10 @@ component QuickAccessButton inherits Rectangle {
     in property <string> label;
     in property <string> path;
     in property <bool> editing: false;
+    in property <string> tooltip: "";
     callback clicked();
     callback remove();
+    callback hover-tip(string);
     height: 20px;
     border-radius: Theme.radius-sm;
     background: qa-ta.has-hover ? Theme.bg-hover : transparent;
@@ -118,6 +117,9 @@ component QuickAccessButton inherits Rectangle {
         width: parent.width;
         height: parent.height;
         mouse-cursor: pointer;
+        changed has-hover => {
+            root.hover-tip(self.has-hover ? root.tooltip : "");
+        }
         clicked => { root.clicked(); }
     }
     Text {
@@ -173,16 +175,13 @@ export component SftpPanel inherits Rectangle {
     property <length> tree-grab-x;
     property <length> tree-base-width;
     // Responsive columns: only when docked left/right (narrow, width-adjustable).
-    // Docked top/bottom the panel is wide and can only be resized vertically, so
-    // always show every column there (show-tree is true exactly in that case).
-    // When narrow, drop Size then Modified the moment keeping them would squeeze
-    // the Name column below `name-min` (names start eliding to "…"). Reserved
-    // widths: checkbox+padding+spacing 36px, Size col 76px, Modified 120px.
+    // Search results reserve the width for name + full path and deliberately hide
+    // the secondary columns, so a valid filename can never collapse to a lone "…".
     property <length> list-w: root.show-tree ? root.width - root.tree-width - 6px : root.width;
-    property <length> name-min: 180px;     // narrower than this → start dropping columns
-    property <bool> show-size-col: root.show-tree || (root.list-w - 36px - 76px - 62px - 120px > root.name-min);
-    property <bool> show-mode-col: root.show-tree || (root.list-w - 36px - 62px - 120px > root.name-min);
-    property <bool> show-modified-col: root.show-tree || (root.list-w - 36px - 120px > root.name-min);
+    property <length> name-min: 180px;
+    property <bool> show-size-col: !root.search-mode && (root.show-tree || (root.list-w - 36px - 76px - 62px - 120px > root.name-min));
+    property <bool> show-mode-col: !root.search-mode && (root.show-tree || (root.list-w - 36px - 62px - 120px > root.name-min));
+    property <bool> show-modified-col: !root.search-mode && (root.show-tree || (root.list-w - 36px - 120px > root.name-min));
     property <int> selected-row: -1;       // clicked/highlighted file-list row (#70)
     in property <int> selected-count;      // number of checked entries (#100)
     // Panel-level right-click context menu (#84). One menu for the whole list:
@@ -205,7 +204,14 @@ export component SftpPanel inherits Rectangle {
     property <string> tree-menu-target;
     property <string> toolbar-tip: ""; // hover hint for compact icon buttons
     property <bool> toolbar-tip-ready: false;
-    property <length> qa-popup-width: min(560px, max(380px, root.width - 16px));
+    property <length> qa-popup-width: min(620px, max(380px, root.width - 24px));
+    property <length> qa-popup-offset-x: 0px;
+    property <length> qa-popup-offset-y: 0px;
+    property <bool> qa-popup-dragging: false;
+    property <length> qa-popup-drag-start-x;
+    property <length> qa-popup-drag-start-y;
+    property <length> qa-popup-drag-base-x;
+    property <length> qa-popup-drag-base-y;
     property <string> pending-local-search: "";
     property <bool> local-search-pending: false;
     property <bool> search-mode: false;       // global/search-results mode; disables left navigation while active
@@ -727,13 +733,15 @@ export component SftpPanel inherits Rectangle {
                             root.qa-manual-path = root.current-path;
                             root.qa-manual-label = "";
                             root.qa-manual-group = "";
+                            root.qa-popup-offset-x = 0px;
+                            root.qa-popup-offset-y = 0px;
                             qa-manager.show();
                         }
                     }
                     Text { text: "\u{E8B8}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
                     qa-manager := PopupWindow {
-                        x: 20px - root.qa-popup-width;
-                        y: 24px;
+                        x: root.absolute-position.x - qa-manage-ta.absolute-position.x + (root.width - root.qa-popup-width) / 2 + root.qa-popup-offset-x;
+                        y: root.absolute-position.y - qa-manage-ta.absolute-position.y + (root.height - 146px) / 2 + root.qa-popup-offset-y;
                         width: root.qa-popup-width;
                         height: 146px;
                         Rectangle {
@@ -748,6 +756,29 @@ export component SftpPanel inherits Rectangle {
                                 spacing: 6px;
                                 Rectangle {
                                     height: 22px;
+                                    title-drag := TouchArea {
+                                        width: parent.width - 58px;
+                                        height: parent.height;
+                                        mouse-cursor: move;
+                                        pointer-event(ev) => {
+                                            if (ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left) {
+                                                root.qa-popup-dragging = true;
+                                                root.qa-popup-drag-start-x = self.absolute-position.x + self.mouse-x;
+                                                root.qa-popup-drag-start-y = self.absolute-position.y + self.mouse-y;
+                                                root.qa-popup-drag-base-x = root.qa-popup-offset-x;
+                                                root.qa-popup-drag-base-y = root.qa-popup-offset-y;
+                                            }
+                                            if (ev.kind == PointerEventKind.up) {
+                                                root.qa-popup-dragging = false;
+                                            }
+                                        }
+                                        moved => {
+                                            if (root.qa-popup-dragging) {
+                                                root.qa-popup-offset-x = root.qa-popup-drag-base-x + self.absolute-position.x + self.mouse-x - root.qa-popup-drag-start-x;
+                                                root.qa-popup-offset-y = root.qa-popup-drag-base-y + self.absolute-position.y + self.mouse-y - root.qa-popup-drag-start-y;
+                                            }
+                                        }
+                                    }
                                     Text {
                                         x: 0px;
                                         width: parent.width - 58px;
@@ -786,7 +817,7 @@ export component SftpPanel inherits Rectangle {
                                         qa-close-ta := TouchArea {
                                             mouse-cursor: pointer;
                                             changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("关闭快捷目录管理") : ""; }
-                                            clicked => { root.quick-edit-mode = false; qa-manager.close(); }
+                                            clicked => { root.quick-edit-mode = false; root.qa-popup-dragging = false; qa-manager.close(); }
                                         }
                                         Text {
                                             text: "\u{E5CD}";
@@ -798,11 +829,20 @@ export component SftpPanel inherits Rectangle {
                                         }
                                     }
                                 }
+                                Rectangle {
+                                    height: 26px;
+                                    border-radius: Theme.radius-sm;
+                                    border-width: 1px;
+                                    border-color: Theme.border-subtle;
+                                    background: Theme.bg-root;
+                                    TextInput { x: 8px; width: parent.width - 16px; height: parent.height; text <=> root.qa-manual-path; single-line: true; font-size: Theme.fs-sm; color: Theme.text-primary; vertical-alignment: center; }
+                                    Text { x: 8px; text: root.qa-manual-path == "" ? @tr("自定义目录路径，例如 /etc/config") : ""; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; height: parent.height; }
+                                }
                                 HorizontalLayout {
                                     height: 26px;
                                     spacing: 6px;
                                     Rectangle {
-                                        width: 96px;
+                                        horizontal-stretch: 1;
                                         border-radius: Theme.radius-sm;
                                         border-width: 1px;
                                         border-color: Theme.border-subtle;
@@ -811,7 +851,7 @@ export component SftpPanel inherits Rectangle {
                                         Text { x: 8px; text: root.qa-manual-label == "" ? @tr("名称/备注") : ""; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; height: parent.height; }
                                     }
                                     Rectangle {
-                                        width: 88px;
+                                        width: 110px;
                                         border-radius: Theme.radius-sm;
                                         border-width: 1px;
                                         border-color: Theme.border-subtle;
@@ -820,16 +860,7 @@ export component SftpPanel inherits Rectangle {
                                         Text { x: 8px; text: root.qa-manual-group == "" ? @tr("分组") : ""; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; height: parent.height; }
                                     }
                                     Rectangle {
-                                        horizontal-stretch: 1;
-                                        border-radius: Theme.radius-sm;
-                                        border-width: 1px;
-                                        border-color: Theme.border-subtle;
-                                        background: Theme.bg-root;
-                                        TextInput { x: 8px; width: parent.width - 16px; height: parent.height; text <=> root.qa-manual-path; single-line: true; font-size: Theme.fs-sm; color: Theme.text-primary; vertical-alignment: center; }
-                                        Text { x: 8px; text: root.qa-manual-path == "" ? @tr("目录地址，例如 /etc/config") : ""; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; height: parent.height; }
-                                    }
-                                    Rectangle {
-                                        width: 56px;
+                                        width: 64px;
                                         border-radius: Theme.radius-sm;
                                         background: add-qa-ta.has-hover ? Theme.accent.with-alpha(0.86) : Theme.accent;
                                         add-qa-ta := TouchArea {
@@ -879,8 +910,26 @@ export component SftpPanel inherits Rectangle {
                 }
 
                 // Back history and up one level are separate: ← returns to the last opened folder, ↑ goes to parent.
-                QuickAccessButton { width: 28px; label: "←"; path: "back"; editing: false; clicked => { root.navigate-back(); } remove => { } }
-                QuickAccessButton { width: 28px; label: "↑"; path: ".."; editing: false; clicked => { root.navigate(".."); } remove => { } }
+                QuickAccessButton {
+                    width: 28px;
+                    label: "←";
+                    path: "back";
+                    editing: false;
+                    tooltip: @tr("返回上一次打开的目录");
+                    hover-tip(t) => { root.toolbar-tip = t; }
+                    clicked => { root.navigate-back(); }
+                    remove => { }
+                }
+                QuickAccessButton {
+                    width: 28px;
+                    label: "↑";
+                    path: "..";
+                    editing: false;
+                    tooltip: @tr("返回上一级目录");
+                    hover-tip(t) => { root.toolbar-tip = t; }
+                    clicked => { root.navigate(".."); }
+                    remove => { }
+                }
 
                 Rectangle { horizontal-stretch: 1; }
                 Text {
@@ -905,7 +954,7 @@ export component SftpPanel inherits Rectangle {
 
             // ── Left: simple directory navigation list ----------------------
             // No tree expanders and no recursive checkbox here. The left side is
-            // only for opening directories or adding a directory to search scope.
+            // only for opening directories or adding them to search scope.
             if root.show-tree : VerticalLayout {
                 width: root.tree-width;
                 opacity: root.search-mode ? 0.42 : 1.0;
@@ -1132,10 +1181,12 @@ export component SftpPanel inherits Rectangle {
                         // Spacer matching the rows' checkbox so the header columns
                         // line up with the values below them (#dock).
                         Rectangle { width: 16px; }
-                        Text { text: @tr("名称"); color: Theme.text-muted; font-size: Theme.fs-xs;
+                        if root.search-mode : Text { text: @tr("名称"); color: Theme.text-muted; font-size: Theme.fs-xs;
+                               width: 180px; vertical-alignment: center; }
+                        if !root.search-mode : Text { text: @tr("名称"); color: Theme.text-muted; font-size: Theme.fs-xs;
                                horizontal-stretch: 1; vertical-alignment: center; }
                         if root.search-mode : Text { text: @tr("位置"); color: Theme.text-muted; font-size: Theme.fs-xs;
-                               width: 180px; horizontal-alignment: left; vertical-alignment: center; }
+                               horizontal-stretch: 1; min-width: 180px; horizontal-alignment: left; vertical-alignment: center; }
                         if root.show-size-col : Text { text: @tr("大小"); color: Theme.text-muted; font-size: Theme.fs-xs;
                                width: 72px; horizontal-alignment: right; vertical-alignment: center; }
                         if root.show-mode-col : Text { text: @tr("权限"); color: Theme.text-muted; font-size: Theme.fs-xs;
@@ -1263,7 +1314,15 @@ export component SftpPanel inherits Rectangle {
                                         kind: entry.kind;
                                     }
 
-                                    Text {
+                                    if root.search-mode : Text {
+                                        text: entry.name;
+                                        color: entry.kind == "dead-link" ? Theme.text-muted : (entry.is-dir ? Theme.accent : Theme.text-primary);
+                                        font-size: Theme.fs-sm;
+                                        width: 180px;
+                                        overflow: elide;
+                                        vertical-alignment: center;
+                                    }
+                                    if !root.search-mode : Text {
                                         text: entry.name;
                                         color: entry.kind == "dead-link" ? Theme.text-muted : (entry.is-dir ? Theme.accent : Theme.text-primary);
                                         font-size: Theme.fs-sm;
@@ -1275,7 +1334,8 @@ export component SftpPanel inherits Rectangle {
                                         text: entry.full-path;
                                         color: Theme.text-muted;
                                         font-size: Theme.fs-xs;
-                                        width: 180px;
+                                        horizontal-stretch: 1;
+                                        min-width: 180px;
                                         overflow: elide;
                                         vertical-alignment: center;
                                     }
