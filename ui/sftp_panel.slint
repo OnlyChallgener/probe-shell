@@ -223,11 +223,11 @@ component QuickGroupButton inherits Rectangle {
             VerticalLayout {
                 padding: 4px;
                 spacing: 0px;
-                if root.p1 != "" && root.g1 == root.group-name : QuickGroupItem { label: root.l1; path: root.p1; chosen(path) => { group-menu.close(); root.navigate(path); } }
-                if root.p2 != "" && root.g2 == root.group-name : QuickGroupItem { label: root.l2; path: root.p2; chosen(path) => { group-menu.close(); root.navigate(path); } }
-                if root.p3 != "" && root.g3 == root.group-name : QuickGroupItem { label: root.l3; path: root.p3; chosen(path) => { group-menu.close(); root.navigate(path); } }
-                if root.p4 != "" && root.g4 == root.group-name : QuickGroupItem { label: root.l4; path: root.p4; chosen(path) => { group-menu.close(); root.navigate(path); } }
-                if root.p5 != "" && root.g5 == root.group-name : QuickGroupItem { label: root.l5; path: root.p5; chosen(path) => { group-menu.close(); root.navigate(path); } }
+                if root.p1 != "" && root.g1 == root.group-name : QuickGroupItem { label: root.l1; path: root.p1; chosen(path) => { root.navigate(path); group-menu.close(); } }
+                if root.p2 != "" && root.g2 == root.group-name : QuickGroupItem { label: root.l2; path: root.p2; chosen(path) => { root.navigate(path); group-menu.close(); } }
+                if root.p3 != "" && root.g3 == root.group-name : QuickGroupItem { label: root.l3; path: root.p3; chosen(path) => { root.navigate(path); group-menu.close(); } }
+                if root.p4 != "" && root.g4 == root.group-name : QuickGroupItem { label: root.l4; path: root.p4; chosen(path) => { root.navigate(path); group-menu.close(); } }
+                if root.p5 != "" && root.g5 == root.group-name : QuickGroupItem { label: root.l5; path: root.p5; chosen(path) => { root.navigate(path); group-menu.close(); } }
             }
         }
     }
