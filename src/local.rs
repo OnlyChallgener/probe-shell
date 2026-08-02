@@ -10,6 +10,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use crate::config::Session;
 use crate::i18n::t;
 use crate::ssh::{SessionCommand, SessionEvent, SessionHandle};
+use crate::system::SystemSampler;
 
 pub fn spawn_local_session(
     runtime: &tokio::runtime::Handle,
@@ -176,6 +177,39 @@ async fn run(
         t("已启动", "Started"),
         session.name
     )));
+
+    // Local CMD/PowerShell tabs use the same sidebar event shape as SSH tabs,
+    // but their figures come from sysinfo on this machine. Previously no
+    // ResourceStats event was emitted, so the sidebar stayed at 0% with an empty
+    // disk list even though the global local sampler was already available.
+    let monitor_events = events.clone();
+    let monitor = tokio::spawn(async move {
+        let mut sampler = SystemSampler::new();
+        let mut ticker = tokio::time::interval(SystemSampler::recommended_interval());
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            ticker.tick().await;
+            let snap = sampler.sample();
+            let sent = monitor_events.send(SessionEvent::ResourceStats {
+                cpu_percent: snap.cpu_percent,
+                mem_used_kib: snap.mem_used_mib.saturating_mul(1024),
+                mem_total_kib: snap.mem_total_mib.saturating_mul(1024),
+                swap_used_kib: snap.swap_used_mib.saturating_mul(1024),
+                swap_total_kib: snap.swap_total_mib.saturating_mul(1024),
+                net: vec![(
+                    "local".to_string(),
+                    snap.net_rx_per_sec,
+                    snap.net_tx_per_sec,
+                )],
+                disks: snap.disks,
+                procs: Vec::new(),
+            });
+            if sent.is_err() {
+                break;
+            }
+        }
+    });
+
     while let Some(command) = commands.recv().await {
         match command {
             SessionCommand::RawInput(bytes) => {
@@ -202,6 +236,7 @@ async fn run(
             }
         }
     }
+    monitor.abort();
     if let Ok(mut c) = child.lock() {
         terminate_pty_child(c.as_mut());
     }
