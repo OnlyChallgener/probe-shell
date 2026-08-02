@@ -61,6 +61,8 @@ zeroize = "1"
 # (HTTP CONNECT proxies are handled in src/proxy.rs without an extra crate.)
 tokio-socks = "0.5"
 base64 = "0.22"
+# Build safe temporary tar streams for SSH-compatible folder uploads.
+tar = "0.4"
 # Enumerate installed system fonts for the Interface (font) settings picker.
 fontdb = "0.16"
 # Cross-platform serial port access for the Serial session type (#14, #17).
