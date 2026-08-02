@@ -367,7 +367,11 @@ async fn ensure_tree_path(
         if !found {
             break;
         }
-        if !tree_dirs.contains_key(&child) {
+        // The right file list has already read `target`. Fetching that same
+        // directory again only to expand the left navigation doubled every
+        // folder click on slow routers. Cache ancestors as needed, but defer the
+        // target's own child listing until the user explicitly expands it.
+        if child != target && !tree_dirs.contains_key(&child) {
             let _ = cache_tree_dir(sftp, &child, tree_dirs).await;
         }
         tree_expanded.insert(child.clone());
@@ -1408,7 +1412,7 @@ async fn ensure_shell_tree_path(
             .map(|c| c.iter().any(|(_, p)| p == &child))
             .unwrap_or(false);
         if !found { break; }
-        if !tree_dirs.contains_key(&child) {
+        if child != target && !tree_dirs.contains_key(&child) {
             let _ = cache_shell_tree_dir(handle, &child, tree_dirs).await;
         }
         tree_expanded.insert(child.clone());
@@ -2820,8 +2824,8 @@ async fn download_impl(
 /// Recursively download a remote directory tree under `local_parent` (#50).
 ///
 /// Iterative (work-stack) rather than a boxed async recursion: each remote dir
-/// is mirrored to a sanitized local name, then its files are downloaded with the
-/// same per-file pipeline used for single downloads. Names are sanitized (#26)
+/// is mirrored to a sanitized local name, then its files are downloaded with
+/// the same per-file pipeline used for single downloads. Names are sanitized (#26)
 /// so a hostile server can't escape the chosen folder.
 async fn download_dir(
     sftp: &SftpSession,
