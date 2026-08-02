@@ -30,7 +30,7 @@ export struct SftpTreeNode {
 component SftpMenuItem inherits Rectangle {
     in property <string> label;
     in property <brush> tint: Theme.text-primary;
-    in property <bool> enabled: true;   // disabled items grey out + ignore clicks
+    in property <bool> enabled: true;
     callback clicked();
     height: 26px;
     border-radius: Theme.radius-sm;
@@ -51,12 +51,9 @@ component SftpMenuItem inherits Rectangle {
     }
 }
 
-// Consistent file-kind glyph used in the right file list and left navigation.
-// Avoid emoji folder+arrow combinations because they render differently on
-// Windows fonts. Empty-directory page keeps the previous 📂 empty-state icon.
 component FileKindIcon inherits Rectangle {
     in property <bool> is-dir: false;
-    in property <string> kind: "file"; // file / dir / symlink-file / symlink-dir / dead-link
+    in property <string> kind: "file";
     in property <bool> expanded: false;
     in property <bool> hovered: false;
     width: 18px;
@@ -66,8 +63,6 @@ component FileKindIcon inherits Rectangle {
         text: root.kind == "dead-link" ? "\u{E002}" : (root.is-dir ? "\u{E2C7}" : "\u{E24D}");
         font-family: "Material Icons";
         font-size: 17px;
-        // Warm folders stay legible against both themes; files retain the
-        // existing blue-grey treatment.
         color: root.kind == "dead-link" ? Theme.text-muted : (root.is-dir ? (root.hovered ? #F6D784 : (root.expanded ? #F0C66A : #D9AE55)) : Theme.text-secondary);
         horizontal-alignment: center;
         vertical-alignment: center;
@@ -85,7 +80,7 @@ component FileKindIcon inherits Rectangle {
         border-width: 1px;
         border-color: Theme.bg-panel;
         Text {
-            text: "\u{E89E}"; // open_in_new, clearer than a raw ↗ emoji overlay
+            text: "\u{E89E}";
             font-family: "Material Icons";
             color: #ffffff;
             font-size: 6px;
@@ -97,9 +92,6 @@ component FileKindIcon inherits Rectangle {
     }
 }
 
-// Compact quick-access chip used by the SFTP shortcut row.
-// The delete "×" only appears in manage mode and is intentionally tiny so it
-// does not steal space from the path bar.
 component QuickAccessButton inherits Rectangle {
     in property <string> label;
     in property <string> path;
@@ -108,7 +100,7 @@ component QuickAccessButton inherits Rectangle {
     callback clicked();
     callback remove();
     callback hover-tip(string);
-    height: 20px;
+    height: 22px;
     border-radius: Theme.radius-sm;
     background: qa-ta.has-hover ? Theme.bg-hover : transparent;
     border-width: 1px;
@@ -117,14 +109,12 @@ component QuickAccessButton inherits Rectangle {
         width: parent.width;
         height: parent.height;
         mouse-cursor: pointer;
-        changed has-hover => {
-            root.hover-tip(self.has-hover ? root.tooltip : "");
-        }
+        changed has-hover => { root.hover-tip(self.has-hover ? root.tooltip : ""); }
         clicked => { root.clicked(); }
     }
     Text {
         x: 6px;
-        width: parent.width - (root.editing ? 17px : 12px);
+        width: parent.width - (root.editing ? 20px : 12px);
         height: parent.height;
         text: root.label;
         color: Theme.text-primary;
@@ -134,10 +124,10 @@ component QuickAccessButton inherits Rectangle {
         overflow: clip;
     }
     if root.editing : Rectangle {
-        x: parent.width - 13px;
-        y: 2px;
-        width: 11px;
-        height: 11px;
+        x: parent.width - 15px;
+        y: 3px;
+        width: 12px;
+        height: 12px;
         border-radius: 6px;
         background: del-ta.has-hover ? Theme.danger : Theme.danger.with-alpha(0.68);
         del-ta := TouchArea {
@@ -150,61 +140,46 @@ component QuickAccessButton inherits Rectangle {
     }
 }
 
-// ---------------------------------------------------------------------------
-// SftpPanel — left directory tree + right file listing
-// ---------------------------------------------------------------------------
-
 export component SftpPanel inherits Rectangle {
-    // --- Properties --------------------------------------------------------
-    in property <string>  current-path: "/";
-    in property <string>  back-path: "";
-    in property <[SftpEntry]>    entries;
-    in property <string>  status: @tr("SFTP not connected");
-    in property <bool>    loading: false;
-    in property <bool>    search-running: false;
+    in property <string> current-path: "/";
+    in property <string> back-path: "";
+    in property <[SftpEntry]> entries;
+    in property <string> status: @tr("SFTP not connected");
+    in property <bool> loading: false;
+    in property <bool> search-running: false;
     in property <[SftpTreeNode]> tree-nodes: [];
-    in property <bool> collapsed: false;   // when true only the toolbar shows
-    in property <string> search-query: ""; // file/folder search text, filtered in Rust
-    in property <string> tree-scope: "";   // recursive folder selection / search scope, owned by Rust
-    in property <bool> show-tree: true;    // hide the directory tree when narrow (#dock)
-    in property <bool> compact: false;     // side-docked + collapsed → render nothing but a clean strip (#dock)
-    // User-resizable directory tree width. This is intentionally local to the
-    // panel, so it is safe and never affects terminal layout.
+    in property <bool> collapsed: false;
+    in property <string> search-query: "";
+    in property <string> tree-scope: "";
+    in property <bool> show-tree: true;
+    in property <bool> compact: false;
     property <length> tree-width: 180px;
     property <bool> tree-resizing: false;
     property <length> tree-grab-x;
     property <length> tree-base-width;
-    // Responsive columns: only when docked left/right (narrow, width-adjustable).
-    // Search results reserve the width for name + full path and deliberately hide
-    // the secondary columns, so a valid filename can never collapse to a lone "…".
     property <length> list-w: root.show-tree ? root.width - root.tree-width - 6px : root.width;
     property <length> name-min: 180px;
     property <bool> show-size-col: !root.search-mode && (root.show-tree || (root.list-w - 36px - 76px - 62px - 120px > root.name-min));
     property <bool> show-mode-col: !root.search-mode && (root.show-tree || (root.list-w - 36px - 62px - 120px > root.name-min));
     property <bool> show-modified-col: !root.search-mode && (root.show-tree || (root.list-w - 36px - 120px > root.name-min));
-    property <int> selected-row: -1;       // clicked/highlighted file-list row (#70)
-    in property <int> selected-count;      // number of checked entries (#100)
-    // Panel-level right-click context menu (#84). One menu for the whole list:
-    // an empty `menu-target` means the click landed on whitespace, which greys
-    // out the item-specific actions (download/rename/…) but keeps new/refresh.
+    property <int> selected-row: -1;
+    in property <int> selected-count;
     property <length> menu-x;
     property <length> menu-y;
-    property <string> menu-target;          // "" = whitespace
+    property <string> menu-target;
     property <string> menu-target-name;
-    property <bool>   menu-target-is-dir;
-    property <int>    menu-target-mode;     // permission bits for the chmod dialog
-    property <int>    menu-target-index: -1; // row index for checkbox/multi-select actions
-    // Directory-tree selection is separate from the right file-list checkbox.
-    // It acts as a search scope: check one folder in the tree, then use the
-    // small folder-search button or press Enter in the search box (#probe-folder-search).
-    property <string> tree-active-path: ""; // single-clicked tree row; selection only, not navigation
-    property <string> file-active-path: ""; // single-clicked/right-clicked file-list item; does not change address bar
+    property <bool> menu-target-is-dir;
+    property <int> menu-target-mode;
+    property <int> menu-target-index: -1;
+    property <string> tree-active-path: "";
+    property <string> file-active-path: "";
     property <length> tree-menu-x;
     property <length> tree-menu-y;
     property <string> tree-menu-target;
-    property <string> toolbar-tip: ""; // hover hint for compact icon buttons
+    property <string> toolbar-tip: "";
     property <bool> toolbar-tip-ready: false;
-    property <length> qa-popup-width: min(620px, max(380px, root.width - 24px));
+    property <length> qa-popup-width: clamp(root.width - 48px, 580px, 680px);
+    property <length> qa-popup-height: 224px;
     property <length> qa-popup-offset-x: 0px;
     property <length> qa-popup-offset-y: 0px;
     property <bool> qa-popup-dragging: false;
@@ -214,8 +189,8 @@ export component SftpPanel inherits Rectangle {
     property <length> qa-popup-drag-base-y;
     property <string> pending-local-search: "";
     property <bool> local-search-pending: false;
-    property <bool> search-mode: false;       // global/search-results mode; disables left navigation while active
-    property <string> search-restore-path: ""; // directory to restore when clearing search
+    property <bool> search-mode: false;
+    property <string> search-restore-path: "";
     property <bool> quick-edit-mode: false;
     property <bool> qa-add-open: false;
     property <string> qa-manual-path: "";
@@ -234,8 +209,6 @@ export component SftpPanel inherits Rectangle {
     in-out property <string> qa4-path: ""; in-out property <string> qa4-label: ""; in-out property <string> qa4-group: "";
     in-out property <string> qa5-path: ""; in-out property <string> qa5-label: ""; in-out property <string> qa5-group: "";
 
-    // Filtering the current cached directory is delayed so fast CJK/IME input
-    // does not rebuild the table on every composition commit. Enter bypasses it.
     local-search-debounce := Timer {
         interval: 250ms;
         running: root.local-search-pending;
@@ -253,128 +226,81 @@ export component SftpPanel inherits Rectangle {
         running: root.toolbar-tip != "" && !root.toolbar-tip-ready;
         triggered => {
             root.toolbar-tip-ready = true;
-            root.show-tooltip(
-                root.toolbar-tip,
-                root.absolute-position.x + root.width - 320px,
-                root.absolute-position.y + 34px
-            );
+            root.show-tooltip(root.toolbar-tip, root.absolute-position.x + root.width - 320px, root.absolute-position.y + 34px);
         }
     }
 
-    // --- Callbacks ---------------------------------------------------------
-    callback toggle-collapsed();    // minimise / restore the panel
+    callback toggle-collapsed();
     callback navigate(string);
     callback navigate-back();
-    callback locate-result(string /* full path */, bool /* is-dir */);
+    callback locate-result(string, bool);
     callback download(string);
-    callback upload-clicked(string /* remote dir */, bool /* folder */);
+    callback upload-clicked(string, bool);
     callback refresh(string);
     callback quick-dir-changed(int, string, string, string);
-    callback search-changed(string); // filter files/folders in current directory
-    callback search-folder(string /* root dir */, string /* query */); // recursive search from a selected/current folder
-    callback cancel-search();       // stop the currently running recursive search
-    callback tree-expand(string);   // toggle expand/collapse only; never navigates
-    callback toggle-tree-scope(string); // recursive checkbox selection/search scope
-    callback set-tree-scope(string); // select one search scope without toggling it off
-    callback clear-tree-scope();     // clear recursive tree search scope/checkmarks
-    callback delete(string);        // remove a remote file/dir
-    callback toggle-select(int);    // toggle a row's multi-select checkbox (#100)
-    callback download-selected();   // download all checked entries (#100)
-    callback delete-selected();     // delete all checked entries (#100)
-    callback copy-selected-paths(); // copy all checked remote paths
-    callback clear-selected();      // clear checked file-list entries
-    callback view(string);          // open read-only in the built-in viewer
-    callback edit(string);          // open writable in the built-in editor
-    callback open-external(string);     // open with the OS default app (#81)
-    callback edit-external(string);     // open externally + watch/re-upload (#81)
-    // Context-menu extensions (#69). The *-request callbacks open dialogs in
-    // the app shell; copy-path goes straight to the system clipboard.
-    callback rename-request(string /* path */, string /* current name */);
-    callback chmod-request(string /* path */, string /* name */, int /* mode */);
+    callback search-changed(string);
+    callback search-folder(string, string);
+    callback cancel-search();
+    callback tree-expand(string);
+    callback toggle-tree-scope(string);
+    callback set-tree-scope(string);
+    callback clear-tree-scope();
+    callback delete(string);
+    callback toggle-select(int);
+    callback download-selected();
+    callback delete-selected();
+    callback copy-selected-paths();
+    callback clear-selected();
+    callback view(string);
+    callback edit(string);
+    callback open-external(string);
+    callback edit-external(string);
+    callback rename-request(string, string);
+    callback chmod-request(string, string, int);
     callback copy-path(string);
-    callback new-folder(string /* parent dir */);
-    callback new-file(string /* parent dir */);
+    callback new-folder(string);
+    callback new-file(string);
     callback open-operation-log();
     callback copy-status(string);
     callback show-tooltip(string, length, length);
     callback hide-tooltip();
     callback toast(string);
-    // Drag-to-dock: empty areas of the panel are a grab handle; coordinates are
-    // reported in window space so the parent can compute the target edge (#dock).
-    callback dock-drag-move(length /* abs-x */, length /* abs-y */);
+    callback dock-drag-move(length, length);
     callback dock-drag-end();
 
-    // -----------------------------------------------------------------------
     background: Theme.bg-panel;
-
-    // Keep the editable path bar in sync when the directory changes elsewhere
-    // (tree click, file double-click, terminal cd) (#54).
     changed current-path => { path-input.text = root.current-path; root.selected-row = -1; root.file-active-path = ""; }
 
-    // Drag empty space to re-dock; interactive widgets (file list, tree, toolbar
-    // buttons) sit in front and capture their own events (#dock).
     dock-bg := TouchArea {
         width: parent.width;
         height: parent.height;
         mouse-cursor: move;
-        moved => {
-            root.dock-drag-move(self.absolute-position.x + self.mouse-x,
-                                self.absolute-position.y + self.mouse-y);
-        }
-        pointer-event(ev) => {
-            if (ev.kind == PointerEventKind.up) { root.dock-drag-end(); }
-        }
+        moved => { root.dock-drag-move(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y); }
+        pointer-event(ev) => { if (ev.kind == PointerEventKind.up) { root.dock-drag-end(); } }
     }
 
-    // Hidden entirely when side-docked + collapsed: the horizontal toolbar would
-    // otherwise squish into an unusable vertical strip. `visible` (not `if`) so
-    // ids like path-input stay accessible to handlers. The parent floats a clean
-    // expand button over this (#dock).
     VerticalLayout {
         visible: !root.compact;
         spacing: 0;
 
-        // --- Toolbar (full width) ------------------------------------------
         Rectangle {
             height: 30px;
             background: Theme.bg-panel-alt;
-
             HorizontalLayout {
                 padding-left: 6px;
                 padding-right: 6px;
                 spacing: 4px;
-
-                // Dedicated drag handle to re-dock the panel. The toolbar is full
-                // of controls, so dragging "empty space" is unreliable; this grip
-                // is always grabbable and reports window-space coords (#dock).
                 Rectangle {
                     width: 16px;
                     y: (parent.height - self.height) / 2;
                     height: 22px;
                     grip-ta := TouchArea {
                         mouse-cursor: move;
-                        moved => {
-                            root.dock-drag-move(self.absolute-position.x + self.mouse-x,
-                                                self.absolute-position.y + self.mouse-y);
-                        }
-                        pointer-event(ev) => {
-                            if (ev.kind == PointerEventKind.up) { root.dock-drag-end(); }
-                        }
+                        moved => { root.dock-drag-move(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y); }
+                        pointer-event(ev) => { if (ev.kind == PointerEventKind.up) { root.dock-drag-end(); } }
                     }
-                    Text {
-                        text: "\u{E945}";   // drag_indicator
-                        font-family: "Material Icons";
-                        color: grip-ta.has-hover ? Theme.text-secondary : Theme.text-muted;
-                        font-size: 16px;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                        width: parent.width;
-                        height: parent.height;
-                    }
+                    Text { text: "\u{E945}"; font-family: "Material Icons"; color: grip-ta.has-hover ? Theme.text-secondary : Theme.text-muted; font-size: 16px; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
                 }
-
-                // Editable path bar: type or paste a path and press Enter to
-                // jump there; copy / paste-jump buttons sit right after it (#54).
                 Rectangle {
                     horizontal-stretch: 1;
                     height: 22px;
@@ -388,22 +314,13 @@ export component SftpPanel inherits Rectangle {
                         height: parent.height;
                         text: root.current-path;
                         color: Theme.text-primary;
-                        // CJK-capable font so typed Chinese isn't tofu (#54).
                         font-family: Theme.ui-font-family;
                         font-size: Theme.fs-sm;
                         vertical-alignment: center;
                         single-line: true;
-                        accepted => {
-                            root.navigate(self.text);
-                            self.text = root.current-path;
-                        }
+                        accepted => { root.navigate(self.text); self.text = root.current-path; }
                     }
                 }
-
-                // Search within the current remote directory. Filtering happens in
-                // Rust against the last full directory listing, so it is instant and
-                // does not touch the network. Kept compact to avoid stealing space
-                // from the path bar on small windows.
                 Rectangle {
                     width: root.width > 900px ? 180px : 128px;
                     height: 22px;
@@ -421,310 +338,117 @@ export component SftpPanel inherits Rectangle {
                         font-size: Theme.fs-sm;
                         vertical-alignment: center;
                         single-line: true;
-                        changed has-focus => {
-                            root.toolbar-tip = self.has-focus ? @tr("输入关键词后按 Enter 搜索；点 X 可退出搜索结果") : "";
-                        }
-                        // Typing filters the current visible listing only. Press Enter or the search button
-                        // to enter bounded global search results.
-                        edited => {
-                            // Plain typing only filters the current directory. Do not enter
-                            // recursive search mode until Enter or the search button is used.
-                            root.pending-local-search = self.text;
-                            root.local-search-pending = true;
-                        }
+                        changed has-focus => { root.toolbar-tip = self.has-focus ? @tr("输入关键词后按 Enter 搜索；点 X 可退出搜索结果") : ""; }
+                        edited => { root.pending-local-search = self.text; root.local-search-pending = true; }
                         accepted => {
                             root.local-search-pending = false;
                             if (!root.search-mode) { root.search-restore-path = root.current-path; }
                             root.search-mode = true;
-                            root.search-folder(
-                                root.tree-scope != "" ? root.tree-scope : root.current-path,
-                                self.text
-                            );
+                            root.search-folder(root.tree-scope != "" ? root.tree-scope : root.current-path, self.text);
                         }
                     }
-                    Text {
-                        x: 6px;
-                        width: 16px;
-                        height: parent.height;
-                        text: "\u{E8B6}"; // search
-                        font-family: "Material Icons";
-                        color: Theme.text-muted;
-                        font-size: Theme.fs-sm;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
+                    Text { x: 6px; width: 16px; height: parent.height; text: "\u{E8B6}"; font-family: "Material Icons"; color: Theme.text-muted; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                     if file-search.text == "" : Text {
-                        x: 24px;
-                        width: parent.width - 30px;
-                        height: parent.height;
-                        text: root.tree-scope == "/"
-                            ? @tr("全局搜索")
-                            : (root.tree-scope != "" ? @tr("已选目录搜索") : @tr("目录搜索"));
-                        color: Theme.text-muted;
-                        font-size: Theme.fs-xs;
-                        vertical-alignment: center;
+                        x: 24px; width: parent.width - 30px; height: parent.height;
+                        text: root.tree-scope == "/" ? @tr("全局搜索") : (root.tree-scope != "" ? @tr("已选目录搜索") : @tr("目录搜索"));
+                        color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center;
                     }
                     if root.search-mode || file-search.text != "" : Rectangle {
-                        x: parent.width - 22px;
-                        y: 2px;
-                        width: 18px;
-                        height: 18px;
-                        border-radius: 9px;
+                        x: parent.width - 22px; y: 2px; width: 18px; height: 18px; border-radius: 9px;
                         background: clear-search-ta.has-hover ? Theme.bg-hover : transparent;
                         clear-search-ta := TouchArea {
-                            width: parent.width;
-                            height: parent.height;
-                            mouse-cursor: pointer;
+                            width: parent.width; height: parent.height; mouse-cursor: pointer;
                             changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("清空搜索并取消目录勾选") : ""; }
                             clicked => {
                                 if (root.search-running) { root.cancel-search(); }
-                                file-search.text = "";
-                                root.search-changed("");
-                                root.clear-tree-scope();
-                                root.tree-active-path = "";
-                                root.search-mode = false;
-                                root.navigate(root.search-restore-path != "" ? root.search-restore-path : root.current-path);
-                                root.search-restore-path = "";
+                                file-search.text = ""; root.search-changed(""); root.clear-tree-scope(); root.tree-active-path = ""; root.search-mode = false;
+                                root.navigate(root.search-restore-path != "" ? root.search-restore-path : root.current-path); root.search-restore-path = "";
                             }
                         }
                         Text { text: "×"; color: Theme.text-muted; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
                     }
                 }
-
-                // Search / stop merged into one button: while a recursive search is
-                // active it turns red and cancels; otherwise it starts a scoped search.
                 Rectangle {
-                    width: root.search-running ? 42px : 24px; height: 22px;
-                    border-radius: Theme.radius-sm;
-                    background: search-action-ta.has-hover
-                        ? (root.search-running ? Theme.danger.with-alpha(0.18) : Theme.bg-hover)
-                        : transparent;
+                    width: root.search-running ? 42px : 24px; height: 22px; border-radius: Theme.radius-sm;
+                    background: search-action-ta.has-hover ? (root.search-running ? Theme.danger.with-alpha(0.18) : Theme.bg-hover) : transparent;
                     search-action-ta := TouchArea {
                         mouse-cursor: pointer;
-                        changed has-hover => {
-                            root.toolbar-tip = self.has-hover
-                                ? (root.search-running ? @tr("停止正在运行的搜索") : @tr("搜索文件/文件夹（递归）"))
-                                : "";
-                        }
+                        changed has-hover => { root.toolbar-tip = self.has-hover ? (root.search-running ? @tr("停止正在运行的搜索") : @tr("搜索文件/文件夹（递归）")) : ""; }
                         clicked => {
-                            if (root.search-running) {
-                                root.cancel-search();
-                                root.toast(@tr("正在停止搜索..."));
-                            } else {
-                                if (!root.search-mode) { root.search-restore-path = root.current-path; }
-                                root.search-mode = true;
-                                root.search-folder(
-                                    root.tree-scope != "" ? root.tree-scope : root.current-path,
-                                    file-search.text
-                                );
-                            }
+                            if (root.search-running) { root.cancel-search(); root.toast(@tr("正在停止搜索...")); }
+                            else { if (!root.search-mode) { root.search-restore-path = root.current-path; } root.search-mode = true; root.search-folder(root.tree-scope != "" ? root.tree-scope : root.current-path, file-search.text); }
                         }
                     }
-                    Text {
-                        text: root.search-running ? @tr("停止") : "\u{F02F}";
-                        font-family: root.search-running ? Theme.ui-font-family : "Material Icons";
-                        color: root.search-running ? Theme.danger : (root.tree-scope != "" ? Theme.accent : Theme.text-secondary);
-                        font-size: root.search-running ? Theme.fs-xs : Theme.fs-sm;
-                        horizontal-alignment: center; vertical-alignment: center;
-                    }
+                    Text { text: root.search-running ? @tr("停止") : "\u{F02F}"; font-family: root.search-running ? Theme.ui-font-family : "Material Icons"; color: root.search-running ? Theme.danger : (root.tree-scope != "" ? Theme.accent : Theme.text-secondary); font-size: root.search-running ? Theme.fs-xs : Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                 }
-
-                // Open the local operation log. The log records file operations
-                // such as create/delete/edit/chmod/download/upload with timestamp.
                 Rectangle {
-                    width: 24px; height: 22px;
-                    border-radius: Theme.radius-sm;
-                    background: oplog-ta.has-hover ? Theme.bg-hover : transparent;
-                    oplog-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("打开本地操作日志") : ""; }
-                        clicked => { root.open-operation-log(); }
-                    }
-                    Text { text: "\u{E889}"; font-family: "Material Icons";
-                           color: Theme.text-secondary; font-size: Theme.fs-sm;
-                           horizontal-alignment: center; vertical-alignment: center; }
+                    width: 24px; height: 22px; border-radius: Theme.radius-sm; background: oplog-ta.has-hover ? Theme.bg-hover : transparent;
+                    oplog-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("打开本地操作日志") : ""; } clicked => { root.open-operation-log(); } }
+                    Text { text: "\u{E889}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                 }
-
-                // Copy the current path to the clipboard.
                 Rectangle {
-                    width: 24px; height: 22px;
-                    border-radius: Theme.radius-sm;
-                    background: copy-ta.has-hover ? Theme.bg-hover : transparent;
-                    copy-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("复制当前路径") : ""; }
-                        clicked => {
-                            path-input.select-all();
-                            path-input.copy();
-                            path-input.clear-selection();
-                            root.toast(@tr("已复制路径"));
-                        }
-                    }
-                    Text { text: "\u{E14D}"; font-family: "Material Icons";
-                           color: Theme.text-secondary; font-size: Theme.fs-sm;
-                           horizontal-alignment: center; vertical-alignment: center; }
+                    width: 24px; height: 22px; border-radius: Theme.radius-sm; background: copy-ta.has-hover ? Theme.bg-hover : transparent;
+                    copy-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("复制当前路径") : ""; } clicked => { path-input.select-all(); path-input.copy(); path-input.clear-selection(); root.toast(@tr("已复制路径")); } }
+                    Text { text: "\u{E14D}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                 }
-
-                // Paste a path from the clipboard and jump straight to it.
                 Rectangle {
-                    width: 24px; height: 22px;
-                    border-radius: Theme.radius-sm;
-                    background: pj-ta.has-hover ? Theme.bg-hover : transparent;
-                    pj-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("粘贴路径并跳转") : ""; }
-                        clicked => {
-                            path-input.select-all();
-                            path-input.paste();
-                            root.navigate(path-input.text);
-                        }
-                    }
-                    Text { text: "\u{E14F}"; font-family: "Material Icons";
-                           color: Theme.text-secondary; font-size: Theme.fs-sm;
-                           horizontal-alignment: center; vertical-alignment: center; }
+                    width: 24px; height: 22px; border-radius: Theme.radius-sm; background: pj-ta.has-hover ? Theme.bg-hover : transparent;
+                    pj-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("粘贴路径并跳转") : ""; } clicked => { path-input.select-all(); path-input.paste(); root.navigate(path-input.text); } }
+                    Text { text: "\u{E14F}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                 }
-
                 up-btn := Rectangle {
-                    width: 24px; height: 22px;
-                    border-radius: Theme.radius-sm;
-                    background: up-ta.has-hover ? Theme.bg-hover : transparent;
-                    up-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("返回上一级目录") : ""; }
-                        clicked => { root.navigate(".."); }
-                    }
-                    Text { text: "↑"; color: Theme.text-secondary; font-size: Theme.fs-md;
-                           horizontal-alignment: center; vertical-alignment: center; }
+                    width: 24px; height: 22px; border-radius: Theme.radius-sm; background: up-ta.has-hover ? Theme.bg-hover : transparent;
+                    up-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("返回上一级目录") : ""; } clicked => { root.navigate(".."); } }
+                    Text { text: "↑"; color: Theme.text-secondary; font-size: Theme.fs-md; horizontal-alignment: center; vertical-alignment: center; }
                 }
-
-                // Upload: a small menu offers file vs folder (#85). The remote
-                // SFTP upload handles both — only the local picker differs.
                 ul-btn := Rectangle {
-                    width: 52px; height: 22px;
-                    border-radius: Theme.radius-sm;
-                    background: ul-ta.has-hover ? Theme.accent-hover : Theme.accent;
-                    ul-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("上传文件或文件夹") : ""; }
-                        clicked => { ul-menu.show(); }
-                    }
-                    Text { text: @tr("Upload"); color: #ffffff; font-size: Theme.fs-sm;
-                           horizontal-alignment: center; vertical-alignment: center; }
+                    width: 52px; height: 22px; border-radius: Theme.radius-sm; background: ul-ta.has-hover ? Theme.accent-hover : Theme.accent;
+                    ul-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("上传文件或文件夹") : ""; } clicked => { ul-menu.show(); } }
+                    Text { text: @tr("Upload"); color: #ffffff; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                     ul-menu := PopupWindow {
-                        x: 0; y: parent.height + 2px;
-                        width: 124px;
-                        height: 2 * 27px + 8px;
-                        Rectangle {
-                            background: Theme.bg-panel;
-                            border-radius: Theme.radius-sm;
-                            border-width: 1px;
-                            border-color: Theme.border-strong;
-                            drop-shadow-blur: 12px;
-                            drop-shadow-color: #00000060;
-                            VerticalLayout {
-                                padding: 4px;
-                                spacing: 1px;
-                                SftpMenuItem {
-                                    label: @tr("Upload file");
-                                    clicked => { root.upload-clicked(root.current-path, false); }
-                                }
-                                SftpMenuItem {
-                                    label: @tr("Upload folder");
-                                    clicked => { root.upload-clicked(root.current-path, true); }
-                                }
+                        x: 0; y: parent.height + 2px; width: 124px; height: 62px;
+                        Rectangle { background: Theme.bg-panel; border-radius: Theme.radius-sm; border-width: 1px; border-color: Theme.border-strong; drop-shadow-blur: 12px; drop-shadow-color: #00000060;
+                            VerticalLayout { padding: 4px; spacing: 1px;
+                                SftpMenuItem { label: @tr("Upload file"); clicked => { root.upload-clicked(root.current-path, false); } }
+                                SftpMenuItem { label: @tr("Upload folder"); clicked => { root.upload-clicked(root.current-path, true); } }
                             }
                         }
                     }
                 }
-
-                // Batch actions on checked entries — shown only when needed.
-                // Safe actions are emphasized; destructive delete stays behind confirmation.
                 if root.selected-count > 0 : Rectangle {
-                    width: 168px; height: 24px;
-                    border-radius: Theme.radius-sm;
-                    background: Theme.accent.with-alpha(0.12);
-                    HorizontalLayout {
-                        padding-left: 8px; padding-right: 6px; spacing: 6px;
+                    width: 168px; height: 24px; border-radius: Theme.radius-sm; background: Theme.accent.with-alpha(0.12);
+                    HorizontalLayout { padding-left: 8px; padding-right: 6px; spacing: 6px;
                         Text { text: "✓ " + root.selected-count + @tr(" 项"); color: Theme.accent; font-size: Theme.fs-xs; vertical-alignment: center; }
                         Rectangle { width: 1px; background: Theme.border-subtle; }
-                        Rectangle {
-                            width: 48px; height: parent.height;
-                            cp-sel-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("复制已勾选项目的完整路径") : ""; } clicked => { root.copy-selected-paths(); } }
-                            Text { text: @tr("复制"); color: Theme.text-primary; font-size: Theme.fs-xs; vertical-alignment: center; horizontal-alignment: center; }
-                        }
-                        Rectangle {
-                            width: 36px; height: parent.height;
-                            dl-sel-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("下载已勾选文件") : ""; } clicked => { root.download-selected(); } }
-                            Text { text: @tr("下载"); color: Theme.text-primary; font-size: Theme.fs-xs; vertical-alignment: center; horizontal-alignment: center; }
-                        }
-                        Rectangle {
-                            width: 36px; height: parent.height;
-                            clr-sel-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("清除所有勾选") : ""; } clicked => { root.clear-selected(); } }
-                            Text { text: @tr("清除"); color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; horizontal-alignment: center; }
-                        }
+                        Rectangle { width: 48px; height: parent.height; cp-sel-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("复制已勾选项目的完整路径") : ""; } clicked => { root.copy-selected-paths(); } } Text { text: @tr("复制"); color: Theme.text-primary; font-size: Theme.fs-xs; vertical-alignment: center; horizontal-alignment: center; } }
+                        Rectangle { width: 36px; height: parent.height; dl-sel-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("下载已勾选文件") : ""; } clicked => { root.download-selected(); } } Text { text: @tr("下载"); color: Theme.text-primary; font-size: Theme.fs-xs; vertical-alignment: center; horizontal-alignment: center; } }
+                        Rectangle { width: 36px; height: parent.height; clr-sel-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("清除所有勾选") : ""; } clicked => { root.clear-selected(); } } Text { text: @tr("清除"); color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; horizontal-alignment: center; } }
                     }
                 }
-
-                Rectangle {
-                    width: 24px; height: 22px;
-                    border-radius: Theme.radius-sm;
-                    background: ref-ta.has-hover ? Theme.bg-hover : transparent;
-                    ref-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("刷新当前目录") : ""; }
-                        clicked => { root.toast(@tr("正在刷新当前目录...")); root.refresh(root.current-path); }
-                    }
-                    Text { text: "\u{E5D5}"; font-family: "Material Icons";
-                           color: Theme.text-secondary; font-size: Theme.fs-sm;
-                           horizontal-alignment: center; vertical-alignment: center; }
-                }
-
-                // Minimise / restore the SFTP panel (#41).
-                Rectangle {
-                    width: 24px; height: 22px;
-                    border-radius: Theme.radius-sm;
-                    background: min-ta.has-hover ? Theme.bg-hover : transparent;
-                    min-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("折叠/展开文件面板") : ""; }
-                        clicked => { root.toggle-collapsed(); }
-                    }
-                    // expand_less (▲, restore) when collapsed, expand_more (▼) otherwise.
-                    Text { text: root.collapsed ? "\u{E5CE}" : "\u{E5CF}"; font-family: "Material Icons";
-                           color: Theme.text-secondary; font-size: Theme.fs-md;
-                           horizontal-alignment: center; vertical-alignment: center; }
-                }
+                Rectangle { width: 24px; height: 22px; border-radius: Theme.radius-sm; background: ref-ta.has-hover ? Theme.bg-hover : transparent; ref-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("刷新当前目录") : ""; } clicked => { root.toast(@tr("正在刷新当前目录...")); root.refresh(root.current-path); } } Text { text: "\u{E5D5}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; } }
+                Rectangle { width: 24px; height: 22px; border-radius: Theme.radius-sm; background: min-ta.has-hover ? Theme.bg-hover : transparent; min-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("折叠/展开文件面板") : ""; } clicked => { root.toggle-collapsed(); } } Text { text: root.collapsed ? "\u{E5CE}" : "\u{E5CF}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: Theme.fs-md; horizontal-alignment: center; vertical-alignment: center; } }
             }
         }
 
-        // --- Quick access bar, inspired by Lucky SSH file manager ---------
-        // Address/path ownership rule:
-        //   - The path bar above is the current directory shown in the RIGHT file list.
-        //   - The left navigation list only opens directories or adds them to search scope.
-        //   - Search scope is separate from the address bar.
         Rectangle {
-            height: 25px;
+            height: 28px;
             background: Theme.bg-panel-alt;
             HorizontalLayout {
-                padding-left: 8px;
-                padding-right: 8px;
-                spacing: 3px;
-                if root.qa-show-root : QuickAccessButton { width: 48px; label: @tr("根目录"); path: "/"; editing: false; clicked => { root.navigate("/"); } remove => { } }
-                if root.qa-show-home : QuickAccessButton { width: 32px; label: "HOME"; path: "/root"; editing: false; clicked => { root.navigate("/root"); } remove => { } }
-                if root.qa-show-etc : QuickAccessButton { width: 26px; label: "ETC"; path: "/etc"; editing: false; clicked => { root.navigate("/etc"); } remove => { } }
-                if root.qa-show-var : QuickAccessButton { width: 26px; label: "VAR"; path: "/var"; editing: false; clicked => { root.navigate("/var"); } remove => { } }
-                if root.qa-show-tmp : QuickAccessButton { width: 28px; label: "TMP"; path: "/tmp"; editing: false; clicked => { root.navigate("/tmp"); } remove => { } }
-                if root.qa-show-www : QuickAccessButton { width: 32px; label: "WWW"; path: "/www"; editing: false; clicked => { root.navigate("/www"); } remove => { } }
-                if root.qa-show-over : QuickAccessButton { width: 32px; label: "OVER"; path: "/overlay"; editing: false; clicked => { root.navigate("/overlay"); } remove => { } }
-                if root.qa1-path != "" : QuickAccessButton { width: 56px; label: root.qa1-label; path: root.qa1-path; editing: false; clicked => { root.navigate(root.qa1-path); } remove => { } }
-                if root.qa2-path != "" : QuickAccessButton { width: 56px; label: root.qa2-label; path: root.qa2-path; editing: false; clicked => { root.navigate(root.qa2-path); } remove => { } }
-                if root.qa3-path != "" : QuickAccessButton { width: 56px; label: root.qa3-label; path: root.qa3-path; editing: false; clicked => { root.navigate(root.qa3-path); } remove => { } }
-                if root.qa4-path != "" : QuickAccessButton { width: 56px; label: root.qa4-label; path: root.qa4-path; editing: false; clicked => { root.navigate(root.qa4-path); } remove => { } }
-                if root.qa5-path != "" : QuickAccessButton { width: 56px; label: root.qa5-label; path: root.qa5-path; editing: false; clicked => { root.navigate(root.qa5-path); } remove => { } }
-
+                padding-left: 8px; padding-right: 8px; spacing: 6px;
+                if root.qa-show-root : QuickAccessButton { width: 54px; label: @tr("根目录"); path: "/"; editing: false; clicked => { root.navigate("/"); } remove => { } }
+                if root.qa-show-home : QuickAccessButton { width: 42px; label: "HOME"; path: "/root"; editing: false; clicked => { root.navigate("/root"); } remove => { } }
+                if root.qa-show-etc : QuickAccessButton { width: 36px; label: "ETC"; path: "/etc"; editing: false; clicked => { root.navigate("/etc"); } remove => { } }
+                if root.qa-show-var : QuickAccessButton { width: 36px; label: "VAR"; path: "/var"; editing: false; clicked => { root.navigate("/var"); } remove => { } }
+                if root.qa-show-tmp : QuickAccessButton { width: 38px; label: "TMP"; path: "/tmp"; editing: false; clicked => { root.navigate("/tmp"); } remove => { } }
+                if root.qa-show-www : QuickAccessButton { width: 42px; label: "WWW"; path: "/www"; editing: false; clicked => { root.navigate("/www"); } remove => { } }
+                if root.qa-show-over : QuickAccessButton { width: 46px; label: "OVER"; path: "/overlay"; editing: false; clicked => { root.navigate("/overlay"); } remove => { } }
+                if root.qa1-path != "" : QuickAccessButton { width: 68px; label: root.qa1-label; path: root.qa1-path; editing: false; clicked => { root.navigate(root.qa1-path); } remove => { } }
+                if root.qa2-path != "" : QuickAccessButton { width: 68px; label: root.qa2-label; path: root.qa2-path; editing: false; clicked => { root.navigate(root.qa2-path); } remove => { } }
+                if root.qa3-path != "" : QuickAccessButton { width: 68px; label: root.qa3-label; path: root.qa3-path; editing: false; clicked => { root.navigate(root.qa3-path); } remove => { } }
+                if root.qa4-path != "" : QuickAccessButton { width: 68px; label: root.qa4-label; path: root.qa4-path; editing: false; clicked => { root.navigate(root.qa4-path); } remove => { } }
+                if root.qa5-path != "" : QuickAccessButton { width: 68px; label: root.qa5-label; path: root.qa5-path; editing: false; clicked => { root.navigate(root.qa5-path); } remove => { } }
                 Rectangle {
-                    width: 20px; height: 20px; border-radius: Theme.radius-sm;
-                    background: qa-manage-ta.has-hover ? Theme.bg-hover : transparent;
+                    width: 22px; height: 22px; border-radius: Theme.radius-sm; background: qa-manage-ta.has-hover ? Theme.bg-hover : transparent;
                     qa-manage-ta := TouchArea {
                         mouse-cursor: pointer;
                         changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("管理快捷目录：手动添加 / 删除快捷入口") : ""; }
@@ -741,23 +465,24 @@ export component SftpPanel inherits Rectangle {
                     Text { text: "\u{E8B8}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
                     qa-manager := PopupWindow {
                         x: root.absolute-position.x - qa-manage-ta.absolute-position.x + (root.width - root.qa-popup-width) / 2 + root.qa-popup-offset-x;
-                        y: root.absolute-position.y - qa-manage-ta.absolute-position.y + (root.height - 146px) / 2 + root.qa-popup-offset-y;
+                        y: root.absolute-position.y - qa-manage-ta.absolute-position.y + (root.height - root.qa-popup-height) / 2 + root.qa-popup-offset-y;
                         width: root.qa-popup-width;
-                        height: 146px;
+                        height: root.qa-popup-height;
+                        close-policy: no-auto-close;
                         Rectangle {
                             background: Theme.bg-panel;
                             border-width: 1px;
                             border-color: Theme.border-strong;
                             border-radius: Theme.radius-sm;
-                            drop-shadow-blur: 14px;
+                            drop-shadow-blur: 16px;
                             drop-shadow-color: #00000065;
                             VerticalLayout {
-                                padding: 8px;
-                                spacing: 6px;
+                                padding: 12px;
+                                spacing: 8px;
                                 Rectangle {
-                                    height: 22px;
+                                    height: 24px;
                                     title-drag := TouchArea {
-                                        width: parent.width - 58px;
+                                        width: parent.width - 62px;
                                         height: parent.height;
                                         mouse-cursor: move;
                                         pointer-event(ev) => {
@@ -768,736 +493,234 @@ export component SftpPanel inherits Rectangle {
                                                 root.qa-popup-drag-base-x = root.qa-popup-offset-x;
                                                 root.qa-popup-drag-base-y = root.qa-popup-offset-y;
                                             }
-                                            if (ev.kind == PointerEventKind.up) {
-                                                root.qa-popup-dragging = false;
-                                            }
+                                            if (ev.kind == PointerEventKind.up || ev.kind == PointerEventKind.cancel) { root.qa-popup-dragging = false; }
                                         }
                                         moved => {
-                                            if (root.qa-popup-dragging) {
+                                            if (root.qa-popup-dragging && self.pressed) {
                                                 root.qa-popup-offset-x = root.qa-popup-drag-base-x + self.absolute-position.x + self.mouse-x - root.qa-popup-drag-start-x;
                                                 root.qa-popup-offset-y = root.qa-popup-drag-base-y + self.absolute-position.y + self.mouse-y - root.qa-popup-drag-start-y;
                                             }
                                         }
                                     }
-                                    Text {
-                                        x: 0px;
-                                        width: parent.width - 58px;
-                                        height: parent.height;
-                                        text: @tr("管理快捷目录");
-                                        color: Theme.text-primary;
-                                        font-size: Theme.fs-sm;
-                                        font-weight: 700;
-                                        vertical-alignment: center;
+                                    Text { x: 0px; width: parent.width - 62px; height: parent.height; text: @tr("管理快捷目录"); color: Theme.text-primary; font-size: Theme.fs-xs; font-weight: 600; vertical-alignment: center; }
+                                    Rectangle {
+                                        x: parent.width - 54px; width: 24px; height: 24px; border-radius: 12px; background: qa-info-ta.has-hover ? Theme.bg-hover : transparent;
+                                        qa-info-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("备注会作为快捷入口名称显示，最多添加 5 个自定义目录") : ""; } }
+                                        Text { text: "\u{E88E}"; font-family: "Material Icons"; color: Theme.text-muted; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
                                     }
                                     Rectangle {
-                                        x: parent.width - 52px;
-                                        width: 22px;
-                                        height: 22px;
-                                        border-radius: 11px;
-                                        background: qa-info-ta.has-hover ? Theme.bg-hover : transparent;
-                                        qa-info-ta := TouchArea {
-                                            mouse-cursor: pointer;
-                                            changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("最多添加 5 个快捷目录，备注最多 6 个字") : ""; }
-                                        }
-                                        Text {
-                                            text: "\u{E88E}";
-                                            font-family: "Material Icons";
-                                            color: Theme.text-muted;
-                                            font-size: 13px;
-                                            horizontal-alignment: center;
-                                            vertical-alignment: center;
-                                        }
+                                        x: parent.width - 26px; width: 24px; height: 24px; border-radius: 12px; background: qa-close-ta.has-hover ? Theme.bg-hover : transparent;
+                                        qa-close-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("关闭快捷目录管理") : ""; } clicked => { root.quick-edit-mode = false; root.qa-popup-dragging = false; qa-manager.close(); } }
+                                        Text { text: "\u{E5CD}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: 14px; horizontal-alignment: center; vertical-alignment: center; }
                                     }
-                                    Rectangle {
-                                        x: parent.width - 26px;
-                                        width: 22px;
-                                        height: 22px;
-                                        border-radius: 11px;
-                                        background: qa-close-ta.has-hover ? Theme.bg-hover : transparent;
-                                        qa-close-ta := TouchArea {
-                                            mouse-cursor: pointer;
-                                            changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("关闭快捷目录管理") : ""; }
-                                            clicked => { root.quick-edit-mode = false; root.qa-popup-dragging = false; qa-manager.close(); }
-                                        }
-                                        Text {
-                                            text: "\u{E5CD}";
-                                            font-family: "Material Icons";
-                                            color: Theme.text-secondary;
-                                            font-size: 14px;
-                                            horizontal-alignment: center;
-                                            vertical-alignment: center;
-                                        }
-                                    }
-                                }
-                                Rectangle {
-                                    height: 26px;
-                                    border-radius: Theme.radius-sm;
-                                    border-width: 1px;
-                                    border-color: Theme.border-subtle;
-                                    background: Theme.bg-root;
-                                    TextInput { x: 8px; width: parent.width - 16px; height: parent.height; text <=> root.qa-manual-path; single-line: true; font-size: Theme.fs-sm; color: Theme.text-primary; vertical-alignment: center; }
-                                    Text { x: 8px; text: root.qa-manual-path == "" ? @tr("自定义目录路径，例如 /etc/config") : ""; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; height: parent.height; }
                                 }
                                 HorizontalLayout {
-                                    height: 26px;
-                                    spacing: 6px;
+                                    height: 32px;
+                                    spacing: 8px;
+                                    Text { width: 64px; text: @tr("目录路径"); color: Theme.text-secondary; font-size: Theme.fs-xs; vertical-alignment: center; }
                                     Rectangle {
-                                        horizontal-stretch: 1;
-                                        border-radius: Theme.radius-sm;
-                                        border-width: 1px;
-                                        border-color: Theme.border-subtle;
-                                        background: Theme.bg-root;
-                                        TextInput { x: 8px; width: parent.width - 16px; height: parent.height; text <=> root.qa-manual-label; single-line: true; font-size: Theme.fs-sm; color: Theme.text-primary; vertical-alignment: center; }
-                                        Text { x: 8px; text: root.qa-manual-label == "" ? @tr("名称/备注") : ""; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; height: parent.height; }
+                                        horizontal-stretch: 1; border-radius: Theme.radius-sm; border-width: 1px; border-color: qa-path-input.has-focus ? Theme.accent : Theme.border-subtle; background: Theme.bg-root;
+                                        qa-path-input := TextInput { x: 9px; width: parent.width - 18px; height: parent.height; text <=> root.qa-manual-path; single-line: true; font-size: Theme.fs-sm; color: Theme.text-primary; vertical-alignment: center; }
+                                        Text { x: 9px; text: root.qa-manual-path == "" ? @tr("例如 /etc/config") : ""; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; height: parent.height; }
+                                    }
+                                }
+                                HorizontalLayout {
+                                    height: 32px;
+                                    spacing: 8px;
+                                    Text { width: 64px; text: @tr("备注"); color: Theme.text-secondary; font-size: Theme.fs-xs; vertical-alignment: center; }
+                                    Rectangle {
+                                        horizontal-stretch: 2; min-width: 210px; border-radius: Theme.radius-sm; border-width: 1px; border-color: qa-label-input.has-focus ? Theme.accent : Theme.border-subtle; background: Theme.bg-root;
+                                        qa-label-input := TextInput { x: 9px; width: parent.width - 18px; height: parent.height; text <=> root.qa-manual-label; single-line: true; font-size: Theme.fs-sm; color: Theme.text-primary; vertical-alignment: center; }
+                                        Text { x: 9px; text: root.qa-manual-label == "" ? @tr("例如：路由配置（作为快捷入口名称）") : ""; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; height: parent.height; }
+                                    }
+                                    Text { width: 40px; text: @tr("分组"); color: Theme.text-secondary; font-size: Theme.fs-xs; vertical-alignment: center; }
+                                    Rectangle {
+                                        width: 128px; border-radius: Theme.radius-sm; border-width: 1px; border-color: qa-group-input.has-focus ? Theme.accent : Theme.border-subtle; background: Theme.bg-root;
+                                        qa-group-input := TextInput { x: 9px; width: parent.width - 18px; height: parent.height; text <=> root.qa-manual-group; single-line: true; font-size: Theme.fs-sm; color: Theme.text-primary; vertical-alignment: center; }
+                                        Text { x: 9px; text: root.qa-manual-group == "" ? @tr("可选") : ""; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; height: parent.height; }
                                     }
                                     Rectangle {
-                                        width: 110px;
-                                        border-radius: Theme.radius-sm;
-                                        border-width: 1px;
-                                        border-color: Theme.border-subtle;
-                                        background: Theme.bg-root;
-                                        TextInput { x: 8px; width: parent.width - 16px; height: parent.height; text <=> root.qa-manual-group; single-line: true; font-size: Theme.fs-sm; color: Theme.text-primary; vertical-alignment: center; }
-                                        Text { x: 8px; text: root.qa-manual-group == "" ? @tr("分组") : ""; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; height: parent.height; }
-                                    }
-                                    Rectangle {
-                                        width: 64px;
-                                        border-radius: Theme.radius-sm;
-                                        background: add-qa-ta.has-hover ? Theme.accent.with-alpha(0.86) : Theme.accent;
+                                        width: 76px; border-radius: Theme.radius-sm; background: add-qa-ta.has-hover ? Theme.accent.with-alpha(0.86) : Theme.accent;
                                         add-qa-ta := TouchArea {
                                             mouse-cursor: pointer;
                                             clicked => {
-                                                if (root.qa-manual-path == "") {
-                                                    root.toast(@tr("请输入目录路径"));
-                                                } else if (root.qa-manual-path == root.qa1-path || root.qa-manual-path == root.qa2-path || root.qa-manual-path == root.qa3-path || root.qa-manual-path == root.qa4-path || root.qa-manual-path == root.qa5-path) {
-                                                    root.toast(@tr("快捷目录已存在"));
-                                                } else if (root.qa1-path == "") {
-                                                    root.qa1-path = root.qa-manual-path; root.qa1-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.qa1-group = root.qa-manual-group; root.quick-dir-changed(0, root.qa1-label, root.qa1-group, root.qa1-path); root.toast(@tr("已添加快捷目录"));
-                                                } else if (root.qa2-path == "") {
-                                                    root.qa2-path = root.qa-manual-path; root.qa2-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.qa2-group = root.qa-manual-group; root.quick-dir-changed(1, root.qa2-label, root.qa2-group, root.qa2-path); root.toast(@tr("已添加快捷目录"));
-                                                } else if (root.qa3-path == "") {
-                                                    root.qa3-path = root.qa-manual-path; root.qa3-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.qa3-group = root.qa-manual-group; root.quick-dir-changed(2, root.qa3-label, root.qa3-group, root.qa3-path); root.toast(@tr("已添加快捷目录"));
-                                                } else if (root.qa4-path == "") {
-                                                    root.qa4-path = root.qa-manual-path; root.qa4-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.qa4-group = root.qa-manual-group; root.quick-dir-changed(3, root.qa4-label, root.qa4-group, root.qa4-path); root.toast(@tr("已添加快捷目录"));
-                                                } else if (root.qa5-path == "") {
-                                                    root.qa5-path = root.qa-manual-path; root.qa5-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.qa5-group = root.qa-manual-group; root.quick-dir-changed(4, root.qa5-label, root.qa5-group, root.qa5-path); root.toast(@tr("已添加快捷目录"));
-                                                } else {
-                                                    root.toast(@tr("最多只能添加 5 个自定义快捷目录"));
-                                                }
+                                                if (root.qa-manual-path == "") { root.toast(@tr("请输入目录路径")); }
+                                                else if (root.qa-manual-path == root.qa1-path || root.qa-manual-path == root.qa2-path || root.qa-manual-path == root.qa3-path || root.qa-manual-path == root.qa4-path || root.qa-manual-path == root.qa5-path) { root.toast(@tr("快捷目录已存在")); }
+                                                else if (root.qa1-path == "") { root.qa1-path = root.qa-manual-path; root.qa1-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.qa1-group = root.qa-manual-group; root.quick-dir-changed(0, root.qa1-label, root.qa1-group, root.qa1-path); root.toast(@tr("已添加快捷目录")); }
+                                                else if (root.qa2-path == "") { root.qa2-path = root.qa-manual-path; root.qa2-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.qa2-group = root.qa-manual-group; root.quick-dir-changed(1, root.qa2-label, root.qa2-group, root.qa2-path); root.toast(@tr("已添加快捷目录")); }
+                                                else if (root.qa3-path == "") { root.qa3-path = root.qa-manual-path; root.qa3-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.qa3-group = root.qa-manual-group; root.quick-dir-changed(2, root.qa3-label, root.qa3-group, root.qa3-path); root.toast(@tr("已添加快捷目录")); }
+                                                else if (root.qa4-path == "") { root.qa4-path = root.qa-manual-path; root.qa4-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.qa4-group = root.qa-manual-group; root.quick-dir-changed(3, root.qa4-label, root.qa4-group, root.qa4-path); root.toast(@tr("已添加快捷目录")); }
+                                                else if (root.qa5-path == "") { root.qa5-path = root.qa-manual-path; root.qa5-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.qa5-group = root.qa-manual-group; root.quick-dir-changed(4, root.qa5-label, root.qa5-group, root.qa5-path); root.toast(@tr("已添加快捷目录")); }
+                                                else { root.toast(@tr("最多只能添加 5 个自定义快捷目录")); }
                                             }
                                         }
-                                        Text { text: @tr("添加"); color: #ffffff; font-size: Theme.fs-xs; horizontal-alignment: center; vertical-alignment: center; }
+                                        Text { text: @tr("添加"); color: #ffffff; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                                     }
                                 }
-                                HorizontalLayout {
-                                    height: 36px;
-                                    spacing: 6px;
-                                    if root.qa-show-root : QuickAccessButton { width: 58px; label: @tr("根目录"); path: "/"; editing: true; clicked => { root.navigate("/"); } remove => { root.qa-show-root = false; root.toast(@tr("已删除快捷目录")); } }
-                                    if root.qa-show-home : QuickAccessButton { width: 52px; label: "HOME"; path: "/root"; editing: true; clicked => { root.navigate("/root"); } remove => { root.qa-show-home = false; root.toast(@tr("已删除快捷目录")); } }
-                                    if root.qa-show-etc : QuickAccessButton { width: 44px; label: "ETC"; path: "/etc"; editing: true; clicked => { root.navigate("/etc"); } remove => { root.qa-show-etc = false; root.toast(@tr("已删除快捷目录")); } }
-                                    if root.qa-show-var : QuickAccessButton { width: 44px; label: "VAR"; path: "/var"; editing: true; clicked => { root.navigate("/var"); } remove => { root.qa-show-var = false; root.toast(@tr("已删除快捷目录")); } }
-                                    if root.qa-show-tmp : QuickAccessButton { width: 44px; label: "TMP"; path: "/tmp"; editing: true; clicked => { root.navigate("/tmp"); } remove => { root.qa-show-tmp = false; root.toast(@tr("已删除快捷目录")); } }
-                                    if root.qa-show-www : QuickAccessButton { width: 48px; label: "WWW"; path: "/www"; editing: true; clicked => { root.navigate("/www"); } remove => { root.qa-show-www = false; root.toast(@tr("已删除快捷目录")); } }
-                                    if root.qa-show-over : QuickAccessButton { width: 48px; label: "OVER"; path: "/overlay"; editing: true; clicked => { root.navigate("/overlay"); } remove => { root.qa-show-over = false; root.toast(@tr("已删除快捷目录")); } }
-                                    if root.qa1-path != "" : QuickAccessButton { width: 58px; label: root.qa1-label; path: root.qa1-path; editing: true; clicked => { root.navigate(root.qa1-path); } remove => { root.qa1-path = ""; root.qa1-label = ""; root.qa1-group = ""; root.quick-dir-changed(0, "", "", ""); root.toast(@tr("已删除快捷目录")); } }
-                                    if root.qa2-path != "" : QuickAccessButton { width: 58px; label: root.qa2-label; path: root.qa2-path; editing: true; clicked => { root.navigate(root.qa2-path); } remove => { root.qa2-path = ""; root.qa2-label = ""; root.qa2-group = ""; root.quick-dir-changed(1, "", "", ""); root.toast(@tr("已删除快捷目录")); } }
-                                    if root.qa3-path != "" : QuickAccessButton { width: 58px; label: root.qa3-label; path: root.qa3-path; editing: true; clicked => { root.navigate(root.qa3-path); } remove => { root.qa3-path = ""; root.qa3-label = ""; root.qa3-group = ""; root.quick-dir-changed(2, "", "", ""); root.toast(@tr("已删除快捷目录")); } }
-                                    if root.qa4-path != "" : QuickAccessButton { width: 58px; label: root.qa4-label; path: root.qa4-path; editing: true; clicked => { root.navigate(root.qa4-path); } remove => { root.qa4-path = ""; root.qa4-label = ""; root.qa4-group = ""; root.quick-dir-changed(3, "", "", ""); root.toast(@tr("已删除快捷目录")); } }
-                                    if root.qa5-path != "" : QuickAccessButton { width: 58px; label: root.qa5-label; path: root.qa5-path; editing: true; clicked => { root.navigate(root.qa5-path); } remove => { root.qa5-path = ""; root.qa5-label = ""; root.qa5-group = ""; root.quick-dir-changed(4, "", "", ""); root.toast(@tr("已删除快捷目录")); } }
+                                Text { height: 16px; text: @tr("已有快捷目录（点红色 × 删除）"); color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; }
+                                Rectangle {
+                                    height: 48px; clip: true; border-radius: Theme.radius-sm; border-width: 1px; border-color: Theme.border-subtle; background: Theme.bg-root;
+                                    ScrollView {
+                                        width: parent.width; height: parent.height;
+                                        viewport-width: max(self.visible-width, qa-list.preferred-width);
+                                        viewport-height: self.visible-height;
+                                        qa-list := HorizontalLayout {
+                                            padding-left: 10px; padding-right: 10px; spacing: 10px;
+                                            if root.qa-show-root : QuickAccessButton { width: 72px; label: @tr("根目录"); path: "/"; editing: true; clicked => { } remove => { root.qa-show-root = false; root.toast(@tr("已删除快捷目录")); } }
+                                            if root.qa-show-home : QuickAccessButton { width: 70px; label: "HOME"; path: "/root"; editing: true; clicked => { } remove => { root.qa-show-home = false; root.toast(@tr("已删除快捷目录")); } }
+                                            if root.qa-show-etc : QuickAccessButton { width: 62px; label: "ETC"; path: "/etc"; editing: true; clicked => { } remove => { root.qa-show-etc = false; root.toast(@tr("已删除快捷目录")); } }
+                                            if root.qa-show-var : QuickAccessButton { width: 62px; label: "VAR"; path: "/var"; editing: true; clicked => { } remove => { root.qa-show-var = false; root.toast(@tr("已删除快捷目录")); } }
+                                            if root.qa-show-tmp : QuickAccessButton { width: 64px; label: "TMP"; path: "/tmp"; editing: true; clicked => { } remove => { root.qa-show-tmp = false; root.toast(@tr("已删除快捷目录")); } }
+                                            if root.qa-show-www : QuickAccessButton { width: 66px; label: "WWW"; path: "/www"; editing: true; clicked => { } remove => { root.qa-show-www = false; root.toast(@tr("已删除快捷目录")); } }
+                                            if root.qa-show-over : QuickAccessButton { width: 70px; label: "OVER"; path: "/overlay"; editing: true; clicked => { } remove => { root.qa-show-over = false; root.toast(@tr("已删除快捷目录")); } }
+                                            if root.qa1-path != "" : QuickAccessButton { width: 92px; label: root.qa1-label; path: root.qa1-path; editing: true; clicked => { } remove => { root.qa1-path = ""; root.qa1-label = ""; root.qa1-group = ""; root.quick-dir-changed(0, "", "", ""); root.toast(@tr("已删除快捷目录")); } }
+                                            if root.qa2-path != "" : QuickAccessButton { width: 92px; label: root.qa2-label; path: root.qa2-path; editing: true; clicked => { } remove => { root.qa2-path = ""; root.qa2-label = ""; root.qa2-group = ""; root.quick-dir-changed(1, "", "", ""); root.toast(@tr("已删除快捷目录")); } }
+                                            if root.qa3-path != "" : QuickAccessButton { width: 92px; label: root.qa3-label; path: root.qa3-path; editing: true; clicked => { } remove => { root.qa3-path = ""; root.qa3-label = ""; root.qa3-group = ""; root.quick-dir-changed(2, "", "", ""); root.toast(@tr("已删除快捷目录")); } }
+                                            if root.qa4-path != "" : QuickAccessButton { width: 92px; label: root.qa4-label; path: root.qa4-path; editing: true; clicked => { } remove => { root.qa4-path = ""; root.qa4-label = ""; root.qa4-group = ""; root.quick-dir-changed(3, "", "", ""); root.toast(@tr("已删除快捷目录")); } }
+                                            if root.qa5-path != "" : QuickAccessButton { width: 92px; label: root.qa5-label; path: root.qa5-path; editing: true; clicked => { } remove => { root.qa5-path = ""; root.qa5-label = ""; root.qa5-group = ""; root.quick-dir-changed(4, "", "", ""); root.toast(@tr("已删除快捷目录")); } }
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
-
-                // Back history and up one level are separate: ← returns to the last opened folder, ↑ goes to parent.
-                QuickAccessButton {
-                    width: 28px;
-                    label: "←";
-                    path: "back";
-                    editing: false;
-                    tooltip: @tr("返回上一次打开的目录");
-                    hover-tip(t) => { root.toolbar-tip = t; }
-                    clicked => { root.navigate-back(); }
-                    remove => { }
-                }
-                QuickAccessButton {
-                    width: 28px;
-                    label: "↑";
-                    path: "..";
-                    editing: false;
-                    tooltip: @tr("返回上一级目录");
-                    hover-tip(t) => { root.toolbar-tip = t; }
-                    clicked => { root.navigate(".."); }
-                    remove => { }
-                }
-
+                QuickAccessButton { width: 30px; label: "←"; path: "back"; editing: false; tooltip: @tr("返回上一次打开的目录"); hover-tip(t) => { root.toolbar-tip = t; } clicked => { root.navigate-back(); } remove => { } }
+                QuickAccessButton { width: 30px; label: "↑"; path: ".."; editing: false; tooltip: @tr("返回上一级目录"); hover-tip(t) => { root.toolbar-tip = t; } clicked => { root.navigate(".."); } remove => { } }
                 Rectangle { horizontal-stretch: 1; }
-                Text {
-                    text: root.tree-scope == "/"
-                        ? @tr("搜索范围: 全局 /")
-                        : (root.tree-scope != ""
-                            ? @tr("搜索范围: ") + root.tree-scope
-                            : (root.search-mode ? @tr("搜索模式: 当前目录") : @tr("搜索范围: 当前目录")));
-                    color: Theme.text-muted;
-                    font-size: 10px;
-                    vertical-alignment: center;
-                    overflow: elide;
-                    width: 280px;
-                }
+                Text { text: root.tree-scope == "/" ? @tr("搜索范围: 全局 /") : (root.tree-scope != "" ? @tr("搜索范围: ") + root.tree-scope : (root.search-mode ? @tr("搜索模式: 当前目录") : @tr("搜索范围: 当前目录"))); color: Theme.text-muted; font-size: 10px; vertical-alignment: center; overflow: elide; width: 280px; }
             }
         }
 
-        // --- Main area: tree (left) + file list (right) --------------------
         HorizontalLayout {
             vertical-stretch: 1;
             spacing: 0;
-
-            // ── Left: simple directory navigation list ----------------------
-            // No tree expanders and no recursive checkbox here. The left side is
-            // only for opening directories or adding them to search scope.
             if root.show-tree : VerticalLayout {
-                width: root.tree-width;
-                opacity: root.search-mode ? 0.42 : 1.0;
-                spacing: 0;
-
-                Rectangle {
-                    height: 20px;
-                    background: Theme.bg-root;
-                    Text {
-                        x: 8px;
-                        text: @tr("目录导航");
-                        color: Theme.text-muted;
-                        font-size: Theme.fs-xs;
-                        vertical-alignment: center;
-                        height: parent.height;
-                    }
-                }
+                width: root.tree-width; opacity: root.search-mode ? 0.42 : 1.0; spacing: 0;
+                Rectangle { height: 20px; background: Theme.bg-root; Text { x: 8px; text: @tr("目录导航"); color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; height: parent.height; } }
                 Rectangle { height: 1px; background: Theme.border-subtle; }
-
                 tree-area := Rectangle {
-                    vertical-stretch: 1;
-                    clip: true;
-                    ScrollView {
-                        width: parent.width;
-                        height: parent.height;
-                        tree-list := VerticalLayout {
-                            spacing: 0;
-
+                    vertical-stretch: 1; clip: true;
+                    ScrollView { width: parent.width; height: parent.height;
+                        tree-list := VerticalLayout { spacing: 0;
                             for node[i] in root.tree-nodes : Rectangle {
                                 height: 24px;
-                                background: node-ta.has-hover
-                                    ? Theme.bg-hover
-                                    : (node.path == root.current-path
-                                        ? #4a90e23c
-                                        : (node.path == root.tree-active-path || (root.tree-scope == "/" && node.path == "/")
-                                            ? #4a90e228
-                                            : (mod(i, 2) == 0 ? transparent : #ffffff08)));
-
+                                background: node-ta.has-hover ? Theme.bg-hover : (node.path == root.current-path ? #4a90e23c : (node.path == root.tree-active-path || (root.tree-scope == "/" && node.path == "/") ? #4a90e228 : (mod(i, 2) == 0 ? transparent : #ffffff08)));
                                 node-ta := TouchArea {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    mouse-cursor: pointer;
-                                    changed has-hover => { root.toolbar-tip = self.has-hover ? node.path : ""; }
-                                    clicked => {
-                                        if (node.path == "/") {
-                                            // Root single-click only moves the tree cursor; it must not
-                                            // select global scope, start/cancel search, or navigate the file list.
-                                            root.tree-active-path = "/";
-                                        } else if (!root.search-mode) {
-                                            root.tree-active-path = node.path;
-                                            // If root/global scope was selected before, opening a concrete
-                                            // folder should return search scope to the current directory.
-                                            // Otherwise the next search still walks / and looks wrong.
-                                            if (root.tree-scope == "/") { root.clear-tree-scope(); }
-                                            root.navigate(node.path);
-                                        }
-                                    }
-                                    double-clicked => {
-                                        if (node.path == "/") {
-                                            root.tree-active-path = "/";
-                                            if (root.tree-scope == "/" || root.search-mode || root.search-running) {
-                                                if (root.search-running) { root.cancel-search(); }
-                                                file-search.text = "";
-                                                root.search-changed("");
-                                                root.clear-tree-scope();
-                                                root.search-mode = false;
-                                                root.navigate(root.search-restore-path != "" ? root.search-restore-path : root.current-path);
-                                                root.search-restore-path = "";
-                                            } else {
-                                                root.set-tree-scope("/");
-                                                file-search.focus();
-                                            }
-                                        } else if (!root.search-mode) {
-                                            root.tree-expand(node.path);
-                                        }
-                                    }
-                                    pointer-event(ev) => {
-                                        if (ev.kind == PointerEventKind.down
-                                                && ev.button == PointerEventButton.right) {
-                                            root.tree-menu-target = node.path;
-                                            root.tree-menu-x = self.absolute-position.x + self.mouse-x - tree-area.absolute-position.x;
-                                            root.tree-menu-y = self.absolute-position.y + self.mouse-y - tree-area.absolute-position.y;
-                                            tree-menu.show();
-                                        }
-                                    }
+                                    width: parent.width; height: parent.height; mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? node.path : ""; }
+                                    clicked => { if (node.path == "/") { root.tree-active-path = "/"; } else if (!root.search-mode) { root.tree-active-path = node.path; if (root.tree-scope == "/") { root.clear-tree-scope(); } root.navigate(node.path); } }
+                                    double-clicked => { if (node.path == "/") { root.tree-active-path = "/"; if (root.tree-scope == "/" || root.search-mode || root.search-running) { if (root.search-running) { root.cancel-search(); } file-search.text = ""; root.search-changed(""); root.clear-tree-scope(); root.search-mode = false; root.navigate(root.search-restore-path != "" ? root.search-restore-path : root.current-path); root.search-restore-path = ""; } else { root.set-tree-scope("/"); file-search.focus(); } } else if (!root.search-mode) { root.tree-expand(node.path); } }
+                                    pointer-event(ev) => { if (ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right) { root.tree-menu-target = node.path; root.tree-menu-x = self.absolute-position.x + self.mouse-x - tree-area.absolute-position.x; root.tree-menu-y = self.absolute-position.y + self.mouse-y - tree-area.absolute-position.y; tree-menu.show(); } }
                                 }
-
-                                if node.path == root.current-path || node.path == root.tree-active-path || (root.tree-scope == "/" && node.path == "/") : Rectangle {
-                                    x: 0px;
-                                    y: 3px;
-                                    width: 3px;
-                                    height: parent.height - 6px;
-                                    border-radius: 2px;
-                                    background: Theme.accent;
-                                }
-
-                                HorizontalLayout {
-                                    spacing: 4px;
-                                    padding-left: 4px + node.depth * 8px;
-                                    padding-right: 4px;
-
-                                    FileKindIcon {
-                                        is-dir: true;
-                                        kind: "dir";
-                                        expanded: node.expanded;
-                                        hovered: node-ta.has-hover;
-                                    }
-
-                                    Text {
-                                        text: node.path == "/" ? @tr("根目录") : node.name;
-                                        color: (node.path == root.current-path || node.path == root.tree-active-path || (root.tree-scope == "/" && node.path == "/")) ? Theme.accent : Theme.text-primary;
-                                        font-size: Theme.fs-xs;
-                                        horizontal-stretch: 1;
-                                        overflow: elide;
-                                        vertical-alignment: center;
-                                    }
-                                }
+                                if node.path == root.current-path || node.path == root.tree-active-path || (root.tree-scope == "/" && node.path == "/") : Rectangle { x: 0px; y: 3px; width: 3px; height: parent.height - 6px; border-radius: 2px; background: Theme.accent; }
+                                HorizontalLayout { spacing: 4px; padding-left: 4px + node.depth * 8px; padding-right: 4px; FileKindIcon { is-dir: true; kind: "dir"; expanded: node.expanded; hovered: node-ta.has-hover; } Text { text: node.path == "/" ? @tr("根目录") : node.name; color: (node.path == root.current-path || node.path == root.tree-active-path || (root.tree-scope == "/" && node.path == "/")) ? Theme.accent : Theme.text-primary; font-size: Theme.fs-xs; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; } }
                             }
                         }
                     }
-
                     tree-menu := PopupWindow {
-                        x: root.tree-menu-x;
-                        y: root.tree-menu-y;
-                        width: 156px;
-                        height: 8 * 27px + 14px;
-                        Rectangle {
-                            background: Theme.bg-panel;
-                            border-radius: Theme.radius-sm;
-                            border-width: 1px;
-                            border-color: Theme.border-strong;
-                            drop-shadow-blur: 10px;
-                            drop-shadow-color: #00000040;
-                            VerticalLayout {
-                                padding: 4px;
-                                spacing: 1px;
-                                SftpMenuItem {
-                                    label: @tr("打开目录");
-                                    clicked => { root.search-mode = false; file-search.text = ""; root.search-changed(""); root.tree-active-path = root.tree-menu-target; if (root.tree-scope == "/") { root.clear-tree-scope(); } root.navigate(root.tree-menu-target); }
-                                }
-                                SftpMenuItem {
-                                    label: @tr("加入/移出搜索范围");
-                                    clicked => { root.toggle-tree-scope(root.tree-menu-target); }
-                                }
-                                SftpMenuItem {
-                                    label: @tr("在此搜索");
-                                    clicked => { root.tree-active-path = root.tree-menu-target; root.set-tree-scope(root.tree-menu-target); file-search.focus(); root.toast(@tr("已设置搜索范围")); }
-                                }
-                                SftpMenuItem {
-                                    label: @tr("复制路径");
-                                    clicked => { root.copy-path(root.tree-menu-target); }
-                                }
-                                SftpMenuItem {
-                                    label: @tr("权限");
-                                    enabled: root.tree-menu-target != "";
-                                    clicked => { root.chmod-request(root.tree-menu-target, root.tree-menu-target, 493); }
-                                }
+                        x: root.tree-menu-x; y: root.tree-menu-y; width: 156px; height: 230px;
+                        Rectangle { background: Theme.bg-panel; border-radius: Theme.radius-sm; border-width: 1px; border-color: Theme.border-strong; drop-shadow-blur: 10px; drop-shadow-color: #00000040;
+                            VerticalLayout { padding: 4px; spacing: 1px;
+                                SftpMenuItem { label: @tr("打开目录"); clicked => { root.search-mode = false; file-search.text = ""; root.search-changed(""); root.tree-active-path = root.tree-menu-target; if (root.tree-scope == "/") { root.clear-tree-scope(); } root.navigate(root.tree-menu-target); } }
+                                SftpMenuItem { label: @tr("加入/移出搜索范围"); clicked => { root.toggle-tree-scope(root.tree-menu-target); } }
+                                SftpMenuItem { label: @tr("在此搜索"); clicked => { root.tree-active-path = root.tree-menu-target; root.set-tree-scope(root.tree-menu-target); file-search.focus(); root.toast(@tr("已设置搜索范围")); } }
+                                SftpMenuItem { label: @tr("复制路径"); clicked => { root.copy-path(root.tree-menu-target); } }
+                                SftpMenuItem { label: @tr("权限"); enabled: root.tree-menu-target != ""; clicked => { root.chmod-request(root.tree-menu-target, root.tree-menu-target, 493); } }
                                 Rectangle { height: 1px; background: Theme.border-subtle; }
-                                SftpMenuItem {
-                                    label: @tr("刷新此目录");
-                                    clicked => { root.toast(@tr("正在刷新此目录...")); root.refresh(root.tree-menu-target); }
-                                }
-                                SftpMenuItem {
-                                    label: @tr("删除文件夹");
-                                    tint: #d86c6c;
-                                    enabled: root.tree-menu-target != "/";
-                                    clicked => { root.delete(root.tree-menu-target); }
-                                }
+                                SftpMenuItem { label: @tr("刷新此目录"); clicked => { root.toast(@tr("正在刷新此目录...")); root.refresh(root.tree-menu-target); } }
+                                SftpMenuItem { label: @tr("删除文件夹"); tint: #d86c6c; enabled: root.tree-menu-target != "/"; clicked => { root.delete(root.tree-menu-target); } }
                             }
                         }
                     }
                 }
             }
-
-            // Vertical splitter: keep the visible divider as a thin Win11-style
-            // hairline, not a glowing block. The transparent 7px hit area still
-            // makes it easy to drag left/right without adding visual noise.
             if root.show-tree : Rectangle {
-                width: 7px;
-                background: transparent;
-                Rectangle {
-                    x: 3px;
-                    width: 1px;
-                    height: parent.height;
-                    background: split-ta.has-hover || root.tree-resizing ? Theme.border-strong : Theme.border-subtle;
-                }
+                width: 7px; background: transparent;
+                Rectangle { x: 3px; width: 1px; height: parent.height; background: split-ta.has-hover || root.tree-resizing ? Theme.border-strong : Theme.border-subtle; }
                 split-ta := TouchArea {
-                    width: parent.width;
-                    height: parent.height;
-                    mouse-cursor: ew-resize;
-                    pointer-event(e) => {
-                        if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
-                            root.tree-resizing = true;
-                            root.tree-grab-x = self.absolute-position.x + self.mouse-x;
-                            root.tree-base-width = root.tree-width;
-                        }
-                        if (e.kind == PointerEventKind.up) {
-                            root.tree-resizing = false;
-                        }
-                    }
-                    moved => {
-                        if (root.tree-resizing) {
-                            root.tree-width = clamp(
-                                root.tree-base-width + (self.absolute-position.x + self.mouse-x - root.tree-grab-x),
-                                120px,
-                                min(420px, max(120px, root.width - 260px))
-                            );
-                        }
-                    }
+                    width: parent.width; height: parent.height; mouse-cursor: ew-resize;
+                    pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { root.tree-resizing = true; root.tree-grab-x = self.absolute-position.x + self.mouse-x; root.tree-base-width = root.tree-width; } if (e.kind == PointerEventKind.up) { root.tree-resizing = false; } }
+                    moved => { if (root.tree-resizing) { root.tree-width = clamp(root.tree-base-width + (self.absolute-position.x + self.mouse-x - root.tree-grab-x), 120px, min(420px, max(120px, root.width - 260px))); } }
                 }
             }
-
-            // ── Right: file listing ─────────────────────────────────────────
             VerticalLayout {
-                horizontal-stretch: 1;
-                spacing: 0;
-
-                // Column headers
+                horizontal-stretch: 1; spacing: 0;
                 Rectangle {
-                    height: 20px;
-                    background: Theme.bg-root;
-                    HorizontalLayout {
-                        padding-left: 8px; padding-right: 8px; spacing: 8px;
-                        // Spacer matching the rows' checkbox so the header columns
-                        // line up with the values below them (#dock).
+                    height: 20px; background: Theme.bg-root;
+                    HorizontalLayout { padding-left: 8px; padding-right: 8px; spacing: 8px;
                         Rectangle { width: 16px; }
-                        if root.search-mode : Text { text: @tr("名称"); color: Theme.text-muted; font-size: Theme.fs-xs;
-                               width: 180px; vertical-alignment: center; }
-                        if !root.search-mode : Text { text: @tr("名称"); color: Theme.text-muted; font-size: Theme.fs-xs;
-                               horizontal-stretch: 1; vertical-alignment: center; }
-                        if root.search-mode : Text { text: @tr("位置"); color: Theme.text-muted; font-size: Theme.fs-xs;
-                               horizontal-stretch: 1; min-width: 180px; horizontal-alignment: left; vertical-alignment: center; }
-                        if root.show-size-col : Text { text: @tr("大小"); color: Theme.text-muted; font-size: Theme.fs-xs;
-                               width: 72px; horizontal-alignment: right; vertical-alignment: center; }
-                        if root.show-mode-col : Text { text: @tr("权限"); color: Theme.text-muted; font-size: Theme.fs-xs;
-                               width: 56px; horizontal-alignment: right; vertical-alignment: center; }
-                        if root.show-modified-col : Text { text: @tr("修改时间"); color: Theme.text-muted; font-size: Theme.fs-xs;
-                               width: 116px; horizontal-alignment: right; vertical-alignment: center; }
+                        if root.search-mode : Text { text: @tr("名称"); color: Theme.text-muted; font-size: Theme.fs-xs; width: 180px; vertical-alignment: center; }
+                        if !root.search-mode : Text { text: @tr("名称"); color: Theme.text-muted; font-size: Theme.fs-xs; horizontal-stretch: 1; vertical-alignment: center; }
+                        if root.search-mode : Text { text: @tr("位置"); color: Theme.text-muted; font-size: Theme.fs-xs; horizontal-stretch: 1; min-width: 180px; horizontal-alignment: left; vertical-alignment: center; }
+                        if root.show-size-col : Text { text: @tr("大小"); color: Theme.text-muted; font-size: Theme.fs-xs; width: 72px; horizontal-alignment: right; vertical-alignment: center; }
+                        if root.show-mode-col : Text { text: @tr("权限"); color: Theme.text-muted; font-size: Theme.fs-xs; width: 56px; horizontal-alignment: right; vertical-alignment: center; }
+                        if root.show-modified-col : Text { text: @tr("修改时间"); color: Theme.text-muted; font-size: Theme.fs-xs; width: 116px; horizontal-alignment: right; vertical-alignment: center; }
                     }
                 }
                 Rectangle { height: 1px; background: Theme.border-subtle; }
-
-                // File list. The area fills the panel height so right-click works
-                // on the whitespace below the rows too (#84); the single menu
-                // below greys out item actions when nothing was hit.
                 file-area := Rectangle {
-                    vertical-stretch: 1;
-                    clip: true;
-                    ScrollView {
-                        width: parent.width;
-                        height: parent.height;
-                        viewport-width: self.visible-width;
-                        viewport-height: max(self.visible-height, file-list.preferred-height);
-
-                        file-list := VerticalLayout {
-                            spacing: 0;
-
-                            if root.loading : Rectangle {
-                                height: 40px;
-                                Text { text: @tr("Loading..."); color: Theme.text-muted; font-size: Theme.fs-sm;
-                                       horizontal-alignment: center; vertical-alignment: center; }
-                            }
-
-                            if !root.loading && root.entries.length == 0 : Rectangle {
-                                height: 52px;
-                                VerticalLayout {
-                                    spacing: 2px;
-                                    Text { text: "📂"; color: Theme.text-muted; font-size: Theme.fs-md;
-                                           horizontal-alignment: center; vertical-alignment: center; }
-                                    Text { text: @tr("目录为空"); color: Theme.text-muted; font-size: Theme.fs-sm;
-                                           horizontal-alignment: center; vertical-alignment: center; }
-                                }
-                            }
-
+                    vertical-stretch: 1; clip: true;
+                    ScrollView { width: parent.width; height: parent.height; viewport-width: self.visible-width; viewport-height: max(self.visible-height, file-list.preferred-height);
+                        file-list := VerticalLayout { spacing: 0;
+                            if root.loading : Rectangle { height: 40px; Text { text: @tr("Loading..."); color: Theme.text-muted; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; } }
+                            if !root.loading && root.entries.length == 0 : Rectangle { height: 52px; VerticalLayout { spacing: 2px; Text { text: "📂"; color: Theme.text-muted; font-size: Theme.fs-md; horizontal-alignment: center; vertical-alignment: center; } Text { text: @tr("目录为空"); color: Theme.text-muted; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; } } }
                             for entry[i] in root.entries : row := Rectangle {
                                 height: 24px;
-                                background: entry.selected
-                                    ? #4a90e235
-                                    : (i == root.selected-row
-                                        ? #4a90e240
-                                        : (row-ta.has-hover
-                                            ? #4a90e225
-                                            : (mod(i, 2) == 0 ? transparent : #ffffff08)));
-
+                                background: entry.selected ? #4a90e235 : (i == root.selected-row ? #4a90e240 : (row-ta.has-hover ? #4a90e225 : (mod(i, 2) == 0 ? transparent : #ffffff08)));
                                 row-ta := TouchArea {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    mouse-cursor: pointer;
-                                    clicked => {
-                                        root.selected-row = i;
-                                        root.file-active-path = entry.full-path;
-                                    }
-                                    double-clicked => {
-                                        root.file-active-path = entry.full-path;
-                                        if (root.search-mode) {
-                                            root.locate-result(entry.full-path, entry.is-dir);
-                                            root.search-mode = false;
-                                            root.search-restore-path = "";
-                                            file-search.text = "";
-                                            root.search-changed("");
-                                        } else if (entry.kind == "dead-link") {
-                                            root.toast(@tr("死链接，无法打开"));
-                                        } else if (entry.is-dir) {
-                                            root.navigate(entry.full-path);
-                                        } else {
-                                            root.download(entry.full-path);
-                                        }
-                                    }
-                                    pointer-event(ev) => {
-                                        if (ev.kind == PointerEventKind.down
-                                                && ev.button == PointerEventButton.right) {
-                                            root.selected-row = i;
-                                            root.file-active-path = entry.full-path;
-                                            root.menu-target = entry.full-path;
-                                            root.menu-target-name = entry.name;
-                                            root.menu-target-is-dir = entry.is-dir;
-                                            root.menu-target-mode = entry.mode;
-                                            root.menu-target-index = i;
-                                            root.menu-x = self.absolute-position.x + self.mouse-x - file-area.absolute-position.x;
-                                            root.menu-y = self.absolute-position.y + self.mouse-y - file-area.absolute-position.y;
-                                            file-menu.show();
-                                        }
-                                    }
+                                    width: parent.width; height: parent.height; mouse-cursor: pointer;
+                                    clicked => { root.selected-row = i; root.file-active-path = entry.full-path; }
+                                    double-clicked => { root.file-active-path = entry.full-path; if (root.search-mode) { root.locate-result(entry.full-path, entry.is-dir); root.search-mode = false; root.search-restore-path = ""; file-search.text = ""; root.search-changed(""); } else if (entry.kind == "dead-link") { root.toast(@tr("死链接，无法打开")); } else if (entry.is-dir) { root.navigate(entry.full-path); } else { root.download(entry.full-path); } }
+                                    pointer-event(ev) => { if (ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right) { root.selected-row = i; root.file-active-path = entry.full-path; root.menu-target = entry.full-path; root.menu-target-name = entry.name; root.menu-target-is-dir = entry.is-dir; root.menu-target-mode = entry.mode; root.menu-target-index = i; root.menu-x = self.absolute-position.x + self.mouse-x - file-area.absolute-position.x; root.menu-y = self.absolute-position.y + self.mouse-y - file-area.absolute-position.y; file-menu.show(); } }
                                 }
-
-                                HorizontalLayout {
-                                    padding-left: 8px; padding-right: 8px; spacing: 8px;
-                                    // Multi-select checkbox (#100). Its own TouchArea
-                                    // sits above the row, so toggling doesn't trigger
-                                    // navigate/select.
-                                    Rectangle {
-                                        width: 13px;
-                                        y: (parent.height - self.height) / 2;
-                                        height: 13px;
-                                        border-radius: 3px;
-                                        border-width: 1px;
-                                        border-color: entry.selected ? Theme.accent : Theme.border-strong;
-                                        background: entry.selected ? Theme.accent : transparent;
-                                        cb-ta := TouchArea {
-                                            width: parent.width;
-                                            height: parent.height;
-                                            mouse-cursor: pointer;
-                                            clicked => { root.selected-row = i; root.file-active-path = entry.full-path; root.toggle-select(i); }
-                                        }
-                                        if entry.selected : Text {
-                                            text: "\u{E5CA}"; // check
-                                            font-family: "Material Icons";
-                                            color: #ffffff;
-                                            font-size: 10px;
-                                            horizontal-alignment: center;
-                                            vertical-alignment: center;
-                                            width: parent.width; height: parent.height;
-                                        }
+                                HorizontalLayout { padding-left: 8px; padding-right: 8px; spacing: 8px;
+                                    Rectangle { width: 13px; y: (parent.height - self.height) / 2; height: 13px; border-radius: 3px; border-width: 1px; border-color: entry.selected ? Theme.accent : Theme.border-strong; background: entry.selected ? Theme.accent : transparent;
+                                        cb-ta := TouchArea { width: parent.width; height: parent.height; mouse-cursor: pointer; clicked => { root.selected-row = i; root.file-active-path = entry.full-path; root.toggle-select(i); } }
+                                        if entry.selected : Text { text: "\u{E5CA}"; font-family: "Material Icons"; color: #ffffff; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
                                     }
-                                    FileKindIcon {
-                                        is-dir: entry.is-dir;
-                                        kind: entry.kind;
-                                    }
-
-                                    if root.search-mode : Text {
-                                        text: entry.name;
-                                        color: entry.kind == "dead-link" ? Theme.text-muted : (entry.is-dir ? Theme.accent : Theme.text-primary);
-                                        font-size: Theme.fs-sm;
-                                        width: 180px;
-                                        overflow: elide;
-                                        vertical-alignment: center;
-                                    }
-                                    if !root.search-mode : Text {
-                                        text: entry.name;
-                                        color: entry.kind == "dead-link" ? Theme.text-muted : (entry.is-dir ? Theme.accent : Theme.text-primary);
-                                        font-size: Theme.fs-sm;
-                                        horizontal-stretch: 1;
-                                        overflow: elide;
-                                        vertical-alignment: center;
-                                    }
-                                    if root.search-mode : Text {
-                                        text: entry.full-path;
-                                        color: Theme.text-muted;
-                                        font-size: Theme.fs-xs;
-                                        horizontal-stretch: 1;
-                                        min-width: 180px;
-                                        overflow: elide;
-                                        vertical-alignment: center;
-                                    }
-                                    if root.show-size-col : Text {
-                                        text: entry.kind == "dead-link" ? @tr("死链接") : (entry.kind == "symlink-dir" ? @tr("链接目录") : (entry.kind == "symlink-file" ? @tr("链接文件") : (entry.is-dir ? @tr("文件夹") : entry.size)));
-                                        color: entry.kind == "dead-link" ? Theme.text-muted : Theme.text-secondary; font-size: Theme.fs-xs;
-                                        width: 72px; horizontal-alignment: right; vertical-alignment: center;
-                                    }
-                                    if root.show-mode-col : Text {
-                                        text: entry.mode-text;
-                                        color: Theme.text-muted; font-size: Theme.fs-xs;
-                                        width: 56px; horizontal-alignment: right; vertical-alignment: center;
-                                    }
-                                    if root.show-modified-col : Text {
-                                        text: entry.modified;
-                                        color: Theme.text-muted; font-size: Theme.fs-xs;
-                                        width: 116px; horizontal-alignment: right; vertical-alignment: center;
-                                    }
+                                    FileKindIcon { is-dir: entry.is-dir; kind: entry.kind; }
+                                    if root.search-mode : Text { text: entry.name; color: entry.kind == "dead-link" ? Theme.text-muted : (entry.is-dir ? Theme.accent : Theme.text-primary); font-size: Theme.fs-sm; width: 180px; overflow: elide; vertical-alignment: center; }
+                                    if !root.search-mode : Text { text: entry.name; color: entry.kind == "dead-link" ? Theme.text-muted : (entry.is-dir ? Theme.accent : Theme.text-primary); font-size: Theme.fs-sm; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+                                    if root.search-mode : Text { text: entry.full-path; color: Theme.text-muted; font-size: Theme.fs-xs; horizontal-stretch: 1; min-width: 180px; overflow: elide; vertical-alignment: center; }
+                                    if root.show-size-col : Text { text: entry.kind == "dead-link" ? @tr("死链接") : (entry.kind == "symlink-dir" ? @tr("链接目录") : (entry.kind == "symlink-file" ? @tr("链接文件") : (entry.is-dir ? @tr("文件夹") : entry.size))); color: entry.kind == "dead-link" ? Theme.text-muted : Theme.text-secondary; font-size: Theme.fs-xs; width: 72px; horizontal-alignment: right; vertical-alignment: center; }
+                                    if root.show-mode-col : Text { text: entry.mode-text; color: Theme.text-muted; font-size: Theme.fs-xs; width: 56px; horizontal-alignment: right; vertical-alignment: center; }
+                                    if root.show-modified-col : Text { text: entry.modified; color: Theme.text-muted; font-size: Theme.fs-xs; width: 116px; horizontal-alignment: right; vertical-alignment: center; }
                                 }
                             }
-
-                            // Whitespace below the rows: right-click here opens the
-                            // menu with no target (item actions greyed out) (#84).
-                            ws := Rectangle {
-                                vertical-stretch: 1;
-                                min-height: 24px;
-                                ws-ta := TouchArea {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    pointer-event(ev) => {
-                                        if (ev.kind == PointerEventKind.down
-                                                && ev.button == PointerEventButton.right) {
-                                            root.selected-row = -1;
-                                            root.file-active-path = "";
-                                            root.menu-target = "";
-                                            root.menu-target-index = -1;
-                                            root.menu-x = self.absolute-position.x + self.mouse-x - file-area.absolute-position.x;
-                                            root.menu-y = self.absolute-position.y + self.mouse-y - file-area.absolute-position.y;
-                                            file-menu.show();
-                                        }
-                                    }
-                                }
+                            ws := Rectangle { vertical-stretch: 1; min-height: 24px;
+                                ws-ta := TouchArea { width: parent.width; height: parent.height; pointer-event(ev) => { if (ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right) { root.selected-row = -1; root.file-active-path = ""; root.menu-target = ""; root.menu-target-index = -1; root.menu-x = self.absolute-position.x + self.mouse-x - file-area.absolute-position.x; root.menu-y = self.absolute-position.y + self.mouse-y - file-area.absolute-position.y; file-menu.show(); } } }
                             }
                         }
                     }
-
-                    // One context menu for the whole list (#84). Item actions are
-                    // enabled only when an item was right-clicked (menu-target set);
-                    // new/refresh are always available.
                     file-menu := PopupWindow {
-                        x: root.menu-x;
-                        y: root.menu-y;
-                        width: 154px;
-                        height: 13 * 27px + 14px;
-                        Rectangle {
-                            background: Theme.bg-panel;
-                            border-radius: Theme.radius-sm;
-                            border-width: 1px;
-                            border-color: Theme.border-strong;
-                            drop-shadow-blur: 10px;
-                            drop-shadow-color: #00000040;
-                            VerticalLayout {
-                                padding: 4px;
-                                spacing: 1px;
-                                SftpMenuItem {
-                                    label: @tr("在此搜索");
-                                    enabled: root.menu-target != "" && root.menu-target-is-dir;
-                                    clicked => { root.tree-active-path = root.menu-target; root.set-tree-scope(root.menu-target); file-search.focus(); root.toast(@tr("已设置搜索范围")); }
-                                }
+                        x: root.menu-x; y: root.menu-y; width: 154px; height: 365px;
+                        Rectangle { background: Theme.bg-panel; border-radius: Theme.radius-sm; border-width: 1px; border-color: Theme.border-strong; drop-shadow-blur: 10px; drop-shadow-color: #00000040;
+                            VerticalLayout { padding: 4px; spacing: 1px;
+                                SftpMenuItem { label: @tr("在此搜索"); enabled: root.menu-target != "" && root.menu-target-is-dir; clicked => { root.tree-active-path = root.menu-target; root.set-tree-scope(root.menu-target); file-search.focus(); root.toast(@tr("已设置搜索范围")); } }
                                 Rectangle { height: 1px; background: Theme.border-subtle; }
-                                SftpMenuItem {
-                                    label: @tr("下载");
-                                    enabled: root.menu-target != "";
-                                    clicked => { root.download(root.menu-target); }
-                                }
-                                SftpMenuItem {
-                                    label: @tr("查看");
-                                    enabled: root.menu-target != "" && !root.menu-target-is-dir;
-                                    clicked => { root.view(root.menu-target); }
-                                }
-                                SftpMenuItem {
-                                    label: @tr("编辑");
-                                    enabled: root.menu-target != "" && !root.menu-target-is-dir;
-                                    clicked => { root.edit(root.menu-target); }
-                                }
-                                SftpMenuItem {
-                                    label: @tr("外部程序查看");
-                                    enabled: root.menu-target != "" && !root.menu-target-is-dir;
-                                    clicked => { root.open-external(root.menu-target); }
-                                }
-                                SftpMenuItem {
-                                    label: @tr("外部程序编辑");
-                                    enabled: root.menu-target != "" && !root.menu-target-is-dir;
-                                    clicked => { root.edit-external(root.menu-target); }
-                                }
-                                SftpMenuItem {
-                                    label: @tr("重命名");
-                                    enabled: root.menu-target != "";
-                                    clicked => { root.rename-request(root.menu-target, root.menu-target-name); }
-                                }
-                                SftpMenuItem {
-                                    label: @tr("权限");
-                                    enabled: root.menu-target != "";
-                                    clicked => { root.chmod-request(root.menu-target, root.menu-target-name, root.menu-target-mode); }
-                                }
-                                SftpMenuItem {
-                                    label: @tr("复制路径");
-                                    enabled: root.menu-target != "";
-                                    clicked => { root.copy-path(root.menu-target); }
-                                }
-                                SftpMenuItem {
-                                    label: @tr("删除");
-                                    tint: #d86c6c;
-                                    enabled: root.menu-target != "";
-                                    clicked => { root.delete(root.menu-target); }
-                                }
+                                SftpMenuItem { label: @tr("下载"); enabled: root.menu-target != ""; clicked => { root.download(root.menu-target); } }
+                                SftpMenuItem { label: @tr("查看"); enabled: root.menu-target != "" && !root.menu-target-is-dir; clicked => { root.view(root.menu-target); } }
+                                SftpMenuItem { label: @tr("编辑"); enabled: root.menu-target != "" && !root.menu-target-is-dir; clicked => { root.edit(root.menu-target); } }
+                                SftpMenuItem { label: @tr("外部程序查看"); enabled: root.menu-target != "" && !root.menu-target-is-dir; clicked => { root.open-external(root.menu-target); } }
+                                SftpMenuItem { label: @tr("外部程序编辑"); enabled: root.menu-target != "" && !root.menu-target-is-dir; clicked => { root.edit-external(root.menu-target); } }
+                                SftpMenuItem { label: @tr("重命名"); enabled: root.menu-target != ""; clicked => { root.rename-request(root.menu-target, root.menu-target-name); } }
+                                SftpMenuItem { label: @tr("权限"); enabled: root.menu-target != ""; clicked => { root.chmod-request(root.menu-target, root.menu-target-name, root.menu-target-mode); } }
+                                SftpMenuItem { label: @tr("复制路径"); enabled: root.menu-target != ""; clicked => { root.copy-path(root.menu-target); } }
+                                SftpMenuItem { label: @tr("删除"); tint: #d86c6c; enabled: root.menu-target != ""; clicked => { root.delete(root.menu-target); } }
                                 Rectangle { height: 1px; background: Theme.border-subtle; }
-                                SftpMenuItem {
-                                    label: @tr("新建文件夹");
-                                    clicked => { root.new-folder(root.current-path); }
-                                }
-                                SftpMenuItem {
-                                    label: @tr("新建文件");
-                                    clicked => { root.new-file(root.current-path); }
-                                }
-                                SftpMenuItem {
-                                    label: @tr("刷新当前目录");
-                                    clicked => { root.toast(@tr("正在刷新当前目录...")); root.refresh(root.current-path); }
-                                }
+                                SftpMenuItem { label: @tr("新建文件夹"); clicked => { root.new-folder(root.current-path); } }
+                                SftpMenuItem { label: @tr("新建文件"); clicked => { root.new-file(root.current-path); } }
+                                SftpMenuItem { label: @tr("刷新当前目录"); clicked => { root.toast(@tr("正在刷新当前目录...")); root.refresh(root.current-path); } }
                             }
                         }
                     }
                 }
             }
         }
-
-        // --- Status bar (full width) --------------------------------------
         Rectangle {
-            height: 18px;
-            background: Theme.bg-panel-alt;
-            status-ta := TouchArea {
-                width: parent.width;
-                height: parent.height;
-                mouse-cursor: pointer;
-                clicked => { root.copy-status(status-text.text); }
-            }
-            status-text := Text {
-                x: 8px;
-                text: (root.search-mode ? @tr("搜索模式") + "  ·  " : "") + root.status
-                    + "  ·  当前目录: " + (root.current-path != "" ? root.current-path : "未打开")
-                    + (root.file-active-path != "" ? "  ·  右侧选中: " + root.file-active-path : "")
-                    + (root.tree-active-path != "" ? "  ·  左侧选中: " + root.tree-active-path : "")
-                    + (root.tree-scope != "" ? "  ·  搜索范围: " + (root.tree-scope == "/" ? "全局 /" : root.tree-scope) : "")
-                    + (root.selected-count > 0 ? "  ·  已勾选: " + root.selected-count + " 项" : "");
-                color: Theme.text-muted;
-                font-size: Theme.fs-xs;
-                vertical-alignment: center;
-                height: parent.height;
-                overflow: elide;
-                width: parent.width - 16px;
-            }
+            height: 18px; background: Theme.bg-panel-alt;
+            status-ta := TouchArea { width: parent.width; height: parent.height; mouse-cursor: pointer; clicked => { root.copy-status(status-text.text); } }
+            status-text := Text { x: 8px; text: (root.search-mode ? @tr("搜索模式") + "  ·  " : "") + root.status + "  ·  当前目录: " + (root.current-path != "" ? root.current-path : "未打开") + (root.file-active-path != "" ? "  ·  右侧选中: " + root.file-active-path : "") + (root.tree-active-path != "" ? "  ·  左侧选中: " + root.tree-active-path : "") + (root.tree-scope != "" ? "  ·  搜索范围: " + (root.tree-scope == "/" ? "全局 /" : root.tree-scope) : "") + (root.selected-count > 0 ? "  ·  已勾选: " + root.selected-count + " 项" : ""); color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; height: parent.height; overflow: elide; width: parent.width - 16px; }
         }
     }
-
 }
