@@ -1,0 +1,67 @@
+name: Temporary Windows validation
+
+on:
+  push:
+    branches:
+      - fix/sftp-local-terminal
+    paths:
+      - .github/workflows/temporary-validate-windows.yml
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repaired branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/sftp-local-terminal
+          fetch-depth: 0
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Validate check, tests and release build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $commands = @(
+            'cargo check --locked',
+            'cargo test --locked',
+            'cargo build --release --locked --target x86_64-pc-windows-msvc'
+          )
+          $ok = $true
+          $failed = ''
+          foreach ($command in $commands) {
+            Write-Host "::group::$command"
+            Invoke-Expression $command
+            $code = $LASTEXITCODE
+            Write-Host '::endgroup::'
+            if ($code -ne 0) {
+              $ok = $false
+              $failed = $command
+              break
+            }
+          }
+
+          New-Item -ItemType Directory -Force '.github/ci-status' | Out-Null
+          $status = if ($ok) { 'SUCCESS' } else { 'FAILED' }
+          @(
+            "status=$status"
+            "source_commit=$env:GITHUB_SHA"
+            "failed_command=$failed"
+            "checked_at=$(Get-Date -Format o)"
+          ) | Set-Content -Encoding utf8 '.github/ci-status/windows-validation.txt'
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add '.github/ci-status/windows-validation.txt'
+          git commit -m "ci: record Windows validation result"
+          git pull --rebase origin fix/sftp-local-terminal
+          git push origin HEAD:fix/sftp-local-terminal
+
+          if (-not $ok) { exit 1 }
