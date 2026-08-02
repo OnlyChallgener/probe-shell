@@ -1,0 +1,74 @@
+name: SSH fallback upload verification
+
+on:
+  pull_request:
+    branches:
+      - automation/ssh-fallback-upload
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ssh-fallback-upload-verification
+  cancel-in-progress: true
+
+jobs:
+  verify-and-apply:
+    if: github.head_ref == 'automation/ssh-fallback-upload-run'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout verification branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Preserve guarded patch
+        run: cp .github/scripts/apply_ssh_fallback_upload.py /tmp/apply_ssh_fallback_upload.py
+
+      - name: Checkout target branch
+        run: |
+          git fetch origin fix/sftp-local-terminal
+          git checkout -B fix/sftp-local-terminal origin/fix/sftp-local-terminal
+
+      - name: Apply focused upload patch
+        run: python /tmp/apply_ssh_fallback_upload.py
+
+      - name: Verify changed-file scope
+        run: |
+          git diff --check
+          changed="$(git diff --name-only | sort)"
+          printf '%s\n' "$changed"
+          test "$changed" = $'Cargo.toml\nsrc/sftp.rs'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libudev-dev libfontconfig1-dev
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Resolve lockfile and check
+        run: cargo check
+
+      - name: Run tests with locked dependencies
+        run: cargo test --locked
+
+      - name: Verify final diff
+        run: |
+          git diff --check
+          changed="$(git diff --name-only | sort)"
+          printf '%s\n' "$changed"
+          test "$changed" = $'Cargo.lock\nCargo.toml\nsrc/sftp.rs'
+
+      - name: Commit verified patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock src/sftp.rs
+          git commit -m "fix: add stable SSH-compatible uploads [skip ci]"
+          git push origin HEAD:fix/sftp-local-terminal
