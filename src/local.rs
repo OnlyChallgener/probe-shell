@@ -200,7 +200,6 @@ async fn run(
                 }
                 break;
             }
-            SessionCommand::AddTunnel { .. } | SessionCommand::StopTunnel(_) => {}
         }
     }
     if let Ok(mut c) = child.lock() {
@@ -220,6 +219,7 @@ fn local_program(kind: &str) -> (String, Vec<String>) {
     }
     #[cfg(not(windows))]
     {
+        let _ = kind;
         (
             std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into()),
             Vec::new(),
