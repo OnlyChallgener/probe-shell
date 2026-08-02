@@ -374,7 +374,7 @@ pub enum SessionEvent {
     /// A keyboard-interactive challenge that isn't the account password —
     /// typically an MFA / OTP / verification-code prompt from a bastion such as
     /// JumpServer. The UI shows `prompt` and answers via `responder`; the auth
-    /// flow is blocked meanwhile (#86-MFA).
+    /// flow is blocked meanwhile.
     MfaPrompt {
         session_id: String,
         host: String,
@@ -838,9 +838,14 @@ async fn run_session(
 
     // --- Remote resource monitor (separate exec channel) ----------------
     // A tiny remote loop streams /proc/stat + /proc/meminfo every 2s; we parse
-    // it into CPU% / mem / swap for the sidebar.  Best-effort: if the channel
-    // or exec fails (e.g. a non-Linux host without /proc), monitoring is
+    // it into CPU% / mem / swap for the sidebar. Best-effort: if the channel
+    // or exec fails (for example a non-Linux host without /proc), monitoring is
     // silently skipped and the interactive shell is unaffected.
+    //
+    // Important: this channel is independent from shell integration. Prompt
+    // injection is disabled by default on routers, but disabling it must not also
+    // suppress CPU/memory/network/disk collection — that coupling was why every
+    // OpenWrt resource panel stayed at 0/empty.
     // Reset PATH to the standard system directories first (#27): the monitor
     // runs over an exec channel, so a server with a hijacked PATH (or a
     // BASH_ENV pointing at a malicious file) could otherwise shadow awk/cat/df/
@@ -853,24 +858,17 @@ async fn run_session(
     // line can't bloat the stream. A host whose `ps` lacks `--sort`/`-o` simply
     // yields nothing (2>/dev/null), degrading to an empty process list.
     const MON_CMD: &[u8] = b"PATH=/usr/bin:/bin:/usr/sbin:/sbin; export PATH; while :; do awk '/^cpu /{print}' /proc/stat; awk '/^(MemTotal|MemAvailable|SwapTotal|SwapFree):/{print}' /proc/meminfo; cat /proc/net/dev; echo __DF__; df -kP 2>/dev/null; echo __PS__; ps -eo pid,user,pcpu,pmem,args --sort=-pcpu 2>/dev/null | head -n 41 | cut -c -200; echo __MSTICK__; sleep 2; done\n";
-    // Skip the resource monitor entirely when shell integration is off (a
-    // non-POSIX / Windows server) — the /proc-based loop only spews errors there
-    // (#140).
-    let mut mon_channel = if !shell_integration_enabled {
-        None
-    } else {
-        match handle.channel_open_session().await {
-            Ok(ch) => match ch.exec(true, MON_CMD).await {
-                Ok(()) => Some(ch),
-                Err(e) => {
-                    tracing::warn!("monitor exec failed: {e}");
-                    None
-                }
-            },
+    let mut mon_channel = match handle.channel_open_session().await {
+        Ok(ch) => match ch.exec(true, MON_CMD).await {
+            Ok(()) => Some(ch),
             Err(e) => {
-                tracing::warn!("monitor channel open failed: {e}");
+                tracing::warn!("monitor exec failed: {e}");
                 None
             }
+        },
+        Err(e) => {
+            tracing::warn!("monitor channel open failed: {e}");
+            None
         }
     };
     let mut mon_buf = String::new();
