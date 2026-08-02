@@ -33,7 +33,9 @@ use tokio::task::JoinHandle;
 
 use crate::config::{AuthMethod, Session};
 use crate::i18n::t;
-use crate::ssh::{format_mtime, format_size, RemoteEntry, RemoteTreeNode, SessionEvent};
+use crate::ssh::{
+    format_mtime, format_size, RemoteEntry, RemoteTreeNode, SessionEvent, SftpSearchState,
+};
 
 const SFTP_DIR_TIMEOUT: Duration = Duration::from_secs(22);
 const SFTP_STAT_TIMEOUT: Duration = Duration::from_secs(8);
@@ -62,7 +64,11 @@ pub enum SftpCommand {
     /// Search files/folders below a specific directory. This is intentionally
     /// bounded so a router flash filesystem or slow WAN session cannot freeze
     /// the UI by walking the whole system forever.
-    Search { root: String, query: String },
+    Search {
+        search_id: String,
+        root: String,
+        query: String,
+    },
     /// Cancel the currently running bounded recursive search. Search runs on a
     /// separate task so directory navigation/refresh can continue while it is active.
     CancelSearch,
@@ -144,9 +150,13 @@ impl SftpHandle {
     pub fn toggle_tree_node(&self, path: String) {
         let _ = self.commands.send(SftpCommand::ToggleTreeNode(path));
     }
-    pub fn search(&self, root: String, query: String) {
+    pub fn search(&self, search_id: String, root: String, query: String) {
         crate::operation_log::record("搜索", &root, "请求", &query);
-        let _ = self.commands.send(SftpCommand::Search { root, query });
+        let _ = self.commands.send(SftpCommand::Search {
+            search_id,
+            root,
+            query,
+        });
     }
     pub fn cancel_search(&self) {
         crate::operation_log::record("停止搜索", "", "请求", "");
@@ -334,8 +344,7 @@ async fn ensure_tree_path(
 ) {
     let target = normalize_tree_path(path);
     if !tree_dirs.contains_key("/") {
-        let dirs = list_dirs_only_impl(sftp, "/").await.unwrap_or_default();
-        tree_dirs.insert("/".to_string(), dirs);
+        let _ = cache_tree_dir(sftp, "/", tree_dirs).await;
     }
     tree_expanded.insert("/".to_string());
     if target == "/" {
@@ -349,8 +358,7 @@ async fn ensure_tree_path(
         }
         let child = format!("{}/{}", current.trim_end_matches('/'), segment);
         if !tree_dirs.contains_key(&current) {
-            let dirs = list_dirs_only_impl(sftp, &current).await.unwrap_or_default();
-            tree_dirs.insert(current.clone(), dirs);
+            let _ = cache_tree_dir(sftp, &current, tree_dirs).await;
         }
         let found = tree_dirs
             .get(&current)
@@ -360,11 +368,27 @@ async fn ensure_tree_path(
             break;
         }
         if !tree_dirs.contains_key(&child) {
-            let dirs = list_dirs_only_impl(sftp, &child).await.unwrap_or_default();
-            tree_dirs.insert(child.clone(), dirs);
+            let _ = cache_tree_dir(sftp, &child, tree_dirs).await;
         }
         tree_expanded.insert(child.clone());
         current = child;
+    }
+}
+
+async fn cache_tree_dir(
+    sftp: &SftpSession,
+    dir: &str,
+    tree_dirs: &mut std::collections::HashMap<String, Vec<(String, String)>>,
+) -> bool {
+    match list_dirs_only_impl(sftp, dir).await {
+        Ok(dirs) => {
+            tree_dirs.insert(dir.to_string(), dirs);
+            true
+        }
+        Err(err) => {
+            tracing::debug!("sftp tree cache kept for {dir}: {err:#}");
+            false
+        }
     }
 }
 
@@ -394,8 +418,7 @@ async fn sync_tree_dir(
     tree_dirs: &mut std::collections::HashMap<String, Vec<(String, String)>>,
 ) {
     if tree_dirs.contains_key(dir) {
-        let dirs = list_dirs_only_impl(sftp, dir).await.unwrap_or_default();
-        tree_dirs.insert(dir.to_string(), dirs);
+        let _ = cache_tree_dir(sftp, dir, tree_dirs).await;
     }
 }
 
@@ -567,8 +590,7 @@ async fn run_sftp(
     let mut tree_expanded: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     // Fetch root "/" subdirs, then expand path down to home.
-    let root_dirs = list_dirs_only_impl(&sftp, "/").await.unwrap_or_default();
-    tree_dirs.insert("/".to_string(), root_dirs);
+    let _ = cache_tree_dir(&sftp, "/", &mut tree_dirs).await;
     tree_expanded.insert("/".to_string());
 
     // Walk each path segment from "/" toward home, expanding as we go.
@@ -587,8 +609,7 @@ async fn run_sftp(
             if !found {
                 break;
             }
-            let dirs = list_dirs_only_impl(&sftp, &child).await.unwrap_or_default();
-            tree_dirs.insert(child.clone(), dirs);
+            let _ = cache_tree_dir(&sftp, &child, &mut tree_dirs).await;
             tree_expanded.insert(child.clone());
             current = child;
         }
@@ -604,6 +625,7 @@ async fn run_sftp(
     // makes navigation/refresh feel frozen until the walk finishes.
     let mut search_cancel: Option<Arc<AtomicBool>> = None;
     let mut search_task: Option<tokio::task::AbortHandle> = None;
+    let mut active_search: Option<(String, String, String)> = None;
     while let Some(cmd) = commands.recv().await {
         match cmd {
             SftpCommand::Close => {
@@ -665,8 +687,7 @@ async fn run_sftp(
                 // build_tree_nodes, so they drop out on the rebuild.
                 let expanded: Vec<String> = tree_expanded.iter().cloned().collect();
                 for dir in expanded {
-                    let dirs = list_dirs_only_impl(&sftp, &dir).await.unwrap_or_default();
-                    tree_dirs.insert(dir, dirs);
+                    let _ = cache_tree_dir(&sftp, &dir, &mut tree_dirs).await;
                 }
                 emit_tree(&tree_dirs, &tree_expanded, &events);
             }
@@ -679,8 +700,7 @@ async fn run_sftp(
                     } else {
                         // Root double-click: refresh and show first-level folders only;
                         // do not touch the right file list.
-                        let dirs = list_dirs_only_impl(&sftp, "/").await.unwrap_or_default();
-                        tree_dirs.insert("/".to_string(), dirs);
+                        let _ = cache_tree_dir(&sftp, "/", &mut tree_dirs).await;
                         tree_expanded.insert("/".to_string());
                     }
                 } else if tree_expanded.contains(&path) {
@@ -690,15 +710,18 @@ async fn run_sftp(
                 } else {
                     // Expand: fetch children if not yet cached.
                     if !tree_dirs.contains_key(&path) {
-                        let dirs = list_dirs_only_impl(&sftp, &path).await.unwrap_or_default();
-                        tree_dirs.insert(path.clone(), dirs);
+                        let _ = cache_tree_dir(&sftp, &path, &mut tree_dirs).await;
                     }
                     tree_expanded.insert(path.clone());
                 }
                 emit_tree(&tree_dirs, &tree_expanded, &events);
             }
 
-            SftpCommand::Search { root, query } => {
+            SftpCommand::Search {
+                search_id,
+                root,
+                query,
+            } => {
                 if let Some(cancel) = search_cancel.take() {
                     cancel.store(true, Ordering::Relaxed);
                 }
@@ -708,64 +731,38 @@ async fn run_sftp(
                 let cancel = Arc::new(AtomicBool::new(false));
                 search_cancel = Some(cancel.clone());
                 let roots = split_search_roots(&root);
-                let label = search_roots_label(&roots);
                 let result_path = root.clone();
                 let query = query.trim().to_string();
+                active_search = Some((search_id.clone(), result_path.clone(), query.clone()));
                 let sftp = sftp.clone();
                 let events = events.clone();
                 let shutdown_task = shutdown.clone();
                 let task = tokio::spawn(async move {
-                    let started = Instant::now();
-                    let _ = events.send(SessionEvent::SftpStatus(format!(
-                        "{}: {}{}",
-                        t("搜索中", "Searching"),
-                        label,
-                        if query.is_empty() { "".to_string() } else { format!("  ·  {query}") }
-                    )));
-                    let mut all = Vec::new();
+                    let mut emitter = SearchEmitter::new(
+                        &events,
+                        search_id,
+                        result_path.clone(),
+                        query.clone(),
+                    );
+                    emitter.status(SftpSearchState::Started);
                     for root in roots.iter() {
                         if is_cancelled(&cancel, &shutdown_task) {
                             break;
                         }
-                        match search_dir_impl(&sftp, root, &query, 400usize.saturating_sub(all.len()), 900, cancel.clone(), shutdown_task.clone(), &events).await {
-                            Ok(mut entries) => all.append(&mut entries),
+                        match search_dir_impl(&sftp, root, &query, 400, 900, cancel.clone(), shutdown_task.clone(), &mut emitter).await {
+                            Ok(()) => {}
                             Err(_) => continue,
                         }
-                        // Refresh only after a whole bounded branch completes;
-                        // never once per discovered entry.
-                        if !all.is_empty() {
-                            let _ = events.send(SessionEvent::SftpSearchBatch {
-                                root: result_path.clone(), query: query.clone(), entries: all.clone(),
-                            });
-                        }
-                        if all.len() >= 400 {
+                        if emitter.found >= 400 {
                             break;
                         }
                     }
+                    emitter.flush();
                     if is_cancelled(&cancel, &shutdown_task) {
-                        let _ = events.send(SessionEvent::SftpStatus(format!(
-                            "{}: {}",
-                            t("搜索已停止", "Search stopped"),
-                            label
-                        )));
+                        emitter.status(SftpSearchState::Cancelled);
                         return;
                     }
-                    let count = format!(
-                        "{}  ·  {}",
-                        all.len(),
-                        format_search_elapsed(started.elapsed())
-                    );
-                    let _ = events.send(SessionEvent::SftpSearchEntries {
-                        root: result_path.clone(),
-                        query: query.clone(),
-                        entries: all,
-                    });
-                    let _ = events.send(SessionEvent::SftpStatus(format!(
-                        "{}: {}  ·  {}",
-                        t("搜索完成", "Search complete"),
-                        label,
-                        count
-                    )));
+                    emitter.status(SftpSearchState::Completed);
                 });
                 search_task = Some(task.abort_handle());
                 track_task(&tasks, task);
@@ -777,7 +774,17 @@ async fn run_sftp(
                     if let Some(task) = search_task.take() {
                         task.abort();
                     }
-                    let _ = events.send(SessionEvent::SftpStatus(t("正在停止搜索...", "Stopping search...").into()));
+                    if let Some((search_id, root, query)) = active_search.take() {
+                        let _ = events.send(SessionEvent::SftpSearchStatus {
+                            search_id,
+                            root,
+                            query,
+                            state: SftpSearchState::Cancelled,
+                            found: 0,
+                            scanned: 0,
+                            elapsed_ms: 0,
+                        });
+                    }
                 } else {
                     let _ = events.send(SessionEvent::SftpStatus(t("当前没有正在运行的搜索", "No active search").into()));
                 }
@@ -1385,8 +1392,7 @@ async fn ensure_shell_tree_path(
 ) {
     let target = normalize_tree_path(path);
     if !tree_dirs.contains_key("/") {
-        let dirs = shell_list_dirs_only(handle, "/").await.unwrap_or_default();
-        tree_dirs.insert("/".to_string(), dirs);
+        let _ = cache_shell_tree_dir(handle, "/", tree_dirs).await;
     }
     tree_expanded.insert("/".to_string());
     if target == "/" { return; }
@@ -1395,8 +1401,7 @@ async fn ensure_shell_tree_path(
         if segment.is_empty() { continue; }
         let child = format!("{}/{}", current.trim_end_matches('/'), segment);
         if !tree_dirs.contains_key(&current) {
-            let dirs = shell_list_dirs_only(handle, &current).await.unwrap_or_default();
-            tree_dirs.insert(current.clone(), dirs);
+            let _ = cache_shell_tree_dir(handle, &current, tree_dirs).await;
         }
         let found = tree_dirs
             .get(&current)
@@ -1404,11 +1409,27 @@ async fn ensure_shell_tree_path(
             .unwrap_or(false);
         if !found { break; }
         if !tree_dirs.contains_key(&child) {
-            let dirs = shell_list_dirs_only(handle, &child).await.unwrap_or_default();
-            tree_dirs.insert(child.clone(), dirs);
+            let _ = cache_shell_tree_dir(handle, &child, tree_dirs).await;
         }
         tree_expanded.insert(child.clone());
         current = child;
+    }
+}
+
+async fn cache_shell_tree_dir(
+    handle: &client::Handle<SftpClientHandler>,
+    dir: &str,
+    tree_dirs: &mut std::collections::HashMap<String, Vec<(String, String)>>,
+) -> bool {
+    match shell_list_dirs_only(handle, dir).await {
+        Ok(dirs) => {
+            tree_dirs.insert(dir.to_string(), dirs);
+            true
+        }
+        Err(err) => {
+            tracing::debug!("ssh tree cache kept for {dir}: {err:#}");
+            false
+        }
     }
 }
 
@@ -1442,8 +1463,7 @@ async fn run_ssh_file_browser(
     let mut tree_dirs: std::collections::HashMap<String, Vec<(String, String)>> =
         std::collections::HashMap::new();
     let mut tree_expanded: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let root_dirs = shell_list_dirs_only(&handle, "/").await.unwrap_or_default();
-    tree_dirs.insert("/".to_string(), root_dirs);
+    let _ = cache_shell_tree_dir(&handle, "/", &mut tree_dirs).await;
     tree_expanded.insert("/".to_string());
     ensure_shell_tree_path(&handle, &home, &mut tree_dirs, &mut tree_expanded).await;
     emit_tree(&tree_dirs, &tree_expanded, &events);
@@ -1452,6 +1472,7 @@ async fn run_ssh_file_browser(
     // browser command loop. This keeps folder expansion and refresh responsive.
     let mut search_cancel: Option<Arc<AtomicBool>> = None;
     let mut search_task: Option<tokio::task::AbortHandle> = None;
+    let mut active_search: Option<(String, String, String)> = None;
     while let Some(cmd) = commands.recv().await {
         match cmd {
             SftpCommand::Close => {
@@ -1478,8 +1499,7 @@ async fn run_ssh_file_browser(
                     if tree_expanded.contains("/") {
                         tree_expanded.clear();
                     } else {
-                        let dirs = shell_list_dirs_only(&handle, "/").await.unwrap_or_default();
-                        tree_dirs.insert("/".to_string(), dirs);
+                        let _ = cache_shell_tree_dir(&handle, "/", &mut tree_dirs).await;
                         tree_expanded.insert("/".to_string());
                     }
                 } else if tree_expanded.contains(&path) {
@@ -1487,14 +1507,17 @@ async fn run_ssh_file_browser(
                     tree_expanded.retain(|p| p != &path && !p.starts_with(&prefix));
                 } else {
                     if !tree_dirs.contains_key(&path) {
-                        let dirs = shell_list_dirs_only(&handle, &path).await.unwrap_or_default();
-                        tree_dirs.insert(path.clone(), dirs);
+                        let _ = cache_shell_tree_dir(&handle, &path, &mut tree_dirs).await;
                     }
                     tree_expanded.insert(path.clone());
                 }
                 emit_tree(&tree_dirs, &tree_expanded, &events);
             }
-            SftpCommand::Search { root, query } => {
+            SftpCommand::Search {
+                search_id,
+                root,
+                query,
+            } => {
                 if let Some(cancel) = search_cancel.take() {
                     cancel.store(true, Ordering::Relaxed);
                 }
@@ -1504,62 +1527,38 @@ async fn run_ssh_file_browser(
                 let cancel = Arc::new(AtomicBool::new(false));
                 search_cancel = Some(cancel.clone());
                 let roots = split_search_roots(&root);
-                let label = search_roots_label(&roots);
                 let result_path = root.clone();
                 let query = query.trim().to_string();
+                active_search = Some((search_id.clone(), result_path.clone(), query.clone()));
                 let handle = handle.clone();
                 let events = events.clone();
                 let shutdown_task = shutdown.clone();
                 let task = tokio::spawn(async move {
-                    let started = Instant::now();
-                    let _ = events.send(SessionEvent::SftpStatus(format!(
-                        "{}: {}{}",
-                        t("搜索中", "Searching"),
-                        label,
-                        if query.is_empty() { "".to_string() } else { format!("  ·  {query}") }
-                    )));
-                    let mut all = Vec::new();
+                    let mut emitter = SearchEmitter::new(
+                        &events,
+                        search_id,
+                        result_path.clone(),
+                        query.clone(),
+                    );
+                    emitter.status(SftpSearchState::Started);
                     for root in roots.iter() {
                         if is_cancelled(&cancel, &shutdown_task) {
                             break;
                         }
-                        match shell_search_dir_impl(&handle, root, &query, 400usize.saturating_sub(all.len()), 900, cancel.clone(), shutdown_task.clone(), &events).await {
-                            Ok(mut entries) => all.append(&mut entries),
+                        match shell_search_dir_impl(&handle, root, &query, 400, 900, cancel.clone(), shutdown_task.clone(), &mut emitter).await {
+                            Ok(()) => {}
                             Err(_) => continue,
                         }
-                        if !all.is_empty() {
-                            let _ = events.send(SessionEvent::SftpSearchBatch {
-                                root: result_path.clone(), query: query.clone(), entries: all.clone(),
-                            });
-                        }
-                        if all.len() >= 400 {
+                        if emitter.found >= 400 {
                             break;
                         }
                     }
+                    emitter.flush();
                     if is_cancelled(&cancel, &shutdown_task) {
-                        let _ = events.send(SessionEvent::SftpStatus(format!(
-                            "{}: {}",
-                            t("搜索已停止", "Search stopped"),
-                            label
-                        )));
+                        emitter.status(SftpSearchState::Cancelled);
                         return;
                     }
-                    let count = format!(
-                        "{}  ·  {}",
-                        all.len(),
-                        format_search_elapsed(started.elapsed())
-                    );
-                    let _ = events.send(SessionEvent::SftpSearchEntries {
-                        root: result_path.clone(),
-                        query: query.clone(),
-                        entries: all,
-                    });
-                    let _ = events.send(SessionEvent::SftpStatus(format!(
-                        "{}: {}  ·  {}",
-                        t("搜索完成", "Search complete"),
-                        label,
-                        count
-                    )));
+                    emitter.status(SftpSearchState::Completed);
                 });
                 search_task = Some(task.abort_handle());
                 track_task(&tasks, task);
@@ -1570,7 +1569,17 @@ async fn run_ssh_file_browser(
                     if let Some(task) = search_task.take() {
                         task.abort();
                     }
-                    let _ = events.send(SessionEvent::SftpStatus(t("正在停止搜索...", "Stopping search...").into()));
+                    if let Some((search_id, root, query)) = active_search.take() {
+                        let _ = events.send(SessionEvent::SftpSearchStatus {
+                            search_id,
+                            root,
+                            query,
+                            state: SftpSearchState::Cancelled,
+                            found: 0,
+                            scanned: 0,
+                            elapsed_ms: 0,
+                        });
+                    }
                 } else {
                     let _ = events.send(SessionEvent::SftpStatus(t("当前没有正在运行的搜索", "No active search").into()));
                 }
@@ -1872,15 +1881,12 @@ async fn shell_search_dir_impl(
     max_dirs: usize,
     cancel: CancelFlag,
     shutdown: CancelFlag,
-    events: &UnboundedSender<SessionEvent>,
-) -> Result<Vec<RemoteEntry>> {
+    emitter: &mut SearchEmitter<'_>,
+) -> Result<()> {
     let q = query.trim().to_lowercase();
     let base = normalise_remote_dir(root);
     let mut stack = vec![base.clone()];
     let mut seen: HashSet<String> = HashSet::new();
-    let mut visited_dirs = 0usize;
-    let mut out = Vec::new();
-    let mut last_status = Instant::now();
 
     while let Some(dir) = stack.pop() {
         if is_cancelled(&cancel, &shutdown) {
@@ -1890,19 +1896,9 @@ async fn shell_search_dir_impl(
         if !seen.insert(key) {
             continue;
         }
-        visited_dirs += 1;
-        if visited_dirs > max_dirs || out.len() >= max_results {
+        emitter.scan_dir();
+        if emitter.scanned > max_dirs || emitter.found >= max_results {
             break;
-        }
-        if visited_dirs == 1 || last_status.elapsed() >= Duration::from_millis(220) {
-            let _ = events.send(SessionEvent::SftpStatus(format!(
-                "{}: {}  ·  {} {}",
-                t("搜索中", "Searching"),
-                dir,
-                t("已扫描目录", "dirs"),
-                visited_dirs
-            )));
-            last_status = Instant::now();
         }
 
         let entries = match shell_list_dir(handle, &dir).await {
@@ -1926,8 +1922,8 @@ async fn shell_search_dir_impl(
                 if !rel.is_empty() {
                     entry.name = rel;
                 }
-                out.push(entry.clone());
-                if out.len() >= max_results {
+                emitter.push(entry.clone());
+                if emitter.found >= max_results {
                     break;
                 }
             }
@@ -1941,7 +1937,7 @@ async fn shell_search_dir_impl(
         }
     }
 
-    Ok(out)
+    Ok(())
 }
 
 async fn shell_read_text(
@@ -2346,25 +2342,86 @@ fn remote_path_same_or_child(path: &str, parent: &str) -> bool {
     parent == "/" || path == parent || path.starts_with(&(parent + "/"))
 }
 
-fn search_roots_label(roots: &[String]) -> String {
-    if roots.len() == 1 {
-        roots[0].clone()
-    } else {
-        format!("{} {}", roots.len(), t("个目录", "folders"))
-    }
-}
-
-fn format_search_elapsed(duration: Duration) -> String {
-    let ms = duration.as_millis();
-    if ms < 1_000 {
-        format!("{ms} ms")
-    } else {
-        format!("{:.1} s", ms as f64 / 1_000.0)
-    }
-}
-
 fn is_cancelled(cancel: &CancelFlag, shutdown: &CancelFlag) -> bool {
     cancel.load(Ordering::Relaxed) || shutdown.load(Ordering::Relaxed)
+}
+
+struct SearchEmitter<'a> {
+    events: &'a UnboundedSender<SessionEvent>,
+    search_id: String,
+    root: String,
+    query: String,
+    pending: Vec<RemoteEntry>,
+    found: usize,
+    scanned: usize,
+    started: Instant,
+    last_batch: Instant,
+    last_status: Instant,
+}
+
+impl<'a> SearchEmitter<'a> {
+    fn new(
+        events: &'a UnboundedSender<SessionEvent>,
+        search_id: String,
+        root: String,
+        query: String,
+    ) -> Self {
+        let now = Instant::now();
+        Self {
+            events,
+            search_id,
+            root,
+            query,
+            pending: Vec::with_capacity(25),
+            found: 0,
+            scanned: 0,
+            started: now,
+            last_batch: now,
+            last_status: now,
+        }
+    }
+
+    fn status(&self, state: SftpSearchState) {
+        let _ = self.events.send(SessionEvent::SftpSearchStatus {
+            search_id: self.search_id.clone(),
+            root: self.root.clone(),
+            query: self.query.clone(),
+            state,
+            found: self.found,
+            scanned: self.scanned,
+            elapsed_ms: self.started.elapsed().as_millis(),
+        });
+    }
+
+    fn scan_dir(&mut self) {
+        self.scanned = self.scanned.saturating_add(1);
+        if self.scanned == 1 || self.last_status.elapsed() >= Duration::from_millis(220) {
+            self.status(SftpSearchState::Progress);
+            self.last_status = Instant::now();
+        }
+    }
+
+    fn push(&mut self, entry: RemoteEntry) {
+        self.found = self.found.saturating_add(1);
+        self.pending.push(entry);
+        if self.pending.len() >= 25 || self.last_batch.elapsed() >= Duration::from_millis(120) {
+            self.flush();
+        }
+    }
+
+    fn flush(&mut self) {
+        if self.pending.is_empty() {
+            return;
+        }
+        let entries = std::mem::take(&mut self.pending);
+        let _ = self.events.send(SessionEvent::SftpSearchBatch {
+            search_id: self.search_id.clone(),
+            root: self.root.clone(),
+            query: self.query.clone(),
+            entries,
+        });
+        self.last_batch = Instant::now();
+    }
 }
 
 fn track_task(tasks: &SftpTaskSet, task: JoinHandle<()>) {
@@ -2393,15 +2450,12 @@ async fn search_dir_impl(
     max_dirs: usize,
     cancel: CancelFlag,
     shutdown: CancelFlag,
-    events: &UnboundedSender<SessionEvent>,
-) -> Result<Vec<RemoteEntry>> {
+    emitter: &mut SearchEmitter<'_>,
+) -> Result<()> {
     let q = query.trim().to_lowercase();
     let base = normalise_remote_dir(root);
     let mut stack = vec![base.clone()];
     let mut seen: HashSet<String> = HashSet::new();
-    let mut visited_dirs = 0usize;
-    let mut out = Vec::new();
-    let mut last_status = Instant::now();
 
     while let Some(dir) = stack.pop() {
         if is_cancelled(&cancel, &shutdown) {
@@ -2411,19 +2465,9 @@ async fn search_dir_impl(
         if !seen.insert(key) {
             continue;
         }
-        visited_dirs += 1;
-        if visited_dirs > max_dirs || out.len() >= max_results {
+        emitter.scan_dir();
+        if emitter.scanned > max_dirs || emitter.found >= max_results {
             break;
-        }
-        if visited_dirs == 1 || last_status.elapsed() >= Duration::from_millis(220) {
-            let _ = events.send(SessionEvent::SftpStatus(format!(
-                "{}: {}  ·  {} {}",
-                t("搜索中", "Searching"),
-                dir,
-                t("已扫描目录", "dirs"),
-                visited_dirs
-            )));
-            last_status = Instant::now();
         }
 
         let entries = match list_dir_impl(sftp, &dir).await {
@@ -2450,8 +2494,8 @@ async fn search_dir_impl(
                 if !rel.is_empty() {
                     entry.name = rel;
                 }
-                out.push(entry.clone());
-                if out.len() >= max_results {
+                emitter.push(entry.clone());
+                if emitter.found >= max_results {
                     break;
                 }
             }
@@ -2465,12 +2509,7 @@ async fn search_dir_impl(
         }
     }
 
-    out.sort_by(|a, b| match (a.is_dir, b.is_dir) {
-        (true, false) => std::cmp::Ordering::Less,
-        (false, true) => std::cmp::Ordering::Greater,
-        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-    });
-    Ok(out)
+    Ok(())
 }
 
 

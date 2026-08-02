@@ -47,7 +47,7 @@ Probe Shell 基于原开源项目重命名和改造，继续遵循 `MIT OR Apach
 ## 下载与安装
 
 当前 Probe Shell 预览版的 GitHub Actions 默认只构建 **Windows x86_64**。
-发布到 [Releases](https://github.com/OnlyChallenger/probe-shell/releases) 页面。
+发布到 [Releases](https://github.com/OnlyChallgener/probe-shell/releases) 页面。
 手动运行 `Release` workflow 时默认只生成 ZIP；需要安装包时勾选 `build_msi`。
 
 ### Windows

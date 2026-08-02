@@ -412,20 +412,24 @@ pub enum SessionEvent {
         path: String,
         entries: Vec<RemoteEntry>,
     },
-    /// Recursive SFTP search results. Kept separate from normal directory
-    /// listings so a cancelled/cleared search cannot overwrite the restored
-    /// current directory view when its background task finishes late.
-    SftpSearchEntries {
+    /// A bounded, background search progress batch. Batches are deliberately
+    /// coalesced by the worker so the UI is not redrawn for every file.
+    SftpSearchBatch {
+        search_id: String,
         root: String,
         query: String,
         entries: Vec<RemoteEntry>,
     },
-    /// A bounded, background search progress batch. Batches are deliberately
-    /// coalesced by the worker so the UI is not redrawn for every file.
-    SftpSearchBatch {
+    /// Structured search state. UI logic must not infer running/completed/cancelled
+    /// by parsing localized status text.
+    SftpSearchStatus {
+        search_id: String,
         root: String,
         query: String,
-        entries: Vec<RemoteEntry>,
+        state: SftpSearchState,
+        found: usize,
+        scanned: usize,
+        elapsed_ms: u128,
     },
     /// Free-form SFTP status message (progress, errors, etc.).
     SftpStatus(String),
@@ -454,6 +458,14 @@ pub enum SessionEvent {
         edit: bool,
         error: String,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SftpSearchState {
+    Started,
+    Progress,
+    Completed,
+    Cancelled,
 }
 
 /// Handle retained by the UI layer to talk to a running session.

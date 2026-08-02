@@ -214,6 +214,8 @@ export component ToolStrip inherits Rectangle {
     in property <string> glyph;       // the panel's tool icon (Material Icons)
     in property <string> tooltip;
     callback expand();
+    callback show-tooltip(string, length, length);
+    callback hide-tooltip();
     property <bool> horizontal: root.dock-edge == "top" || root.dock-edge == "bottom";
     property <bool> tooltip-ready: false;
     property <bool> icon-hover: false;
@@ -247,37 +249,21 @@ export component ToolStrip inherits Rectangle {
         }
         ta := TouchArea {
             mouse-cursor: pointer;
-            changed has-hover => { root.icon-hover = self.has-hover; if (!self.has-hover) { root.tooltip-ready = false; } }
+            changed has-hover => { root.icon-hover = self.has-hover; if (!self.has-hover) { root.tooltip-ready = false; root.hide-tooltip(); } }
             clicked => { root.expand(); }
         }
     }
-    changed tooltip => { root.tooltip-ready = false; }
+    changed tooltip => { root.tooltip-ready = false; root.hide-tooltip(); }
     tooltip-delay := Timer {
         interval: 350ms;
         running: root.icon-hover && root.tooltip != "" && !root.tooltip-ready;
-        triggered => { root.tooltip-ready = true; }
-    }
-    if root.icon-hover && root.tooltip != "" && root.tooltip-ready : Rectangle {
-        x: root.horizontal ? 4px : parent.width + 6px;
-        y: root.horizontal ? (root.dock-edge == "bottom" ? -28px : parent.height + 6px) : 6px;
-        width: min(220px, tip.preferred-width + 16px);
-        height: 22px;
-        background: Theme.bg-elevated;
-        border-width: 1px;
-        border-color: Theme.border-strong;
-        border-radius: Theme.radius-sm;
-        drop-shadow-blur: 8px;
-        drop-shadow-color: #00000060;
-        tip := Text {
-            x: 8px;
-            width: parent.width - 16px;
-            height: parent.height;
-            text: root.tooltip;
-            color: Theme.text-primary;
-            font-size: Theme.fs-xs;
-            vertical-alignment: center;
-            horizontal-alignment: center;
-            overflow: elide;
+        triggered => {
+            root.tooltip-ready = true;
+            root.show-tooltip(
+                root.tooltip,
+                root.absolute-position.x + (root.horizontal ? 4px : root.width + 6px),
+                root.absolute-position.y + (root.horizontal ? (root.dock-edge == "bottom" ? -28px : root.height + 6px) : 6px)
+            );
         }
     }
 }

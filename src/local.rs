@@ -4,7 +4,7 @@ use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
-use portable_pty::{CommandBuilder, PtySize};
+use portable_pty::{Child as PtyChild, CommandBuilder, PtySize};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use crate::config::Session;
@@ -45,6 +45,71 @@ fn size(cols: u32, rows: u32) -> PtySize {
     }
 }
 
+#[derive(Default)]
+struct Utf8StreamDecoder {
+    pending: Vec<u8>,
+}
+
+impl Utf8StreamDecoder {
+    fn push(&mut self, bytes: &[u8]) -> String {
+        self.decode(bytes, false)
+    }
+
+    fn finish(&mut self) -> String {
+        self.decode(&[], true)
+    }
+
+    fn decode(&mut self, bytes: &[u8], eof: bool) -> String {
+        self.pending.extend_from_slice(bytes);
+        let mut out = String::new();
+        loop {
+            match std::str::from_utf8(&self.pending) {
+                Ok(text) => {
+                    out.push_str(text);
+                    self.pending.clear();
+                    break;
+                }
+                Err(err) => {
+                    let valid = err.valid_up_to();
+                    if valid > 0 {
+                        if let Ok(text) = std::str::from_utf8(&self.pending[..valid]) {
+                            out.push_str(text);
+                        }
+                        self.pending.drain(..valid);
+                        continue;
+                    }
+                    if let Some(len) = err.error_len() {
+                        out.push_str("\u{fffd}");
+                        self.pending.drain(..len);
+                        continue;
+                    }
+                    if eof {
+                        out.push_str(&String::from_utf8_lossy(&self.pending));
+                        self.pending.clear();
+                    }
+                    break;
+                }
+            }
+        }
+        out
+    }
+}
+
+fn terminate_pty_child(child: &mut dyn PtyChild) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        if let Some(pid) = child.process_id() {
+            let _ = std::process::Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .creation_flags(CREATE_NO_WINDOW)
+                .status();
+        }
+    }
+    let _ = child.kill();
+}
+
 async fn run(
     session: Session,
     mut commands: UnboundedReceiver<SessionCommand>,
@@ -73,22 +138,25 @@ async fn run(
     let read_events = events.clone();
     std::thread::spawn(move || {
         let mut buffer = [0; 8192];
+        let mut decoder = Utf8StreamDecoder::default();
         loop {
             match reader.read(&mut buffer) {
                 Ok(0) => {
+                    let tail = decoder.finish();
+                    if !tail.is_empty() {
+                        let _ = read_events.send(SessionEvent::Output(tail));
+                    }
                     let _ = read_events.send(SessionEvent::Closed(
                         t("本地终端已退出", "Local terminal exited").into(),
                     ));
                     break;
                 }
                 Ok(n) => {
-                    if read_events
-                        .send(SessionEvent::Output(
-                            String::from_utf8_lossy(&buffer[..n]).into_owned(),
-                        ))
-                        .is_err()
-                    {
-                        break;
+                    let text = decoder.push(&buffer[..n]);
+                    if !text.is_empty() {
+                        if read_events.send(SessionEvent::Output(text)).is_err() {
+                            break;
+                        }
                     }
                 }
                 Err(error) => {
@@ -127,13 +195,17 @@ async fn run(
                 let _ = pair.master.resize(size(c, r));
             }
             SessionCommand::Close => {
-                let _ = child.lock().ok().and_then(|mut c| c.kill().ok());
+                if let Ok(mut c) = child.lock() {
+                    terminate_pty_child(c.as_mut());
+                }
                 break;
             }
             SessionCommand::AddTunnel { .. } | SessionCommand::StopTunnel(_) => {}
         }
     }
-    let _ = child.lock().ok().and_then(|mut c| c.kill().ok());
+    if let Ok(mut c) = child.lock() {
+        terminate_pty_child(c.as_mut());
+    }
     Ok(())
 }
 

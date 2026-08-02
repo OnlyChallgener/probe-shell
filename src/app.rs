@@ -95,8 +95,8 @@ use crate::i18n::t;
 use crate::local::spawn_local_session;
 use crate::sftp::spawn_sftp;
 use crate::ssh::{
-    format_mtime, format_size, spawn_session, ProcInfo, SessionCommand, SessionEvent,
-    SessionHandle,
+    format_mtime, format_size, spawn_session, ProcInfo, RemoteEntry, SessionCommand,
+    SessionEvent, SessionHandle, SftpSearchState,
 };
 use crate::system::{format_bytes_per_sec, format_mem, SystemSampler, SystemSnapshot};
 use crate::app_state::{LocalSnap, SftpHandles, SftpLastCwd, TabStatus, TabStatuses};
@@ -134,6 +134,24 @@ fn filter_sftp_entries(entries: &[SftpEntry], query: &str) -> Vec<SftpEntry> {
         })
         .cloned()
         .collect()
+}
+
+fn remote_entry_to_sftp_entry(entry: &RemoteEntry) -> SftpEntry {
+    SftpEntry {
+        name: entry.name.clone().into(),
+        full_path: entry.full_path.clone().into(),
+        is_dir: entry.is_dir,
+        kind: entry.kind.clone().into(),
+        size: if entry.is_dir {
+            "".into()
+        } else {
+            format_size(entry.size).into()
+        },
+        modified: format_mtime(entry.modified).into(),
+        mode: (entry.mode & 0o7777) as i32,
+        mode_text: format!("{:04o}", entry.mode & 0o7777).into(),
+        selected: false,
+    }
 }
 
 fn normalize_remote_path_for_scope(path: &str) -> String {
@@ -195,25 +213,55 @@ fn sftp_scope_status(scope: &str) -> String {
     }
 }
 
-fn is_sftp_search_running_status(msg: &str) -> bool {
-    let m = msg.trim();
-    m.contains("搜索中")
-        || m.contains("正在搜索")
-        || m.contains("Searching")
-        || m.contains("Scanning")
+fn format_elapsed_ms(ms: u128) -> String {
+    if ms < 1_000 {
+        format!("{ms} ms")
+    } else {
+        format!("{:.1} s", ms as f64 / 1_000.0)
+    }
 }
 
-#[allow(dead_code)]
-fn is_sftp_search_finished_status(msg: &str) -> bool {
-    let m = msg.trim();
-    m.contains("搜索完成")
-        || m.contains("搜索已停止")
-        || m.contains("正在停止搜索")
-        || m.contains("Stopping search")
-        || m.contains("当前没有正在运行")
-        || m.contains("Search complete")
-        || m.contains("Search stopped")
-        || m.contains("No active search")
+fn sftp_search_status_text(
+    state: SftpSearchState,
+    root: &str,
+    query: &str,
+    found: usize,
+    scanned: usize,
+    elapsed_ms: u128,
+) -> String {
+    let scope = sftp_scope_status(root);
+    let query_part = if query.trim().is_empty() {
+        String::new()
+    } else {
+        format!("  ·  {query}")
+    };
+    match state {
+        SftpSearchState::Started | SftpSearchState::Progress => format!(
+            "{}: {}{}  ·  {} {}  ·  {} {}",
+            t("搜索中", "Searching"),
+            scope,
+            query_part,
+            found,
+            t("项", "items"),
+            scanned,
+            t("目录", "dirs")
+        ),
+        SftpSearchState::Completed => format!(
+            "{}: {}  ·  {} {}  ·  {}",
+            t("搜索完成", "Search complete"),
+            scope,
+            found,
+            t("项", "items"),
+            format_elapsed_ms(elapsed_ms)
+        ),
+        SftpSearchState::Cancelled => format!(
+            "{}: {}  ·  {} {}",
+            t("搜索已停止", "Search stopped"),
+            scope,
+            found,
+            t("项", "items")
+        ),
+    }
 }
 
 fn mark_sftp_entries_for_scope(entries: &mut [SftpEntry], scope: &str) -> i32 {
@@ -1987,26 +2035,30 @@ fn sync_sessions_to_model_filtered(
 fn apply_sftp_search_batch(
     terminals: &VecModel<TerminalState>,
     tab_id: &str,
+    search_id: &str,
     root: &str,
     query: &str,
-    entries: &[crate::ssh::RemoteEntry],
+    entries: &[RemoteEntry],
 ) {
     for i in 0..terminals.row_count() {
         let Some(mut row) = terminals.row_data(i) else { continue };
         if row.id.as_str() != tab_id
             || !row.sftp_search_running
+            || row.sftp_search_id.as_str() != search_id
             || row.sftp_search.as_str() != query
             || row.sftp_search_root.as_str() != root
         { continue; }
-        let mut converted: Vec<SftpEntry> = entries.iter().map(|e| SftpEntry {
-            name: e.name.clone().into(), full_path: e.full_path.clone().into(), is_dir: e.is_dir,
-            kind: e.kind.clone().into(), size: if e.is_dir { "".into() } else { format_size(e.size).into() },
-            modified: format_mtime(e.modified).into(), mode: (e.mode & 0o7777) as i32,
-            mode_text: format!("{:04o}", e.mode & 0o7777).into(), selected: false,
-        }).collect();
-        let selected = mark_sftp_entries_for_scope(&mut converted, row.sftp_tree_scope.as_str());
-        row.sftp_all_entries = sftp_entries_model(converted.clone());
-        row.sftp_entries = sftp_entries_model(converted);
+        let mut all = collect_sftp_entries(&row.sftp_all_entries);
+        let mut seen: std::collections::HashSet<String> =
+            all.iter().map(|entry| entry.full_path.to_string()).collect();
+        for entry in entries {
+            if seen.insert(entry.full_path.clone()) {
+                all.push(remote_entry_to_sftp_entry(entry));
+            }
+        }
+        let selected = mark_sftp_entries_for_scope(&mut all, row.sftp_tree_scope.as_str());
+        row.sftp_all_entries = sftp_entries_model(all.clone());
+        row.sftp_entries = sftp_entries_model(all);
         row.sftp_selected_count = selected;
         row.sftp_loading = false;
         terminals.set_row_data(i, row);
@@ -2855,6 +2907,7 @@ fn wire_session_callbacks(
                 sftp_loading: has_sftp,
                 sftp_search_running: false,
                 sftp_search: "".into(),
+                sftp_search_id: "".into(),
                 sftp_search_root: "".into(),
                 sftp_tree_nodes: ModelRc::from(
                     std::rc::Rc::new(VecModel::<SftpTreeNode>::default()),
@@ -3987,7 +4040,7 @@ fn apply_session_event_to_window(
         &event,
         SessionEvent::SftpEntries { .. }
             | SessionEvent::SftpSearchBatch { .. }
-            | SessionEvent::SftpSearchEntries { .. }
+            | SessionEvent::SftpSearchStatus { .. }
             | SessionEvent::SftpStatus(_)
             | SessionEvent::SftpError(_)
             | SessionEvent::SftpTreeUpdate(_)
@@ -4089,6 +4142,7 @@ fn apply_session_event_to_window(
                 t.sftp_status = crate::i18n::t("文件连接已断开", "File connection disconnected").into();
                 t.sftp_loading = false;
                 t.sftp_search_running = false;
+                t.sftp_search_id = "".into();
                 t.sftp_search_root = "".into();
             });
             if let Some(st) = statuses.lock().unwrap().get_mut(tab_id) {
@@ -4142,24 +4196,13 @@ fn apply_session_event_to_window(
         SessionEvent::SftpEntries { path, entries } => {
             let base_entries: Vec<SftpEntry> = entries
                 .iter()
-                .map(|e| SftpEntry {
-                    name: e.name.clone().into(),
-                    full_path: e.full_path.clone().into(),
-                    is_dir: e.is_dir,
-                    kind: e.kind.clone().into(),
-                    size: if e.is_dir {
-                        "".into()
-                    } else {
-                        format_size(e.size).into()
-                    },
-                    modified: format_mtime(e.modified).into(),
-                    mode: (e.mode & 0o7777) as i32,
-                    mode_text: format!("{:04o}", e.mode & 0o7777).into(),
-                    selected: false,
-                })
+                .map(remote_entry_to_sftp_entry)
                 .collect();
             let q = current_sftp_search(terminals, tab_id);
             update_terminal(&|t| {
+                if !t.sftp_search_root.is_empty() {
+                    return;
+                }
                 if !t.sftp_search_running
                     && normalize_remote_path_for_scope(t.sftp_path.as_str())
                         != normalize_remote_path_for_scope(&path)
@@ -4180,62 +4223,51 @@ fn apply_session_event_to_window(
                 t.sftp_selected_count = selected_count;
             });
         }
-        SessionEvent::SftpSearchBatch { root, query, entries } => {
-            apply_sftp_search_batch(terminals, tab_id, &root, &query, &entries);
+        SessionEvent::SftpSearchBatch {
+            search_id,
+            root,
+            query,
+            entries,
+        } => {
+            apply_sftp_search_batch(terminals, tab_id, &search_id, &root, &query, &entries);
         }
-        SessionEvent::SftpSearchEntries { root, query, entries } => {
-            let base_entries: Vec<SftpEntry> = entries
-                .iter()
-                .map(|e| SftpEntry {
-                    name: e.name.clone().into(),
-                    full_path: e.full_path.clone().into(),
-                    is_dir: e.is_dir,
-                    kind: e.kind.clone().into(),
-                    size: if e.is_dir {
-                        "".into()
-                    } else {
-                        format_size(e.size).into()
-                    },
-                    modified: format_mtime(e.modified).into(),
-                    mode: (e.mode & 0o7777) as i32,
-                    mode_text: format!("{:04o}", e.mode & 0o7777).into(),
-                    selected: false,
-                })
-                .collect();
-            let query = query.clone();
-            let root = root.clone();
+        SessionEvent::SftpSearchStatus {
+            search_id,
+            root,
+            query,
+            state,
+            found,
+            scanned,
+            elapsed_ms,
+        } => {
             update_terminal(&|t| {
-                // If the user has pressed X/Stop or started another search, ignore
-                // late results from the old background task. This fixes stale
-                // global/current search results overwriting the restored folder.
-                if !t.sftp_search_running
+                if t.sftp_search_id.as_str() != search_id.as_str()
                     || t.sftp_search.as_str() != query.as_str()
                     || t.sftp_search_root.as_str() != root.as_str()
                 {
                     return;
                 }
-                let mut slint_entries = base_entries.clone();
-                let selected_count = mark_sftp_entries_for_scope(&mut slint_entries, t.sftp_tree_scope.as_str());
-                let all_model = sftp_entries_model(slint_entries.clone());
-                let model = sftp_entries_model(slint_entries);
-                t.sftp_all_entries = all_model;
-                t.sftp_entries = model;
+                let mut current = collect_sftp_entries(&t.sftp_all_entries);
+                let selected_count = mark_sftp_entries_for_scope(&mut current, t.sftp_tree_scope.as_str());
+                t.sftp_all_entries = sftp_entries_model(current.clone());
+                t.sftp_entries = sftp_entries_model(current);
                 t.sftp_loading = false;
                 t.sftp_selected_count = selected_count;
-                t.sftp_search_running = false;
-                t.sftp_status = format!("{}: {}  ·  {}", crate::i18n::t("搜索完成", "Search complete"), sftp_scope_status(&root), t.sftp_entries.row_count()).into();
+                t.sftp_search_running = matches!(
+                    state,
+                    SftpSearchState::Started | SftpSearchState::Progress
+                );
+                let shown_found = if state == SftpSearchState::Cancelled && found == 0 {
+                    t.sftp_entries.row_count()
+                } else {
+                    found
+                };
+                t.sftp_status =
+                    sftp_search_status_text(state, &root, &query, shown_found, scanned, elapsed_ms).into();
             });
         }
         SessionEvent::SftpStatus(msg) => {
-            let running = is_sftp_search_running_status(msg.as_str());
             update_terminal(&|t| {
-                // After the user presses X/Stop we mark the search as not running
-                // immediately. Ignore late "搜索中" progress messages from the
-                // background walker, otherwise the stop button turns red again
-                // and it looks like the cancelled search is still active.
-                if running && !t.sftp_search_running {
-                    return;
-                }
                 t.sftp_status = msg.clone().into();
             });
         }
@@ -4246,6 +4278,7 @@ fn apply_session_event_to_window(
                 t.sftp_status = msg.clone().into();
                 t.sftp_loading = false;
                 t.sftp_search_running = false;
+                t.sftp_search_id = "".into();
                 t.sftp_search_root = "".into();
             });
         }
@@ -5429,6 +5462,7 @@ fn wire_sftp_callbacks(
                                 if !current.is_empty() && normalize_remote_path_for_scope(&current) != normalize_remote_path_for_scope(&resolved) {
                                     row.sftp_back_path = current.into();
                                     row.sftp_search_running = false;
+                                    row.sftp_search_id = "".into();
                                     row.sftp_search_root = "".into();
                                     row.sftp_tree_scope = "".into();
                                 }
@@ -5476,6 +5510,7 @@ fn wire_sftp_callbacks(
                                 if !target.is_empty() {
                                     row.sftp_back_path = current.clone().into();
                                     row.sftp_search_running = false;
+                                    row.sftp_search_id = "".into();
                                     row.sftp_search_root = "".into();
                                     row.sftp_tree_scope = "".into();
                                     row.sftp_path = normalize_remote_path_for_scope(&target).into();
@@ -5733,6 +5768,7 @@ fn wire_sftp_callbacks(
                         if row.id.as_str() == tab_id {
                             let mut all = collect_sftp_entries(&row.sftp_all_entries);
                             row.sftp_search = query.clone().into();
+                            row.sftp_search_id = "".into();
                             row.sftp_search_root = "".into();
                             let selected_count = mark_sftp_entries_for_scope(&mut all, row.sftp_tree_scope.as_str());
                             row.sftp_all_entries = sftp_entries_model(all.clone());
@@ -5757,9 +5793,10 @@ fn wire_sftp_callbacks(
             let tab_id = tab_id.to_string();
             let root_dir = root_dir.to_string();
             let query = query.to_string();
+            let search_id = uuid::Uuid::new_v4().to_string();
             // Mark the active search immediately. The worker runs recursively in
             // the background, so status/results can arrive after the user presses
-            // X or Stop. app.rs will only accept SearchEntries matching this
+            // X or Stop. app.rs will only accept search batches matching this
             // still-active query; late old results are discarded.
             if let Some(w) = weak.upgrade() {
                 let terminals = w.get_terminals();
@@ -5768,8 +5805,13 @@ fn wire_sftp_callbacks(
                         if let Some(mut row) = tm.row_data(ti) {
                             if row.id.as_str() == tab_id.as_str() {
                                 row.sftp_search = query.clone().into();
+                                row.sftp_search_id = search_id.clone().into();
                                 row.sftp_search_root = root_dir.clone().into();
                                 row.sftp_search_running = true;
+                                row.sftp_loading = true;
+                                row.sftp_all_entries = sftp_entries_model(Vec::new());
+                                row.sftp_entries = sftp_entries_model(Vec::new());
+                                row.sftp_selected_count = 0;
                                 row.sftp_status = format!(
                                     "{}: {}{}",
                                     crate::i18n::t("搜索中", "Searching"),
@@ -5785,7 +5827,7 @@ fn wire_sftp_callbacks(
             }
             if let Ok(handles) = sftp_handles.lock() {
                 if let Some(h) = handles.get(&tab_id) {
-                    h.search(root_dir, query);
+                    h.search(search_id, root_dir, query);
                 }
             }
         });
@@ -5804,8 +5846,12 @@ fn wire_sftp_callbacks(
                         if let Some(mut row) = tm.row_data(ti) {
                             if row.id.as_str() == tab_id.as_str() {
                                 row.sftp_search_running = false;
-                                row.sftp_search_root = "".into();
-                                row.sftp_status = crate::i18n::t("搜索已停止", "Search stopped").into();
+                                row.sftp_loading = false;
+                                row.sftp_status = format!(
+                                    "{}: {}",
+                                    crate::i18n::t("搜索已停止", "Search stopped"),
+                                    row.sftp_entries.row_count()
+                                ).into();
                                 tm.set_row_data(ti, row);
                                 break;
                             }
@@ -6731,6 +6777,8 @@ fn wire_key_input(
                                 crate::i18n::t("SFTP 连接中...", "SFTP connecting...").into();
                             t.sftp_loading = true;
                             t.sftp_search_running = false;
+                            t.sftp_search_id = "".into();
+                            t.sftp_search_root = "".into();
                         });
                     }
                     start_session_in_tab(tab_id.as_str(), session, &ctx);

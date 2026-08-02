@@ -33,3 +33,22 @@ jobs:
 
       - name: Check Rust project
         run: cargo check --locked
+
+  windows-check-test:
+    name: Windows cargo check/test
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check Rust project
+        run: cargo check --locked
+
+      - name: Test Rust project
+        run: cargo test --locked

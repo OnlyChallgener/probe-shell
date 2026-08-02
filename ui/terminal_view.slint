@@ -209,6 +209,9 @@ export component TerminalView inherits Rectangle {
     callback sftp-new-folder(string);
     callback sftp-new-file(string);
     callback sftp-open-operation-log();
+    callback show-tooltip(string, length, length);
+    callback hide-tooltip();
+    callback show-toast(string);
     callback paste-from-clipboard();
     callback copy-terminal-text();
     callback clear-terminal();              // wipe this session's screen buffer
@@ -1617,6 +1620,9 @@ export component TerminalView inherits Rectangle {
             new-folder(dir)     => { root.sftp-new-folder(dir); }
             new-file(dir)       => { root.sftp-new-file(dir); }
             open-operation-log() => { root.sftp-open-operation-log(); }
+            show-tooltip(text, x, y) => { root.show-tooltip(text, x, y); }
+            hide-tooltip() => { root.hide-tooltip(); }
+            toast(text) => { root.show-toast(text); }
         }
 
         // Drag-to-dock snap overlay — four edge zones; the one under the cursor
@@ -1655,6 +1661,8 @@ export component TerminalView inherits Rectangle {
             dock-edge: root.sftp-dock;
             glyph: "\u{E2C7}";   // folder — SFTP
             tooltip: @tr("SFTP 文件面板");
+            show-tooltip(text, x, y) => { root.show-tooltip(text, x, y); }
+            hide-tooltip() => { root.hide-tooltip(); }
             expand => { root.set-sftp-collapsed(false); }
         }
         }

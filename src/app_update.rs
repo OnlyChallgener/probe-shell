@@ -3,9 +3,9 @@
 //! Keeping these helpers out of `app.rs` makes the large Slint callback hub less
 //! tangled and keeps repository URLs in one place for forked builds.
 
-pub const REPO_URL: &str = "https://github.com/OnlyChallenger/probe-shell";
-pub const RELEASE_URL: &str = "https://github.com/OnlyChallenger/probe-shell/releases/latest";
-pub const RELEASE_API_URL: &str = "https://api.github.com/repos/OnlyChallenger/probe-shell/releases/latest";
+pub const REPO_URL: &str = "https://github.com/OnlyChallgener/probe-shell";
+pub const RELEASE_URL: &str = "https://github.com/OnlyChallgener/probe-shell/releases/latest";
+pub const RELEASE_API_URL: &str = "https://api.github.com/repos/OnlyChallgener/probe-shell/releases/latest";
 pub const USER_AGENT: &str = "probe-shell-update-check";
 
 /// Open a URL with the platform default browser/file handler.

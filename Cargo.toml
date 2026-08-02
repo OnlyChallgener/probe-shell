@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["Probe Shell contributors"]
 description = "Probe Shell: a lightweight SSH terminal and router-friendly file browser written in Rust + Slint"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/OnlyChallenger/probe-shell"
+repository = "https://github.com/OnlyChallgener/probe-shell"
 readme = "README.md"
 rust-version = "1.75"
 

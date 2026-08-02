@@ -23,6 +23,7 @@
 //! Legacy plaintext passwords (from older installs) are left untouched in
 //! memory and silently re-encrypted the next time the config is saved.
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -955,15 +956,27 @@ impl ConfigStore {
         &self.cache.sftp_quick_dirs
     }
 
-    pub fn set_sftp_quick_dirs(&mut self, mut dirs: Vec<SftpQuickDir>) {
-        dirs.retain(|d| !d.path.trim().is_empty());
-        dirs.truncate(5);
-        for dir in &mut dirs {
+    pub fn set_sftp_quick_dirs(&mut self, dirs: Vec<SftpQuickDir>) {
+        let mut seen_paths = HashSet::new();
+        let mut normalized = Vec::new();
+
+        for mut dir in dirs {
             dir.path = dir.path.trim().replace('\\', "/");
+            while dir.path.len() > 1 && dir.path.ends_with('/') {
+                dir.path.pop();
+            }
+            if dir.path.is_empty() || !seen_paths.insert(dir.path.clone()) {
+                continue;
+            }
             dir.label = dir.label.trim().chars().take(6).collect();
             dir.group = dir.group.trim().to_string();
+            normalized.push(dir);
+            if normalized.len() >= 5 {
+                break;
+            }
         }
-        self.cache.sftp_quick_dirs = dirs;
+
+        self.cache.sftp_quick_dirs = normalized;
     }
 
     /// Explicit quick-command groups (#55) — parallels [`groups`](Self::groups).

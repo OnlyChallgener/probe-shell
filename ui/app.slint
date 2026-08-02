@@ -69,6 +69,7 @@ export struct TerminalState {
     sftp-loading: bool,
     sftp-search-running: bool,
     sftp-search: string,
+    sftp-search-id: string,
     sftp-search-root: string,
     sftp-tree-nodes: [SftpTreeNode],
     sftp-tree-scope: string,       // recursive folder selection/search scope
@@ -105,9 +106,8 @@ export struct SplitterInfo {
     vertical: bool,   // true = vertical handle (drag left/right)
 }
 
-// A 26×26 top-bar icon button with a hover tooltip (right-aligned so it never
-// runs off the window edge). `active` keeps the hover background lit (e.g. while
-// its popup is open).
+// A 26×26 top-bar icon button. Hover hints are delegated to the AppWindow-level
+// floating tooltip so they are not clipped by panels or scroll views.
 // A Windows-style window-control button (minimize / maximize / close) for the
 // custom title bar (#119). `danger` gives the close button its red hover.
 component WinBtn inherits Rectangle {
@@ -137,6 +137,8 @@ component IconBtn inherits Rectangle {
     in property <string> tooltip;
     in property <bool> active;
     callback clicked();
+    callback show-tooltip(string, length, length);
+    callback hide-tooltip();
     property <bool> tooltip-ready: false;
     width: 26px;
     height: 26px;
@@ -144,10 +146,18 @@ component IconBtn inherits Rectangle {
     background: ta.has-hover || root.active ? Theme.bg-hover : transparent;
     ta := TouchArea {
         mouse-cursor: pointer;
+        changed has-hover => { if (!self.has-hover) { root.tooltip-ready = false; root.hide-tooltip(); } }
         clicked => { root.clicked(); }
     }
-    changed tooltip => { root.tooltip-ready = false; }
-    tooltip-delay := Timer { interval: 350ms; running: ta.has-hover && root.tooltip != "" && !root.tooltip-ready; triggered => { root.tooltip-ready = true; } }
+    changed tooltip => { root.tooltip-ready = false; root.hide-tooltip(); }
+    tooltip-delay := Timer {
+        interval: 350ms;
+        running: ta.has-hover && root.tooltip != "" && !root.tooltip-ready;
+        triggered => {
+            root.tooltip-ready = true;
+            root.show-tooltip(root.tooltip, root.absolute-position.x + root.width - 260px, root.absolute-position.y + root.height + 5px);
+        }
+    }
     Text {
         text: root.icon;
         font-family: "Material Icons";
@@ -156,27 +166,7 @@ component IconBtn inherits Rectangle {
         horizontal-alignment: center;
         vertical-alignment: center;
     }
-    if ta.has-hover && root.tooltip != "" && root.tooltip-ready : Rectangle {
-        y: parent.height + 5px;
-        x: parent.width - self.width;   // align right edge with the icon
-        width: tip-txt.preferred-width + 16px;
-        height: 22px;
-        background: Theme.bg-elevated;
-        border-radius: Theme.radius-sm;
-        border-width: 1px;
-        border-color: Theme.border-strong;
-        drop-shadow-blur: 8px;
-        drop-shadow-color: #00000070;
-        tip-txt := Text {
-            text: root.tooltip;
-            color: Theme.text-primary;
-            font-size: Theme.fs-xs;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            width: parent.width;
-            height: parent.height;
-        }
-    }
+
 }
 
 // One row in the keyboard-shortcuts dialog: a key chip + a description (#103).
@@ -379,6 +369,32 @@ export component AppWindow inherits Window {
     // Window focused & visible — Rust drives it from winit events; gates the
     // cursor blink so an idle background window stops repainting (#127).
     in-out property <bool> window-focused <=> Theme.window-focused;
+    property <string> global-tooltip-text: "";
+    property <length> global-tooltip-x: 0px;
+    property <length> global-tooltip-y: 0px;
+    property <bool> toast-visible: false;
+    property <string> toast-text: "";
+    public function show-global-tooltip(text: string, x: length, y: length) {
+        root.global-tooltip-text = text;
+        root.global-tooltip-x = x;
+        root.global-tooltip-y = y;
+    }
+    public function hide-global-tooltip() {
+        root.global-tooltip-text = "";
+    }
+    public function show-toast(text: string) {
+        root.toast-visible = false;
+        root.toast-text = text;
+        root.toast-visible = text != "";
+    }
+    toast-timer := Timer {
+        interval: 1800ms;
+        running: root.toast-visible;
+        triggered => {
+            root.toast-visible = false;
+            root.toast-text = "";
+        }
+    }
     // macOS flag — Rust sets it so shortcuts switch to Cmd (⌘) there (#158).
     in-out property <bool> is-mac <=> Theme.is-mac;
     // Wallpaper / immersive theming — Rust drives these from the wallpaper module.
@@ -830,6 +846,8 @@ export component AppWindow inherits Window {
             dock-edge: "left";
             glyph: "\u{E88A}";   // session list / welcome
             tooltip: root.lang-en ? "Sessions" : "会话列表";
+            show-tooltip(text, x, y) => { root.show-global-tooltip(text, x, y); }
+            hide-tooltip() => { root.hide-global-tooltip(); }
             expand => {
                 root.welcome-collapsed = false;
                 root.set-welcome-collapsed(false);
@@ -991,6 +1009,8 @@ export component AppWindow inherits Window {
             dock-edge: root.sidebar-dock;
             glyph: "\u{E871}";   // dashboard — resource panel
             tooltip: root.lang-en ? "Resources" : "资源面板";
+            show-tooltip(text, x, y) => { root.show-global-tooltip(text, x, y); }
+            hide-tooltip() => { root.hide-global-tooltip(); }
             expand => { root.sidebar-collapsed = false; }
         }
 
@@ -1247,7 +1267,10 @@ export component AppWindow inherits Window {
                     sftp-clear-tree-scope() => { root.sftp-clear-tree-scope(term.id); }
                     sftp-toggle-select(i) => { root.sftp-toggle-select(term.id, i); }
                     sftp-download-selected() => { root.sftp-download-selected(term.id); }
-                    sftp-copy-selected-paths() => { root.sftp-copy-selected-paths(term.id); }
+                    sftp-copy-selected-paths() => {
+                        root.sftp-copy-selected-paths(term.id);
+                        root.show-toast(root.lang-en ? "Copied selected paths" : "已复制勾选路径");
+                    }
                     sftp-clear-selected() => { root.sftp-clear-selected(term.id); }
                     // Confirm before deleting the checked entries (#100), reusing
                     // the delete-confirm dialog in batch mode.
@@ -1279,8 +1302,14 @@ export component AppWindow inherits Window {
                     sftp-chmod-request(path, name, mode) => {
                         root.sftp-chmod-open(term.id, path, name, mode);
                     }
-                    sftp-copy-path(path) => { root.sftp-copy-path(path); }
-                    sftp-copy-status(text) => { root.sftp-copy-status(text); }
+                    sftp-copy-path(path) => {
+                        root.sftp-copy-path(path);
+                        root.show-toast(root.lang-en ? "Copied path" : "已复制路径");
+                    }
+                    sftp-copy-status(text) => {
+                        root.sftp-copy-status(text);
+                        root.show-toast(root.lang-en ? "Copied status" : "已复制状态");
+                    }
                     sftp-new-folder(dir) => {
                         root.sftp-prompt-kind = "mkdir";
                         root.sftp-prompt-tab = term.id;
@@ -1296,6 +1325,9 @@ export component AppWindow inherits Window {
                         root.sftp-prompt-open = true;
                     }
                     sftp-open-operation-log() => { root.open-operation-log(); }
+                    show-tooltip(text, x, y) => { root.show-global-tooltip(text, x, y); }
+                    hide-tooltip() => { root.hide-global-tooltip(); }
+                    show-toast(text) => { root.show-toast(text); }
                     paste-from-clipboard() => { root.paste-from-clipboard(term.id); }
                     copy-terminal-text() => { root.copy-terminal-text(term.id); }
                     clear-terminal() => { root.clear-terminal(term.id); }
@@ -1401,6 +1433,8 @@ export component AppWindow inherits Window {
         icon: "\u{E8B8}";
         tooltip: root.lang-en ? "Settings" : "设置";
         active: root.settings-open;
+        show-tooltip(text, x, y) => { root.show-global-tooltip(text, x, y); }
+        hide-tooltip() => { root.hide-global-tooltip(); }
         clicked => { root.settings-open = !root.settings-open; root.download-open = false; root.ssh-import-hint = ""; }
     }
     IconBtn {
@@ -1408,6 +1442,8 @@ export component AppWindow inherits Window {
         icon: "\u{E2C4}";
         tooltip: root.lang-en ? "Download" : "下载";
         active: root.download-open;
+        show-tooltip(text, x, y) => { root.show-global-tooltip(text, x, y); }
+        hide-tooltip() => { root.hide-global-tooltip(); }
         clicked => { root.download-open = !root.download-open; root.settings-open = false; }
     }
     IconBtn {
@@ -1415,6 +1451,8 @@ export component AppWindow inherits Window {
         icon: Theme.dark ? "\u{E518}" : "\u{E51C}";
         icon-color: Theme.dark ? #f5c542 : #5856d6;
         tooltip: root.lang-en ? "Toggle theme" : "切换主题";
+        show-tooltip(text, x, y) => { root.show-global-tooltip(text, x, y); }
+        hide-tooltip() => { root.hide-global-tooltip(); }
         clicked => { root.toggle-theme(); }
     }
     IconBtn {
@@ -1425,6 +1463,8 @@ export component AppWindow inherits Window {
         tooltip: root.lang-en
             ? (root.sync-input ? "Sync input: ON" : "Sync input")
             : (root.sync-input ? "会话同步：开" : "会话同步");
+        show-tooltip(text, x, y) => { root.show-global-tooltip(text, x, y); }
+        hide-tooltip() => { root.hide-global-tooltip(); }
         clicked => { root.sync-input = !root.sync-input; root.set-sync-input(root.sync-input); }
     }
 
@@ -3465,6 +3505,54 @@ export component AppWindow inherits Window {
                     persist-wallpaper-overlay(v) => { root.persist-wallpaper-overlay(v); }
                 }
             }
+        }
+    }
+
+    if root.global-tooltip-text != "" : Rectangle {
+        x: min(root.width - self.width - 8px, max(8px, root.global-tooltip-x));
+        y: min(root.height - self.height - 8px, max(8px, root.global-tooltip-y));
+        width: min(320px, global-tip-text.preferred-width + 18px);
+        height: 24px;
+        border-radius: Theme.radius-sm;
+        background: Theme.bg-elevated;
+        border-width: 1px;
+        border-color: Theme.border-strong;
+        drop-shadow-blur: 10px;
+        drop-shadow-color: #00000070;
+        global-tip-text := Text {
+            x: 9px;
+            width: parent.width - 18px;
+            height: parent.height;
+            text: root.global-tooltip-text;
+            color: Theme.text-primary;
+            font-size: Theme.fs-xs;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+            overflow: elide;
+        }
+    }
+
+    if root.toast-visible && root.toast-text != "" : Rectangle {
+        width: min(360px, toast-label.preferred-width + 28px);
+        height: 32px;
+        x: (root.width - self.width) / 2;
+        y: root.height - self.height - 22px;
+        border-radius: Theme.radius-sm;
+        background: Theme.bg-elevated;
+        border-width: 1px;
+        border-color: Theme.border-strong;
+        drop-shadow-blur: 14px;
+        drop-shadow-color: #00000080;
+        toast-label := Text {
+            x: 14px;
+            width: parent.width - 28px;
+            height: parent.height;
+            text: root.toast-text;
+            color: Theme.text-primary;
+            font-size: Theme.fs-sm;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+            overflow: elide;
         }
     }
 }
