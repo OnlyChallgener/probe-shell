@@ -73,7 +73,8 @@ component SessionRow inherits Rectangle {
             }
         }
         pointer-event(e) => {
-            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) {
+            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right
+                    && root.session.group != "system") {
                 ctx-x = self.mouse-x;
                 ctx-y = self.mouse-y;
                 ctx-menu.show();

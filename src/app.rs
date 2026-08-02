@@ -72,6 +72,16 @@ enum CsiState {
 
 type TermBuffers = Arc<Mutex<HashMap<String, TermBuffer>>>;
 
+/// UI resize requests are independently sequenced per tab. This is deliberately
+/// separate from `last_term_size`: a hidden tab may never advance this state or
+/// poison the default passed to a newly opened session.
+#[derive(Default)]
+struct TerminalResizeState {
+    last_valid: Option<(u32, u32)>,
+    last_applied: Option<(u32, u32)>,
+    generation: i32,
+}
+
 use anyhow::{Context, Result};
 use i_slint_backend_winit::WinitWindowAccessor;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
@@ -79,6 +89,7 @@ use tokio::runtime::Runtime;
 
 use crate::config::{AuthMethod, ConfigStore, Secret, Session, SessionKind};
 use crate::i18n::t;
+use crate::local::spawn_local_session;
 use crate::sftp::spawn_sftp;
 use crate::ssh::{
     format_mtime, format_size, spawn_session, ProcInfo, SessionCommand, SessionEvent,
@@ -1872,6 +1883,9 @@ fn sync_sessions_to_model_filtered(
     if has_default {
         display_groups.push("default".to_string());
     }
+    if query.is_empty() || builtin_local_sessions().iter().any(|s| session_matches_query(s, query)) {
+        display_groups.insert(0, "system".to_string());
+    }
     display_groups.extend(named);
 
     // Placeholder row for an empty folder; id == "" marks it as a group header
@@ -1897,7 +1911,10 @@ fn sync_sessions_to_model_filtered(
 
     let mut rows: Vec<SessionInfo> = Vec::new();
     for group in &display_groups {
-        let mut gs: Vec<&Session> = if group == "default" {
+        let builtins = builtin_local_sessions();
+        let mut gs: Vec<&Session> = if group == "system" {
+            builtins.iter().filter(|s| session_matches_query(s, query)).collect()
+        } else if group == "default" {
             sessions
                 .iter()
                 .filter(|s| s.group.is_empty() && session_matches_query(s, query))
@@ -1957,6 +1974,59 @@ fn sync_sessions_to_model_filtered(
         }
     }
     model.set_vec(rows);
+}
+
+/// Apply a coalesced background-search batch without changing its running state.
+/// Only the current root/query may update the list, so cancelled/replaced work
+/// cannot overwrite a newer search or normal directory view.
+fn apply_sftp_search_batch(
+    terminals: &VecModel<TerminalState>,
+    tab_id: &str,
+    root: &str,
+    query: &str,
+    entries: &[crate::ssh::RemoteEntry],
+) {
+    for i in 0..terminals.row_count() {
+        let Some(mut row) = terminals.row_data(i) else { continue };
+        if row.id.as_str() != tab_id
+            || !row.sftp_search_running
+            || row.sftp_search.as_str() != query
+            || row.sftp_search_root.as_str() != root
+        { continue; }
+        let mut converted: Vec<SftpEntry> = entries.iter().map(|e| SftpEntry {
+            name: e.name.clone().into(), full_path: e.full_path.clone().into(), is_dir: e.is_dir,
+            kind: e.kind.clone().into(), size: if e.is_dir { "".into() } else { format_size(e.size).into() },
+            modified: format_mtime(e.modified).into(), mode: (e.mode & 0o7777) as i32,
+            mode_text: format!("{:04o}", e.mode & 0o7777).into(), selected: false,
+        }).collect();
+        let selected = mark_sftp_entries_for_scope(&mut converted, row.sftp_tree_scope.as_str());
+        row.sftp_all_entries = sftp_entries_model(converted.clone());
+        row.sftp_entries = sftp_entries_model(converted);
+        row.sftp_selected_count = selected;
+        row.sftp_loading = false;
+        terminals.set_row_data(i, row);
+        break;
+    }
+}
+
+/// Built-ins exist only in the view model. They cannot be serialized, edited,
+/// copied, moved or deleted through ConfigStore.
+fn builtin_local_sessions() -> Vec<Session> {
+    #[cfg(windows)]
+    { vec![builtin_local_session("system:powershell", "PowerShell", "powershell"), builtin_local_session("system:cmd", "CMD", "cmd")] }
+    #[cfg(not(windows))]
+    { vec![builtin_local_session("system:shell", "Shell", "shell")] }
+}
+
+fn builtin_local_session(id: &str, name: &str, host: &str) -> Session {
+    let mut session = Session::new_empty();
+    session.id = id.into();
+    session.name = name.into();
+    session.host = host.into();
+    session.user = std::env::var("USERNAME").or_else(|_| std::env::var("USER")).unwrap_or_default();
+    session.group = "system".into();
+    session.kind = SessionKind::Local;
+    session
 }
 
 // ---------------------------------------------------------------------------
@@ -2565,9 +2635,16 @@ fn wire_session_callbacks(
         let sftp_follow_cd = sftp_follow_cd.clone();
         let connect_debounce = connect_debounce.clone();
         let open_saved_session = Rc::new(move |id: String, force_new: bool| {
-            let session = match store.borrow().get(&id).cloned() {
-                Some(s) => s,
-                None => return,
+            let session = if id.starts_with("system:") {
+                match builtin_local_sessions().into_iter().find(|s| s.id == id) {
+                    Some(s) => s,
+                    None => return,
+                }
+            } else {
+                match store.borrow().get(&id).cloned() {
+                    Some(s) => s,
+                    None => return,
+                }
             };
 
             if !force_new {
@@ -2674,6 +2751,7 @@ fn wire_session_callbacks(
                     format!("{} @{}", session.serial_port, session.baud_rate)
                 }
                 SessionKind::Telnet => format!("telnet {}:{}", session.host, session.port),
+                SessionKind::Local => format!("local {}", session.name),
             };
             // Serial / Telnet have no SFTP side-channel.
             let has_sftp = session.kind == SessionKind::Ssh;
@@ -2745,7 +2823,7 @@ fn wire_session_callbacks(
                 ),
                 sftp_tree_scope: "".into(),
                 sftp_selected_count: 0,
-                sftp_collapsed: sftp_collapsed_default,
+                sftp_collapsed: !has_sftp || sftp_collapsed_default,
                 sftp_panel_height: sftp_h_default,
                 sftp_panel_width: sftp_w_default,
                 sftp_saved_height: sftp_h_default,
@@ -2886,6 +2964,13 @@ fn start_session_in_tab(tab_id: &str, session: Session, ctx: &ConnectCtx) {
             session.clone(),
         ),
         SessionKind::Telnet => crate::telnet::spawn_telnet_session(
+            ctx.runtime.handle(),
+            tab_id.to_string(),
+            session.clone(),
+            initial_cols,
+            initial_rows,
+        ),
+        SessionKind::Local => spawn_local_session(
             ctx.runtime.handle(),
             tab_id.to_string(),
             session.clone(),
@@ -3500,29 +3585,34 @@ fn apply_terminal_resize(
     tab_id: &str,
     cols: u32,
     rows: u32,
-) {
-    *last_term_size.lock().unwrap() = (cols, rows);
+) -> bool {
+    let mut buffers = bufs.lock().unwrap();
+    let Some(buf) = buffers.get_mut(tab_id) else {
+        return false;
+    };
+    let (old_rows, old_cols) = buf.parser.screen().size();
+    let (new_rows, new_cols) = (rows as u16, cols as u16);
+    if (new_rows, new_cols) == (old_rows, old_cols) {
+        return false;
+    }
+    if buf.parser.screen().alternate_screen() || new_cols == old_cols {
+                // Alt-screen (tmux/vim/btop): the remote redraws the whole screen
+                // on SIGWINCH, so just resize the grid and let that redraw fill it.
+        buf.parser.set_size(new_rows, new_cols);
+    } else {
+                // Reflow already-printed output to the new width by replaying the
+                // byte stream — vt100's set_size only truncates/pads (#169).
+        buf.reflow(new_rows, new_cols);
+    }
+    // The pre/post-resize screens differ; drop the scroll-detection snapshot so
+    // the next output isn't mis-read as a scroll.
+    buf.prev.clear();
+    drop(buffers);
     if let Some(handle) = handles.borrow().get(tab_id) {
         handle.resize(cols, rows);
     }
-    if let Some(buf) = bufs.lock().unwrap().get_mut(tab_id) {
-        let (old_rows, old_cols) = buf.parser.screen().size();
-        let (new_rows, new_cols) = (rows as u16, cols as u16);
-        if (new_rows, new_cols) != (old_rows, old_cols) {
-            if buf.parser.screen().alternate_screen() {
-                // Alt-screen (tmux/vim/btop): the remote redraws the whole screen
-                // on SIGWINCH, so just resize the grid and let that redraw fill it.
-                buf.parser.set_size(new_rows, new_cols);
-            } else {
-                // Reflow already-printed output to the new width by replaying the
-                // byte stream — vt100's set_size only truncates/pads (#169).
-                buf.reflow(new_rows, new_cols);
-            }
-            // The pre/post-resize screens differ; drop the scroll-detection
-            // snapshot so the next output isn't mis-read as a scroll.
-            buf.prev.clear();
-        }
-    }
+    *last_term_size.lock().unwrap() = (cols, rows);
+    true
 }
 
 /// Recompute spans + cursor + find/selection highlights for one tab from its
@@ -3856,6 +3946,7 @@ fn apply_session_event_to_window(
     if matches!(
         &event,
         SessionEvent::SftpEntries { .. }
+            | SessionEvent::SftpSearchBatch { .. }
             | SessionEvent::SftpSearchEntries { .. }
             | SessionEvent::SftpStatus(_)
             | SessionEvent::SftpError(_)
@@ -4029,6 +4120,13 @@ fn apply_session_event_to_window(
                 .collect();
             let q = current_sftp_search(terminals, tab_id);
             update_terminal(&|t| {
+                if !t.sftp_search_running
+                    && normalize_remote_path_for_scope(t.sftp_path.as_str())
+                        != normalize_remote_path_for_scope(&path)
+                    && !(t.sftp_path.as_str() == "/" && t.sftp_all_entries.row_count() == 0)
+                {
+                    return;
+                }
                 let mut slint_entries = base_entries.clone();
                 let selected_count = mark_sftp_entries_for_scope(&mut slint_entries, t.sftp_tree_scope.as_str());
                 let all_model = sftp_entries_model(slint_entries.clone());
@@ -4041,6 +4139,9 @@ fn apply_session_event_to_window(
                 t.sftp_loading = false;
                 t.sftp_selected_count = selected_count;
             });
+        }
+        SessionEvent::SftpSearchBatch { root, query, entries } => {
+            apply_sftp_search_batch(terminals, tab_id, &root, &query, &entries);
         }
         SessionEvent::SftpSearchEntries { root, query, entries } => {
             let base_entries: Vec<SftpEntry> = entries
@@ -5260,8 +5361,12 @@ fn wire_sftp_callbacks(
                                     row.sftp_search_running = false;
                                     row.sftp_search_root = "".into();
                                     row.sftp_tree_scope = "".into();
-                                    terminals.set_row_data(i, row);
                                 }
+                                // Commit the target before dispatch: replies to an
+                                // earlier ListDir must not overwrite a newer view.
+                                row.sftp_path = normalize_remote_path_for_scope(&resolved).into();
+                                row.sftp_loading = true;
+                                terminals.set_row_data(i, row);
                                 break;
                             }
                         }
@@ -5303,6 +5408,8 @@ fn wire_sftp_callbacks(
                                     row.sftp_search_running = false;
                                     row.sftp_search_root = "".into();
                                     row.sftp_tree_scope = "".into();
+                                    row.sftp_path = normalize_remote_path_for_scope(&target).into();
+                                    row.sftp_loading = true;
                                     terminals.set_row_data(i, row);
                                 }
                                 break;
@@ -5331,6 +5438,7 @@ fn wire_sftp_callbacks(
     {
         let sftp_handles = sftp_handles.clone();
         let sftp_last_cwd = sftp_last_cwd.clone();
+        let weak = window.as_weak();
         window.on_sftp_locate_result(move |tab_id: SharedString, path: SharedString, is_dir: bool| {
             let tab_id = tab_id.to_string();
             let target = if is_dir {
@@ -5338,6 +5446,21 @@ fn wire_sftp_callbacks(
             } else {
                 parent_path(path.as_str())
             };
+            if let Some(w) = weak.upgrade() {
+                let terminals_rc = w.get_terminals();
+                if let Some(terminals) = terminals_rc.as_any().downcast_ref::<VecModel<TerminalState>>() {
+                    for i in 0..terminals.row_count() {
+                        if let Some(mut row) = terminals.row_data(i) {
+                            if row.id.as_str() == tab_id {
+                                row.sftp_path = normalize_remote_path_for_scope(&target).into();
+                                row.sftp_loading = true;
+                                terminals.set_row_data(i, row);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
             sftp_last_cwd.lock().unwrap().remove(&tab_id);
             if let Ok(handles) = sftp_handles.lock() {
                 if let Some(h) = handles.get(&tab_id) {
@@ -6776,48 +6899,112 @@ fn wire_key_input(
         // progress meter wraps at 10 chars). Coalesce rapid changes and apply
         // only the size that's still set after a short quiet period, so a
         // transient bad value never reaches the server.
-        let pending_size: Rc<RefCell<HashMap<String, (u32, u32)>>> =
+        let resize_states: Rc<RefCell<HashMap<String, TerminalResizeState>>> =
             Rc::new(RefCell::new(HashMap::new()));
-        let resize_debounce = Rc::new(slint::Timer::default());
-        window.on_terminal_resize(move |tab_id: SharedString, cols_f: f32, rows_f: f32| {
+        window.on_terminal_resize(move |
+            tab_id: SharedString,
+            raw_cols: f32,
+            raw_rows: f32,
+            key_width: f32,
+            key_height: f32,
+            generation: i32,
+            source: SharedString,
+        | {
             // A hidden terminal (inactive tab, or a split sibling not currently
             // shown) reports 0 width/height. Ignore those: flooring 0 to the 10-col
             // minimum and applying it would shrink that tab's PTY *and* poison
             // `last_term_size`, so the next connection (e.g. "Duplicate connection")
             // would start at 10 cols and wrap its first output to ~10 chars (#v0.5).
             // Only genuine, visible sizes drive a resize.
-            if cols_f < 1.0 || rows_f < 1.0 {
+            let tab = tab_id.to_string();
+            let source = source.to_string();
+            if !raw_cols.is_finite()
+                || !raw_rows.is_finite()
+                || key_width < 160.0
+                || key_height < 100.0
+                || raw_cols < 20.0
+                || raw_rows < 8.0
+            {
+                tracing::debug!(
+                    tab_id = %tab,
+                    visible = true,
+                    key_width,
+                    key_height,
+                    raw_cols,
+                    raw_rows,
+                    generation,
+                    source = %source,
+                    "terminal_resize ignored: invalid or transitional geometry"
+                );
                 return;
             }
-            let cols = (cols_f as u32).max(10);
-            let rows = (rows_f as u32).max(5);
-            pending_size
-                .borrow_mut()
-                .insert(tab_id.to_string(), (cols, rows));
-            let pending = pending_size.clone();
-            let handles = handles.clone();
-            let bufs = bufs_resize.clone();
-            let last = last_term_size.clone();
-            let weak = weak_resize.clone();
-            // (Re)arm the single-shot timer; rapid changes keep resetting it so
-            // only the final, settled size is applied.
-            resize_debounce.start(
-                slint::TimerMode::SingleShot,
-                std::time::Duration::from_millis(150),
-                move || {
-                    let settled: Vec<(String, (u32, u32))> =
-                        pending.borrow_mut().drain().collect();
-                    for (tab, (cols, rows)) in settled {
-                        tracing::debug!("terminal_resize tab={} cols={} rows={}", tab, cols, rows);
-                        apply_terminal_resize(&handles, &bufs, &last, &tab, cols, rows);
-                        // Re-render so the reflowed (or resized) grid shows at once
-                        // instead of waiting for the next remote output (#169).
-                        if let Some(win) = weak.upgrade() {
-                            rebuild_tab_display(&win, &bufs, &tab);
-                        }
-                    }
-                },
+            let cols = raw_cols.floor() as u32;
+            let rows = raw_rows.floor() as u32;
+            let last_applied = {
+                let mut states = resize_states.borrow_mut();
+                let state = states.entry(tab.clone()).or_default();
+                if generation < state.generation {
+                    tracing::debug!(
+                        tab_id = %tab,
+                        visible = true,
+                        generation,
+                        latest_generation = state.generation,
+                        source = %source,
+                        "terminal_resize ignored: stale generation"
+                    );
+                    return;
+                }
+                state.generation = generation;
+                state.last_valid = Some((cols, rows));
+                if state.last_applied == Some((cols, rows)) {
+                    tracing::debug!(
+                        tab_id = %tab,
+                        visible = true,
+                        key_width,
+                        key_height,
+                        raw_cols,
+                        raw_rows,
+                        requested_cols = cols,
+                        requested_rows = rows,
+                        generation,
+                        source = %source,
+                        "terminal_resize ignored: duplicate size"
+                    );
+                    return;
+                }
+                state.last_applied
+            };
+            let (old_rows, old_cols) = bufs_resize
+                .lock()
+                .unwrap()
+                .get(&tab)
+                .map(|buf| buf.parser.screen().size())
+                .unwrap_or((0, 0));
+            tracing::debug!(
+                tab_id = %tab,
+                visible = true,
+                key_width,
+                key_height,
+                raw_cols,
+                raw_rows,
+                old_cols,
+                old_rows,
+                requested_cols = cols,
+                requested_rows = rows,
+                ?last_applied,
+                generation,
+                source = %source,
+                "terminal_resize applying"
             );
+            if apply_terminal_resize(&handles, &bufs_resize, &last_term_size, &tab, cols, rows) {
+                resize_states.borrow_mut().entry(tab.clone()).or_default().last_applied = Some((cols, rows));
+                tracing::debug!(tab_id = %tab, generation, source = %source, "terminal_resize applied");
+                if let Some(win) = weak_resize.upgrade() {
+                    rebuild_tab_display(&win, &bufs_resize, &tab);
+                }
+            } else {
+                tracing::debug!(tab_id = %tab, generation, source = %source, "terminal_resize ignored: parser already sized");
+            }
         });
     }
 
@@ -7932,14 +8119,18 @@ impl TermBuffer {
     /// remote instead.
     fn reflow(&mut self, new_rows: u16, new_cols: u16) {
         let stream: Vec<u8> = self.raw.iter().copied().collect();
+        let prior_view_offset = self.view_offset;
         self.parser = vt100::Parser::new(new_rows, new_cols, 5000);
         self.history.clear();
         self.prev.clear();
-        self.view_offset = 0;
+        // Reflow changes line boundaries, but retain the reader's relative
+        // position whenever that much scrollback still exists.
+        self.view_offset = prior_view_offset;
         // Scrollback line count changes, so absolute selection coords no longer map.
         self.sel_anchor = None;
         self.sel_focus = None;
         self.feed_batched(&stream);
+        self.view_offset = self.view_offset.min(self.history.len());
     }
 
     /// Translate every CSI sequence terminated by `f` (HVP) into the identical

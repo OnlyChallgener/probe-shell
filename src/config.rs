@@ -224,6 +224,8 @@ pub enum SessionKind {
     Serial,
     /// Plain Telnet over TCP, for legacy network gear (#17).
     Telnet,
+    /// Built-in local shell. System entries are never saved to sessions.json.
+    Local,
 }
 
 impl SessionKind {
@@ -232,6 +234,7 @@ impl SessionKind {
             SessionKind::Ssh => "ssh",
             SessionKind::Serial => "serial",
             SessionKind::Telnet => "telnet",
+            SessionKind::Local => "local",
         }
     }
 
@@ -239,6 +242,7 @@ impl SessionKind {
         match s {
             "serial" => SessionKind::Serial,
             "telnet" => SessionKind::Telnet,
+            "local" => SessionKind::Local,
             _ => SessionKind::Ssh,
         }
     }
@@ -498,6 +502,17 @@ pub struct QuickCommand {
     pub send_enter: bool,
 }
 
+/// One compact SFTP shortcut. Kept separate from terminal quick commands so
+/// file navigation can persist without changing the sessions format.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SftpQuickDir {
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub group: String,
+    pub path: String,
+}
+
 fn default_true() -> bool {
     true
 }
@@ -547,6 +562,9 @@ pub struct ConfigFile {
     /// Saved quick commands (#55).
     #[serde(default)]
     pub quick_commands: Vec<QuickCommand>,
+    /// User-managed SFTP navigation shortcuts (maximum five).
+    #[serde(default)]
+    pub sftp_quick_dirs: Vec<SftpQuickDir>,
     /// Explicit quick-command group names — mirrors `groups` for sessions so that
     /// empty quick-command groups survive and can be renamed/deleted (#55).
     #[serde(default)]
@@ -931,6 +949,21 @@ impl ConfigStore {
 
     pub fn set_quick_commands(&mut self, cmds: Vec<QuickCommand>) {
         self.cache.quick_commands = cmds;
+    }
+
+    pub fn sftp_quick_dirs(&self) -> &[SftpQuickDir] {
+        &self.cache.sftp_quick_dirs
+    }
+
+    pub fn set_sftp_quick_dirs(&mut self, mut dirs: Vec<SftpQuickDir>) {
+        dirs.retain(|d| !d.path.trim().is_empty());
+        dirs.truncate(5);
+        for dir in &mut dirs {
+            dir.path = dir.path.trim().replace('\\', "/");
+            dir.label = dir.label.trim().chars().take(6).collect();
+            dir.group = dir.group.trim().to_string();
+        }
+        self.cache.sftp_quick_dirs = dirs;
     }
 
     /// Explicit quick-command groups (#55) — parallels [`groups`](Self::groups).

@@ -420,6 +420,13 @@ pub enum SessionEvent {
         query: String,
         entries: Vec<RemoteEntry>,
     },
+    /// A bounded, background search progress batch. Batches are deliberately
+    /// coalesced by the worker so the UI is not redrawn for every file.
+    SftpSearchBatch {
+        root: String,
+        query: String,
+        entries: Vec<RemoteEntry>,
+    },
     /// Free-form SFTP status message (progress, errors, etc.).
     SftpStatus(String),
     /// A directory listing failed (e.g. permission denied): show the message and

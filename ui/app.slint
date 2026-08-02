@@ -137,6 +137,7 @@ component IconBtn inherits Rectangle {
     in property <string> tooltip;
     in property <bool> active;
     callback clicked();
+    property <bool> tooltip-ready: false;
     width: 26px;
     height: 26px;
     border-radius: Theme.radius-sm;
@@ -145,6 +146,8 @@ component IconBtn inherits Rectangle {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
+    changed tooltip => { root.tooltip-ready = false; }
+    tooltip-delay := Timer { interval: 350ms; running: ta.has-hover && root.tooltip != "" && !root.tooltip-ready; triggered => { root.tooltip-ready = true; } }
     Text {
         text: root.icon;
         font-family: "Material Icons";
@@ -153,7 +156,7 @@ component IconBtn inherits Rectangle {
         horizontal-alignment: center;
         vertical-alignment: center;
     }
-    if ta.has-hover && root.tooltip != "" : Rectangle {
+    if ta.has-hover && root.tooltip != "" && root.tooltip-ready : Rectangle {
         y: parent.height + 5px;
         x: parent.width - self.width;   // align right edge with the icon
         width: tip-txt.preferred-width + 16px;
@@ -640,8 +643,10 @@ export component AppWindow inherits Window {
 
     // Raw keystroke forwarding: Rust converts key+modifiers to PTY bytes.
     callback send-key(string /* tab-id */, string /* key */, bool /* ctrl */, bool /* alt */, bool /* shift */);
-    // Notifies Rust of a PTY resize (pixel dimensions; Rust converts to cols/rows).
-    callback terminal-resize(string /* tab-id */, float /* width-px */, float /* height-px */);
+    // Raw grid + output-area geometry, per-tab resize generation and source.
+    callback terminal-resize(string /* tab-id */, float /* raw-cols */, float /* raw-rows */,
+                             float /* key-width */, float /* key-height */, int /* generation */,
+                             string /* source */);
 
     // --- SFTP callbacks ---------------------------------------------------
     // Navigate to a new remote directory (or ".." to go up).
@@ -1200,7 +1205,9 @@ export component AppWindow inherits Window {
                     rename-quick-group(g) => { root.qcg-orig = g; root.qcg-name = g; root.qcg-open = true; }
                     delete-quick-group(g) => { root.delete-quick-group(g); }
                     send-key(key, ctrl, alt, shift) => { root.send-key(term.id, key, ctrl, alt, shift) }
-                    terminal-resize(w, h) => { root.terminal-resize(term.id, w, h) }
+                    terminal-resize(cols, rows, key_w, key_h, generation, source) => {
+                        root.terminal-resize(term.id, cols, rows, key_w, key_h, generation, source)
+                    }
                     sftp-navigate(path) => { root.sftp-navigate(term.id, path); }
                     sftp-navigate-back() => { root.sftp-navigate-back(term.id); }
                     sftp-locate-result(path, is_dir) => { root.sftp-locate-result(term.id, path, is_dir); }

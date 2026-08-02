@@ -708,6 +708,13 @@ async fn run_sftp(
                             Ok(mut entries) => all.append(&mut entries),
                             Err(_) => continue,
                         }
+                        // Refresh only after a whole bounded branch completes;
+                        // never once per discovered entry.
+                        if !all.is_empty() {
+                            let _ = events.send(SessionEvent::SftpSearchBatch {
+                                root: result_path.clone(), query: query.clone(), entries: all.clone(),
+                            });
+                        }
                         if all.len() >= 400 {
                             break;
                         }
@@ -1463,6 +1470,11 @@ async fn run_ssh_file_browser(
                         match shell_search_dir_impl(&handle, root, &query, 400usize.saturating_sub(all.len()), 900, cancel.clone(), &events).await {
                             Ok(mut entries) => all.append(&mut entries),
                             Err(_) => continue,
+                        }
+                        if !all.is_empty() {
+                            let _ = events.send(SessionEvent::SftpSearchBatch {
+                                root: result_path.clone(), query: query.clone(), entries: all.clone(),
+                            });
                         }
                         if all.len() >= 400 {
                             break;
