@@ -40,6 +40,9 @@ const SFTP_STAT_TIMEOUT: Duration = Duration::from_secs(8);
 const SSH_BROWSER_EXEC_TIMEOUT: Duration = Duration::from_secs(18);
 const SFTP_MAX_RECURSIVE_NODES: usize = 20_000;
 
+type CancelFlag = Arc<AtomicBool>;
+type SftpTaskSet = Arc<Mutex<Vec<JoinHandle<()>>>>;
+
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
@@ -104,6 +107,8 @@ pub struct SftpHandle {
     pub commands: UnboundedSender<SftpCommand>,
     #[allow(dead_code)]
     pub join: JoinHandle<()>,
+    shutdown: CancelFlag,
+    tasks: SftpTaskSet,
 }
 
 impl SftpHandle {
@@ -180,11 +185,17 @@ impl SftpHandle {
         let _ = self.commands.send(SftpCommand::WriteText { remote, content });
     }
     pub fn close(&self) {
-        // Do not only enqueue Close: the SFTP worker may be blocked in a slow
-        // directory listing/search on flaky links. Abort the worker as well so
-        // the file-side connection drops in sync with the terminal session.
+        self.shutdown.store(true, Ordering::Relaxed);
         let _ = self.commands.send(SftpCommand::Close);
-        self.join.abort();
+        let tasks = self.tasks.clone();
+        let worker = self.join.abort_handle();
+        std::thread::spawn(move || {
+            // Give cooperative cancellation a short window to remove partial
+            // transfer output, then force-stop anything still blocked in I/O.
+            std::thread::sleep(Duration::from_millis(250));
+            abort_tracked_tasks(&tasks);
+            worker.abort();
+        });
     }
 }
 
@@ -242,14 +253,20 @@ pub fn spawn_sftp(
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
     let self_tx = cmd_tx.clone();
     let events_err = events.clone();
+    let shutdown: CancelFlag = Arc::new(AtomicBool::new(false));
+    let tasks: SftpTaskSet = Arc::new(Mutex::new(Vec::new()));
+    let shutdown_worker = shutdown.clone();
+    let tasks_worker = tasks.clone();
     let join = runtime.spawn(async move {
-        if let Err(err) = run_sftp(session, cmd_rx, self_tx, events).await {
+        if let Err(err) = run_sftp(session, cmd_rx, self_tx, events, shutdown_worker, tasks_worker).await {
             let _ = events_err.send(SessionEvent::SftpStatus(friendly_sftp_error(&err)));
         }
     });
     SftpHandle {
         commands: cmd_tx,
         join,
+        shutdown,
+        tasks,
     }
 }
 
@@ -391,6 +408,8 @@ async fn run_sftp(
     mut commands: UnboundedReceiver<SftpCommand>,
     self_tx: UnboundedSender<SftpCommand>,
     events: UnboundedSender<SessionEvent>,
+    shutdown: CancelFlag,
+    tasks: SftpTaskSet,
 ) -> Result<()> {
     let _ = events.send(SessionEvent::SftpStatus(t("SFTP 连接中...", "SFTP connecting...").into()));
 
@@ -501,7 +520,7 @@ async fn run_sftp(
                     t("SSH 文件浏览模式", "SSH file-browser mode"),
                     t("未检测到标准 SFTP", "native SFTP not detected")
                 )));
-                return run_ssh_file_browser(handle, commands, events).await;
+                return run_ssh_file_browser(handle, commands, events, shutdown, tasks).await;
             }
             let _ = events.send(SessionEvent::SftpStatus(format!(
                 "{}: {err:#}",
@@ -584,10 +603,11 @@ async fn run_sftp(
     // Keep long recursive searches off the command loop. Otherwise a router search
     // makes navigation/refresh feel frozen until the walk finishes.
     let mut search_cancel: Option<Arc<AtomicBool>> = None;
-    let mut search_task: Option<JoinHandle<()>> = None;
+    let mut search_task: Option<tokio::task::AbortHandle> = None;
     while let Some(cmd) = commands.recv().await {
         match cmd {
             SftpCommand::Close => {
+                shutdown.store(true, Ordering::Relaxed);
                 if let Some(cancel) = search_cancel.take() {
                     cancel.store(true, Ordering::Relaxed);
                 }
@@ -693,7 +713,8 @@ async fn run_sftp(
                 let query = query.trim().to_string();
                 let sftp = sftp.clone();
                 let events = events.clone();
-                search_task = Some(tokio::spawn(async move {
+                let shutdown_task = shutdown.clone();
+                let task = tokio::spawn(async move {
                     let started = Instant::now();
                     let _ = events.send(SessionEvent::SftpStatus(format!(
                         "{}: {}{}",
@@ -703,10 +724,10 @@ async fn run_sftp(
                     )));
                     let mut all = Vec::new();
                     for root in roots.iter() {
-                        if cancel.load(Ordering::Relaxed) {
+                        if is_cancelled(&cancel, &shutdown_task) {
                             break;
                         }
-                        match search_dir_impl(&sftp, root, &query, 400usize.saturating_sub(all.len()), 900, cancel.clone(), &events).await {
+                        match search_dir_impl(&sftp, root, &query, 400usize.saturating_sub(all.len()), 900, cancel.clone(), shutdown_task.clone(), &events).await {
                             Ok(mut entries) => all.append(&mut entries),
                             Err(_) => continue,
                         }
@@ -721,7 +742,7 @@ async fn run_sftp(
                             break;
                         }
                     }
-                    if cancel.load(Ordering::Relaxed) {
+                    if is_cancelled(&cancel, &shutdown_task) {
                         let _ = events.send(SessionEvent::SftpStatus(format!(
                             "{}: {}",
                             t("搜索已停止", "Search stopped"),
@@ -745,7 +766,9 @@ async fn run_sftp(
                         label,
                         count
                     )));
-                }));
+                });
+                search_task = Some(task.abort_handle());
+                track_task(&tasks, task);
             }
 
             SftpCommand::CancelSearch => {
@@ -775,7 +798,8 @@ async fn run_sftp(
                     .unwrap()
                     .insert(file_id.clone(), cancel.clone());
                 let cancels_done = cancels.clone();
-                tokio::spawn(async move {
+                let shutdown_task = shutdown.clone();
+                let task = tokio::spawn(async move {
                 // A directory target → recursively mirror the whole tree (#50).
                 let is_dir = remote_lstat_is_dir(&sftp, &remote).await.unwrap_or(false);
                 if is_dir {
@@ -795,10 +819,15 @@ async fn run_sftp(
                     let _ = events.send(SessionEvent::SftpStatus(format!(
                         "{} {}/...", t("下载文件夹", "Downloading folder"), dirname
                     )));
-                    match download_dir(&sftp, &handle, &remote, &local_dir, &events).await {
-                        Ok(_) => {
+                    match download_dir(&sftp, &handle, &remote, &local_dir, &events, &cancel, &shutdown_task).await {
+                        Ok(true) => {
                             let _ = events.send(SessionEvent::SftpStatus(format!(
                                 "{}: {}", t("下载完成", "Downloaded"), dirname
+                            )));
+                        }
+                        Ok(false) => {
+                            let _ = events.send(SessionEvent::SftpStatus(format!(
+                                "{}: {}", t("已取消", "Cancelled"), dirname
                             )));
                         }
                         Err(e) => {
@@ -816,7 +845,7 @@ async fn run_sftp(
                     let local_path = format!("{}/{}", local_dir.trim_end_matches('/'), filename);
                     let id = file_id.clone();
                     let _ = events.send(SessionEvent::SftpStatus(format!("{} {}...", t("下载", "Downloading"), filename)));
-                    match download_impl(&handle, &remote, &local_path, &filename, &id, &events, &cancel).await {
+                    match download_impl(&handle, &remote, &local_path, &filename, &id, &events, &cancel, &shutdown_task).await {
                         Ok(true) => {
                             let _ = events
                                 .send(SessionEvent::SftpStatus(format!("{}: {}", t("下载完成", "Downloaded"), filename)));
@@ -832,6 +861,7 @@ async fn run_sftp(
                 }
                 cancels_done.lock().unwrap().remove(&file_id);
                 });
+                track_task(&tasks, task);
             }
 
             SftpCommand::DownloadArchive {
@@ -850,7 +880,8 @@ async fn run_sftp(
                 let cancel = Arc::new(AtomicBool::new(false));
                 cancels.lock().unwrap().insert(id.clone(), cancel.clone());
                 let cancels_done = cancels.clone();
-                tokio::spawn(async move {
+                let shutdown_task = shutdown.clone();
+                let task = tokio::spawn(async move {
                     let n = names.len();
                     let tmp = format!("/tmp/probe-shell-{}.tar", Uuid::new_v4());
                     // Name the archive after the first item's stem, per the user:
@@ -887,7 +918,7 @@ async fn run_sftp(
                         if st != 0 {
                             return Err(anyhow!(t("远端 tar 打包失败", "remote tar failed")));
                         }
-                        download_impl(&handle, &tmp, &local_path, &arc_name, &id, &events, &cancel)
+                        download_impl(&handle, &tmp, &local_path, &arc_name, &id, &events, &cancel, &shutdown_task)
                             .await
                     }
                     .await;
@@ -914,6 +945,7 @@ async fn run_sftp(
                     }
                     cancels_done.lock().unwrap().remove(&id);
                 });
+                track_task(&tasks, task);
             }
 
             SftpCommand::CancelTransfer(id) => {
@@ -934,18 +966,19 @@ async fn run_sftp(
                 let cancel = Arc::new(AtomicBool::new(false));
                 cancels.lock().unwrap().insert(up_id.clone(), cancel.clone());
                 let cancels_done = cancels.clone();
-                tokio::spawn(async move {
+                let shutdown_task = shutdown.clone();
+                let task = tokio::spawn(async move {
                 // A directory source → recursively upload the whole tree (#50).
-                let is_dir = tokio::fs::metadata(&local)
+                let is_dir = tokio::fs::symlink_metadata(&local)
                     .await
-                    .map(|m| m.is_dir())
+                    .map(|m| !m.file_type().is_symlink() && m.is_dir())
                     .unwrap_or(false);
                 if is_dir {
                     let dirname = base_name(&local);
                     let _ = events.send(SessionEvent::SftpStatus(format!(
                         "{} {}/...", t("上传文件夹", "Uploading folder"), dirname
                     )));
-                    let res = upload_dir(&handle, &sftp, &local, &remote_dir, &events).await;
+                    let res = upload_dir(&handle, &sftp, &local, &remote_dir, &events, &cancel, &shutdown_task).await;
                     if let Ok(entries) = list_dir_impl(&sftp, &remote_dir).await {
                         let _ = events.send(SessionEvent::SftpEntries {
                             path: remote_dir.clone(),
@@ -953,9 +986,14 @@ async fn run_sftp(
                         });
                     }
                     match res {
-                        Ok(_) => {
+                        Ok(true) => {
                             let _ = events.send(SessionEvent::SftpStatus(format!(
                                 "{}: {}", t("上传完成", "Uploaded"), dirname
+                            )));
+                        }
+                        Ok(false) => {
+                            let _ = events.send(SessionEvent::SftpStatus(format!(
+                                "{}: {}", t("已取消", "Cancelled"), dirname
                             )));
                         }
                         Err(e) => {
@@ -969,7 +1007,7 @@ async fn run_sftp(
                     let remote_path = format!("{}/{}", remote_dir.trim_end_matches('/'), filename);
                     let id = up_id.clone();
                     let _ = events.send(SessionEvent::SftpStatus(format!("{} {}...", t("上传", "Uploading"), filename)));
-                    match upload_pipelined(&handle, &local, &remote_path, &filename, &id, &events, &cancel).await {
+                    match upload_pipelined(&handle, &local, &remote_path, &filename, &id, &events, &cancel, &shutdown_task).await {
                         Ok(true) => {
                             if let Ok(entries) = list_dir_impl(&sftp, &remote_dir).await {
                                 let _ = events.send(SessionEvent::SftpEntries {
@@ -998,6 +1036,7 @@ async fn run_sftp(
                 }
                 cancels_done.lock().unwrap().remove(&up_id);
                 });
+                track_task(&tasks, task);
             }
 
             SftpCommand::Delete(path) => {
@@ -1178,9 +1217,9 @@ async fn run_sftp(
                 let local_str = local.to_string_lossy().to_string();
                 let _ = events.send(SessionEvent::SftpStatus(format!("{} {}...", t("打开", "Opening"), filename)));
                 let xid = Uuid::new_v4().to_string();
-                let no_cancel = Arc::new(AtomicBool::new(false));
-                match download_impl(&handle, &remote, &local_str, &filename, &xid, &events, &no_cancel).await {
-                    Ok(_) => {
+                let open_cancel = Arc::new(AtomicBool::new(false));
+                match download_impl(&handle, &remote, &local_str, &filename, &xid, &events, &open_cancel, &shutdown).await {
+                    Ok(true) => {
                         open_with_os(&local_str);
                         let _ = events.send(SessionEvent::SftpStatus(format!(
                             "{}: {}",
@@ -1188,14 +1227,22 @@ async fn run_sftp(
                             filename
                         )));
                         if edit {
-                            spawn_edit_watcher(
+                            let watcher = spawn_edit_watcher(
                                 self_tx.clone(),
                                 local_str,
                                 remote.clone(),
                                 filename,
                                 events.clone(),
+                                shutdown.clone(),
                             );
+                            track_task(&tasks, watcher);
                         }
+                    }
+                    Ok(false) => {
+                        let _ = tokio::fs::remove_file(&local_str).await;
+                        let _ = events.send(SessionEvent::SftpStatus(format!(
+                            "{}: {}", t("已取消", "Cancelled"), filename
+                        )));
                     }
                     Err(e) => {
                         let _ = events.send(SessionEvent::SftpStatus(format!("{}: {e}", t("打开失败", "Open failed"))));
@@ -1375,6 +1422,8 @@ async fn run_ssh_file_browser(
     handle: client::Handle<SftpClientHandler>,
     mut commands: UnboundedReceiver<SftpCommand>,
     events: UnboundedSender<SessionEvent>,
+    shutdown: CancelFlag,
+    tasks: SftpTaskSet,
 ) -> Result<()> {
     // `russh::client::Handle` itself is not Clone in the version we build
     // against. Wrap it in Arc so background search tasks can share the same
@@ -1402,10 +1451,11 @@ async fn run_ssh_file_browser(
     // Same rule as real SFTP mode: recursive search must never block the file
     // browser command loop. This keeps folder expansion and refresh responsive.
     let mut search_cancel: Option<Arc<AtomicBool>> = None;
-    let mut search_task: Option<JoinHandle<()>> = None;
+    let mut search_task: Option<tokio::task::AbortHandle> = None;
     while let Some(cmd) = commands.recv().await {
         match cmd {
             SftpCommand::Close => {
+                shutdown.store(true, Ordering::Relaxed);
                 if let Some(cancel) = search_cancel.take() {
                     cancel.store(true, Ordering::Relaxed);
                 }
@@ -1459,7 +1509,8 @@ async fn run_ssh_file_browser(
                 let query = query.trim().to_string();
                 let handle = handle.clone();
                 let events = events.clone();
-                search_task = Some(tokio::spawn(async move {
+                let shutdown_task = shutdown.clone();
+                let task = tokio::spawn(async move {
                     let started = Instant::now();
                     let _ = events.send(SessionEvent::SftpStatus(format!(
                         "{}: {}{}",
@@ -1469,10 +1520,10 @@ async fn run_ssh_file_browser(
                     )));
                     let mut all = Vec::new();
                     for root in roots.iter() {
-                        if cancel.load(Ordering::Relaxed) {
+                        if is_cancelled(&cancel, &shutdown_task) {
                             break;
                         }
-                        match shell_search_dir_impl(&handle, root, &query, 400usize.saturating_sub(all.len()), 900, cancel.clone(), &events).await {
+                        match shell_search_dir_impl(&handle, root, &query, 400usize.saturating_sub(all.len()), 900, cancel.clone(), shutdown_task.clone(), &events).await {
                             Ok(mut entries) => all.append(&mut entries),
                             Err(_) => continue,
                         }
@@ -1485,7 +1536,7 @@ async fn run_ssh_file_browser(
                             break;
                         }
                     }
-                    if cancel.load(Ordering::Relaxed) {
+                    if is_cancelled(&cancel, &shutdown_task) {
                         let _ = events.send(SessionEvent::SftpStatus(format!(
                             "{}: {}",
                             t("搜索已停止", "Search stopped"),
@@ -1509,7 +1560,9 @@ async fn run_ssh_file_browser(
                         label,
                         count
                     )));
-                }));
+                });
+                search_task = Some(task.abort_handle());
+                track_task(&tasks, task);
             }
             SftpCommand::CancelSearch => {
                 if let Some(cancel) = search_cancel.take() {
@@ -1555,7 +1608,8 @@ async fn run_ssh_file_browser(
                         "p={0}; ",
                         "[ -n \"$p\" ] && [ \"$p\" != / ] && [ \"$p\" != . ] && [ \"$p\" != .. ] || exit 64; ",
                         "if [ -L \"$p\" ] || [ ! -d \"$p\" ]; then rm -f -- \"$p\"; ",
-                        "else find \"$p\" -xdev -depth -mindepth 1 ",
+                        "else excess=$(find \"$p\" -xdev -mindepth 1 -print | sed -n '20001p'); ",
+                        "[ -z \"$excess\" ] || exit 65; find \"$p\" -xdev -depth -mindepth 1 ",
                         "\\( -type l -o -type f -o ! -type d \\) -exec rm -f -- {{}} + -o -type d -exec rmdir -- {{}} +; ",
                         "rmdir -- \"$p\"; fi"
                     ),
@@ -1816,7 +1870,8 @@ async fn shell_search_dir_impl(
     query: &str,
     max_results: usize,
     max_dirs: usize,
-    cancel: Arc<AtomicBool>,
+    cancel: CancelFlag,
+    shutdown: CancelFlag,
     events: &UnboundedSender<SessionEvent>,
 ) -> Result<Vec<RemoteEntry>> {
     let q = query.trim().to_lowercase();
@@ -1828,10 +1883,10 @@ async fn shell_search_dir_impl(
     let mut last_status = Instant::now();
 
     while let Some(dir) = stack.pop() {
-        if cancel.load(Ordering::Relaxed) {
+        if is_cancelled(&cancel, &shutdown) {
             break;
         }
-        let key = normalise_remote_dir(&dir).to_lowercase();
+        let key = normalise_remote_dir(&dir);
         if !seen.insert(key) {
             continue;
         }
@@ -1879,7 +1934,7 @@ async fn shell_search_dir_impl(
             if entry.is_dir && entry.kind != "symlink-dir" {
                 let name = entry.name.rsplit('/').next().unwrap_or(&entry.name);
                 let next = normalise_remote_dir(&entry.full_path);
-                if name != "." && name != ".." && !seen.contains(&next.to_lowercase()) {
+                if name != "." && name != ".." && !seen.contains(&next) {
                     stack.push(next);
                 }
             }
@@ -2175,7 +2230,8 @@ fn spawn_edit_watcher(
     remote: String,
     filename: String,
     events: UnboundedSender<SessionEvent>,
-) {
+    shutdown: CancelFlag,
+) -> JoinHandle<()> {
     let remote_dir = parent_dir(&remote);
     tokio::spawn(async move {
         let mtime = |p: &str| std::fs::metadata(p).ok().and_then(|m| m.modified().ok());
@@ -2183,7 +2239,7 @@ fn spawn_edit_watcher(
         // ~40 min of 2s polls; also exits early once the worker is gone.
         for _ in 0..1200 {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            if self_tx.is_closed() {
+            if shutdown.load(Ordering::Relaxed) || self_tx.is_closed() {
                 break;
             }
             let cur = mtime(&local);
@@ -2246,12 +2302,11 @@ fn normalise_remote_dir(path: &str) -> String {
 }
 
 fn is_forbidden_remote_path(path: &str) -> bool {
-    let p = path.trim();
-    if p.is_empty() || p == "/" || p == "." || p == ".." {
+    let p = path.trim().replace('\\', "/");
+    if p.is_empty() || p.split('/').any(|part| part == "..") {
         return true;
     }
-    let trimmed = p.trim_end_matches('/');
-    trimmed.is_empty() || trimmed == "." || trimmed == ".."
+    !p.split('/').any(|part| !part.is_empty() && part != ".")
 }
 
 fn mode_is_dir(permissions: Option<u32>) -> bool {
@@ -2308,13 +2363,36 @@ fn format_search_elapsed(duration: Duration) -> String {
     }
 }
 
+fn is_cancelled(cancel: &CancelFlag, shutdown: &CancelFlag) -> bool {
+    cancel.load(Ordering::Relaxed) || shutdown.load(Ordering::Relaxed)
+}
+
+fn track_task(tasks: &SftpTaskSet, task: JoinHandle<()>) {
+    if let Ok(mut set) = tasks.lock() {
+        set.retain(|task| !task.is_finished());
+        set.push(task);
+    } else {
+        task.abort();
+    }
+}
+
+fn abort_tracked_tasks(tasks: &SftpTaskSet) {
+    if let Ok(mut set) = tasks.lock() {
+        for task in set.iter() {
+            task.abort();
+        }
+        set.clear();
+    }
+}
+
 async fn search_dir_impl(
     sftp: &SftpSession,
     root: &str,
     query: &str,
     max_results: usize,
     max_dirs: usize,
-    cancel: Arc<AtomicBool>,
+    cancel: CancelFlag,
+    shutdown: CancelFlag,
     events: &UnboundedSender<SessionEvent>,
 ) -> Result<Vec<RemoteEntry>> {
     let q = query.trim().to_lowercase();
@@ -2326,10 +2404,10 @@ async fn search_dir_impl(
     let mut last_status = Instant::now();
 
     while let Some(dir) = stack.pop() {
-        if cancel.load(Ordering::Relaxed) {
+        if is_cancelled(&cancel, &shutdown) {
             break;
         }
-        let key = normalise_remote_dir(&dir).to_lowercase();
+        let key = normalise_remote_dir(&dir);
         if !seen.insert(key) {
             continue;
         }
@@ -2380,7 +2458,7 @@ async fn search_dir_impl(
             if entry.is_dir && entry.kind != "symlink-dir" {
                 let name = entry.name.rsplit('/').next().unwrap_or(&entry.name);
                 let next = normalise_remote_dir(&entry.full_path);
-                if name != "." && name != ".." && !seen.contains(&next.to_lowercase()) {
+                if name != "." && name != ".." && !seen.contains(&next) {
                     stack.push(next);
                 }
             }
@@ -2548,7 +2626,8 @@ async fn download_impl(
     name: &str,
     id: &str,
     events: &UnboundedSender<SessionEvent>,
-    cancel: &Arc<AtomicBool>,
+    cancel: &CancelFlag,
+    shutdown: &CancelFlag,
 ) -> Result<bool> {
     use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
@@ -2592,7 +2671,7 @@ async fn download_impl(
         let mut next_off = 0u64;
         let mut inflight = FuturesUnordered::new();
         loop {
-            if cancel.load(Ordering::Relaxed) {
+            if is_cancelled(cancel, shutdown) {
                 cancelled = true;
             }
             // Top up the pipeline with fresh READ requests.
@@ -2653,7 +2732,7 @@ async fn download_impl(
         // Unknown / zero size: serial drain until EOF (rare; keeps correctness).
         let mut off = 0u64;
         loop {
-            if cancel.load(Ordering::Relaxed) {
+            if is_cancelled(cancel, shutdown) {
                 cancelled = true;
                 break;
             }
@@ -2712,18 +2791,21 @@ async fn download_dir(
     remote_root: &str,
     local_parent: &str,
     events: &UnboundedSender<SessionEvent>,
-) -> Result<()> {
-    // Folder transfers aren't individually cancellable from the UI; a throwaway
-    // never-set flag satisfies download_impl's signature.
-    let no_cancel = Arc::new(AtomicBool::new(false));
+    cancel: &CancelFlag,
+    shutdown: &CancelFlag,
+) -> Result<bool> {
     let root_name = sanitize_filename(&base_name(remote_root));
     let root_local = format!("{}/{}", local_parent.trim_end_matches('/'), root_name);
     // (remote_dir, local_dir) pairs still to mirror.
-    let mut stack = vec![(remote_root.trim_end_matches('/').to_string(), root_local)];
+    let mut stack = vec![(remote_root.trim_end_matches('/').to_string(), root_local.clone())];
     let mut visited: HashSet<String> = HashSet::new();
     let mut nodes = 0usize;
     while let Some((rdir, ldir)) = stack.pop() {
-        let key = normalise_remote_dir(&rdir).to_lowercase();
+        if is_cancelled(cancel, shutdown) {
+            let _ = tokio::fs::remove_dir_all(&root_local).await;
+            return Ok(false);
+        }
+        let key = normalise_remote_dir(&rdir);
         if !visited.insert(key) {
             continue;
         }
@@ -2735,6 +2817,10 @@ async fn download_dir(
             .await
             .with_context(|| format!("create local dir {ldir}"))?;
         for entry in list_dir_impl(sftp, &rdir).await? {
+            if is_cancelled(cancel, shutdown) {
+                let _ = tokio::fs::remove_dir_all(&root_local).await;
+                return Ok(false);
+            }
             nodes += 1;
             if nodes > SFTP_MAX_RECURSIVE_NODES {
                 return Err(anyhow!("recursive download exceeded node limit"));
@@ -2746,12 +2832,14 @@ async fn download_dir(
                 let fname = sanitize_filename(&entry.name);
                 let lpath = format!("{}/{}", ldir, fname);
                 let id = Uuid::new_v4().to_string();
-                download_impl(handle, &entry.full_path, &lpath, &fname, &id, events, &no_cancel)
-                    .await?;
+                if !download_impl(handle, &entry.full_path, &lpath, &fname, &id, events, cancel, shutdown).await? {
+                    let _ = tokio::fs::remove_dir_all(&root_local).await;
+                    return Ok(false);
+                }
             }
         }
     }
-    Ok(())
+    Ok(true)
 }
 
 /// Recursively remove a remote directory tree (#50 follow-up).
@@ -2765,7 +2853,7 @@ async fn remove_dir_recursive(sftp: &SftpSession, root: &str) -> Result<()> {
     }
     let mut all_dirs = vec![root.trim_end_matches('/').to_string()];
     let mut visited: HashSet<String> = HashSet::new();
-    visited.insert(normalise_remote_dir(root).to_lowercase());
+    visited.insert(normalise_remote_dir(root));
     let mut nodes = 1usize;
     let mut i = 0;
     while i < all_dirs.len() {
@@ -2777,7 +2865,7 @@ async fn remove_dir_recursive(sftp: &SftpSession, root: &str) -> Result<()> {
                 return Err(anyhow!("recursive delete exceeded node limit"));
             }
             if entry.is_dir && entry.kind != "symlink-dir" {
-                let key = normalise_remote_dir(&entry.full_path).to_lowercase();
+                let key = normalise_remote_dir(&entry.full_path);
                 if visited.insert(key) {
                     all_dirs.push(entry.full_path);
                 }
@@ -2797,6 +2885,15 @@ async fn remove_dir_recursive(sftp: &SftpSession, root: &str) -> Result<()> {
     Ok(())
 }
 
+async fn cleanup_remote_upload(sftp: &SftpSession, files: &[String], dirs: &[String]) {
+    for file in files.iter().rev() {
+        let _ = sftp.remove_file(file).await;
+    }
+    for dir in dirs.iter().rev() {
+        let _ = sftp.remove_dir(dir).await;
+    }
+}
+
 /// Recursively upload a local directory tree into `remote_parent` (#50).
 ///
 /// Iterative work-stack: mirror each local dir to the remote (create_dir, whose
@@ -2808,21 +2905,26 @@ async fn upload_dir(
     local_root: &str,
     remote_parent: &str,
     events: &UnboundedSender<SessionEvent>,
-) -> Result<()> {
-    // Folder uploads aren't individually cancellable from the UI; a throwaway
-    // never-set flag satisfies upload_pipelined's signature.
-    let no_cancel = Arc::new(AtomicBool::new(false));
+    cancel: &CancelFlag,
+    shutdown: &CancelFlag,
+) -> Result<bool> {
     let root_name = base_name(local_root);
     let remote_root = format!("{}/{}", remote_parent.trim_end_matches('/'), root_name);
     let mut stack = vec![(local_root.to_string(), remote_root)];
     let mut visited: HashSet<String> = HashSet::new();
+    let mut created_files: Vec<String> = Vec::new();
+    let mut created_dirs: Vec<String> = Vec::new();
     let mut nodes = 0usize;
     while let Some((ldir, rdir)) = stack.pop() {
+        if is_cancelled(cancel, shutdown) {
+            cleanup_remote_upload(sftp, &created_files, &created_dirs).await;
+            return Ok(false);
+        }
         let key = tokio::fs::canonicalize(&ldir)
             .await
             .unwrap_or_else(|_| Path::new(&ldir).to_path_buf())
             .to_string_lossy()
-            .to_lowercase();
+            .into_owned();
         if !visited.insert(key) {
             continue;
         }
@@ -2831,11 +2933,17 @@ async fn upload_dir(
             return Err(anyhow!("recursive upload exceeded node limit"));
         }
         // Best-effort mkdir; an error usually just means the dir already exists.
-        let _ = sftp.create_dir(&rdir).await;
+        if sftp.create_dir(&rdir).await.is_ok() {
+            created_dirs.push(rdir.clone());
+        }
         let mut rd = tokio::fs::read_dir(&ldir)
             .await
             .with_context(|| format!("read local dir {ldir}"))?;
         while let Some(entry) = rd.next_entry().await.context("read dir entry")? {
+            if is_cancelled(cancel, shutdown) {
+                cleanup_remote_upload(sftp, &created_files, &created_dirs).await;
+                return Ok(false);
+            }
             let name = entry.file_name().to_string_lossy().to_string();
             let lpath = entry.path().to_string_lossy().to_string();
             let rchild = format!("{}/{}", rdir, name);
@@ -2853,11 +2961,16 @@ async fn upload_dir(
                 stack.push((lpath, rchild));
             } else if meta.is_file() {
                 let id = Uuid::new_v4().to_string();
-                upload_pipelined(handle, &lpath, &rchild, &name, &id, events, &no_cancel).await?;
+                if upload_pipelined(handle, &lpath, &rchild, &name, &id, events, cancel, shutdown).await? {
+                    created_files.push(rchild);
+                } else {
+                    cleanup_remote_upload(sftp, &created_files, &created_dirs).await;
+                    return Ok(false);
+                }
             }
         }
     }
-    Ok(())
+    Ok(true)
 }
 
 /// Pipelined SFTP upload (#16).
@@ -2876,7 +2989,8 @@ async fn upload_pipelined(
     name: &str,
     id: &str,
     events: &UnboundedSender<SessionEvent>,
-    cancel: &Arc<AtomicBool>,
+    cancel: &CancelFlag,
+    shutdown: &CancelFlag,
 ) -> Result<bool> {
     use tokio::io::AsyncReadExt;
 
@@ -2925,7 +3039,7 @@ async fn upload_pipelined(
     let mut inflight = FuturesUnordered::new();
 
     while !eof || !inflight.is_empty() {
-        if cancel.load(Ordering::Relaxed) {
+        if is_cancelled(cancel, shutdown) {
             cancelled = true;
             eof = true; // stop reading more; drain what's in flight
         }
