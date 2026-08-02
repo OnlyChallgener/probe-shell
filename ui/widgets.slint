@@ -165,8 +165,10 @@ export component LabeledInput inherits VerticalLayout {
             }
         }
 
-        // Lightweight placeholder — shown when value is empty.
-        if value == "" : Text {
+        // Follow the live TextInput value directly. During IME/composition the
+        // two-way bound outer property can update a frame later, which otherwise
+        // leaves the placeholder painted over freshly typed text.
+        if input.text == "" : Text {
             x: 10px;
             y: 0px;
             height: parent.height;
