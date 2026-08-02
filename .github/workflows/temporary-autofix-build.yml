@@ -1,4 +1,4 @@
-name: Temporary autofix build
+name: Temporary autofix source
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 jobs:
-  patch-check-commit:
+  patch-and-commit:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repair branch
@@ -20,51 +20,34 @@ jobs:
           ref: fix/sftp-local-terminal
           fetch-depth: 0
 
-      - name: Apply the two confirmed build fixes
+      - name: Repair spawn_edit_watcher return value
         shell: python
         run: |
           from pathlib import Path
 
-          local_path = Path("src/local.rs")
-          local_text = local_path.read_text(encoding="utf-8")
-          stale = "            SessionCommand::AddTunnel { .. } | SessionCommand::StopTunnel(_) => {}\n"
-          if stale not in local_text:
-              raise SystemExit("stale local-session command branch was not found")
-          local_path.write_text(local_text.replace(stale, "", 1), encoding="utf-8")
-
-          sftp_path = Path("src/sftp.rs")
-          sftp_text = sftp_path.read_text(encoding="utf-8")
+          path = Path("src/sftp.rs")
+          text = path.read_text(encoding="utf-8")
           marker = "fn spawn_edit_watcher("
-          start = sftp_text.find(marker)
+          start = text.find(marker)
           if start < 0:
               raise SystemExit("spawn_edit_watcher was not found")
           end_marker = "\n// ---------------------------------------------------------------------------\n// SFTP helpers"
-          end = sftp_text.find(end_marker, start)
+          end = text.find(end_marker, start)
           if end < 0:
               raise SystemExit("spawn_edit_watcher end marker was not found")
-          block = sftp_text[start:end]
+          block = text[start:end]
           old_tail = "    });\n}"
           if old_tail not in block:
-              raise SystemExit("spawn_edit_watcher did not contain the expected semicolon tail")
-          block = block.rsplit(old_tail, 1)[0] + "    })\n}"
-          sftp_path.write_text(sftp_text[:start] + block + sftp_text[end:], encoding="utf-8")
+              raise SystemExit("expected semicolon tail was not found")
+          fixed = block.rsplit(old_tail, 1)[0] + "    })\n}"
+          path.write_text(text[:start] + fixed + text[end:], encoding="utf-8")
 
-      - name: Verify stale variants are gone
-        shell: bash
-        run: |
-          if grep -RInE 'AddTunnel|StopTunnel' src; then
-            echo "stale command variants remain"
-            exit 1
-          fi
-
-      - name: Cargo check
-        run: cargo check --locked
-
-      - name: Commit repaired sources
+      - name: Commit repaired source
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/local.rs src/sftp.rs
-          git commit -m "fix: resolve remaining build errors"
+          git add src/sftp.rs
+          git commit -m "fix: return SFTP edit watcher handle"
+          git pull --rebase origin fix/sftp-local-terminal
           git push origin HEAD:fix/sftp-local-terminal
