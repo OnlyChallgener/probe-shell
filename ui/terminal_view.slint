@@ -343,7 +343,7 @@ export component TerminalView inherits Rectangle {
                 root.last-applied-cols = root.raw-term-cols;
                 root.last-applied-rows = root.raw-term-rows;
                 root.terminal-resize(root.raw-term-cols, root.raw-term-rows,
-                    key-capture.width, key-capture.height,
+                    key-capture.width / 1px, key-capture.height / 1px,
                     root.resize-generation, root.resize-source);
             }
         }
