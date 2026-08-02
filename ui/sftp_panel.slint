@@ -1,821 +1,1041 @@
 import { Theme } from "theme.slint";
 import { ScrollView } from "std-widgets.slint";
+
 export struct SftpEntry {
-name: string,
-full-path: string,
-is-dir: bool,
-kind: string,      // file / dir / symlink-file / symlink-dir / dead-link
-size: string,
-modified: string,
-mode: int,        // POSIX permission bits, for the chmod dialog (#84)
-mode-text: string,
-selected: bool,   // multi-select checkbox state (#100)
+    name: string,
+    full-path: string,
+    is-dir: bool,
+    kind: string,
+    size: string,
+    modified: string,
+    mode: int,
+    mode-text: string,
+    selected: bool,
 }
+
 export struct SftpTreeNode {
-path: string,
-name: string,
-depth: int,
-expanded: bool,
-has-children: bool,
-checked: bool,     // true when covered by the recursive tree selection scope
+    path: string,
+    name: string,
+    depth: int,
+    expanded: bool,
+    has-children: bool,
+    checked: bool,
 }
+
 component SftpMenuItem inherits Rectangle {
-in property <string> label;
-in property <brush> tint: Theme.text-primary;
-in property <bool> enabled: true;
-callback clicked();
-height: 26px;
-border-radius: Theme.radius-sm;
-background: (root.enabled && ta.has-hover) ? Theme.bg-hover : transparent;
-ta := TouchArea {
-width: parent.width;
-height: parent.height;
-mouse-cursor: root.enabled ? pointer : default;
-clicked => { if (root.enabled) { root.clicked(); } }
+    in property <string> label;
+    in property <brush> tint: Theme.text-primary;
+    in property <bool> enabled: true;
+    callback clicked();
+    height: 26px;
+    border-radius: Theme.radius-sm;
+    background: (root.enabled && ta.has-hover) ? Theme.bg-hover : transparent;
+    ta := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { if (root.enabled) { root.clicked(); } }
+    }
+    Text {
+        x: 10px;
+        text: root.label;
+        color: root.enabled ? root.tint : Theme.text-muted;
+        font-size: Theme.fs-sm;
+        vertical-alignment: center;
+        height: parent.height;
+    }
 }
-Text {
-x: 10px;
-text: root.label;
-color: root.enabled ? root.tint : Theme.text-muted;
-font-size: Theme.fs-sm;
-vertical-alignment: center;
-height: parent.height;
-}
-}
+
 component FileKindIcon inherits Rectangle {
-in property <bool> is-dir: false;
-in property <string> kind: "file";
-in property <bool> expanded: false;
-in property <bool> hovered: false;
-width: 18px;
-height: 18px;
-Text {
-text: root.kind == "dead-link" ? "\u{E002}" : (root.is-dir ? "\u{E2C7}" : "\u{E24D}");
-font-family: "Material Icons";
-font-size: 17px;
-color: root.kind == "dead-link" ? Theme.text-muted : (root.is-dir ? (root.hovered ? #F6D784 : (root.expanded ? #F0C66A : #D9AE55)) : Theme.text-secondary);
-horizontal-alignment: center;
-vertical-alignment: center;
-width: parent.width;
-height: parent.height;
+    in property <bool> is-dir: false;
+    in property <string> kind: "file";
+    in property <bool> expanded: false;
+    in property <bool> hovered: false;
+    width: 18px;
+    height: 18px;
+    Text {
+        text: root.kind == "dead-link" ? "\u{E002}" : (root.is-dir ? "\u{E2C7}" : "\u{E24D}");
+        font-family: "Material Icons";
+        font-size: 17px;
+        color: root.kind == "dead-link" ? Theme.text-muted : (root.is-dir ? (root.hovered ? #F6D784 : (root.expanded ? #F0C66A : #D9AE55)) : Theme.text-secondary);
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        width: parent.width;
+        height: parent.height;
+    }
+    if root.kind == "symlink-dir" || root.kind == "symlink-file" : Rectangle {
+        x: parent.width - 8px;
+        y: parent.height - 8px;
+        width: 8px;
+        height: 8px;
+        border-radius: 4px;
+        background: #F0C66A;
+        border-width: 1px;
+        border-color: Theme.bg-panel;
+        Text {
+            text: "\u{E89E}";
+            font-family: "Material Icons";
+            color: #ffffff;
+            font-size: 6px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            width: parent.width;
+            height: parent.height;
+        }
+    }
 }
-if root.kind == "symlink-dir" || root.kind == "symlink-file" : Rectangle {
-x: parent.width - 8px;
-y: parent.height - 8px;
-width: 8px;
-height: 8px;
-border-radius: 4px;
-background: #F0C66A;
-border-width: 1px;
-border-color: Theme.bg-panel;
-Text {
-text: "\u{E89E}";
-font-family: "Material Icons";
-color: #ffffff;
-font-size: 6px;
-horizontal-alignment: center;
-vertical-alignment: center;
-width: parent.width;
-height: parent.height;
-}
-}
-}
+
 component QuickAccessButton inherits Rectangle {
-in property <string> label;
-in property <string> path;
-in property <bool> editing: false;
-in property <string> tooltip: "";
-callback clicked();
-callback remove();
-callback hover-tip(string);
-width: clamp(label-text.preferred-width + (root.editing ? 24px : 12px), root.editing ? 54px : 34px, root.editing ? 150px : 100px);
-height: 22px;
-border-radius: Theme.radius-sm;
-background: qa-ta.has-hover ? Theme.bg-hover : transparent;
-border-width: 1px;
-border-color: qa-ta.has-hover ? Theme.border-strong : transparent;
-qa-ta := TouchArea {
-width: parent.width;
-height: parent.height;
-mouse-cursor: pointer;
-changed has-hover => { root.hover-tip(self.has-hover ? root.tooltip : ""); }
-clicked => { root.clicked(); }
+    in property <string> label;
+    in property <string> path;
+    in property <bool> editing: false;
+    in property <string> tooltip: "";
+    callback clicked();
+    callback remove();
+    callback hover-tip(string);
+    width: clamp(label-text.preferred-width + (root.editing ? 24px : 12px), root.editing ? 54px : 34px, root.editing ? 150px : 100px);
+    height: 22px;
+    border-radius: Theme.radius-sm;
+    background: qa-ta.has-hover ? Theme.bg-hover : transparent;
+    border-width: 1px;
+    border-color: qa-ta.has-hover ? Theme.border-strong : transparent;
+    qa-ta := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        mouse-cursor: pointer;
+        changed has-hover => { root.hover-tip(self.has-hover ? root.tooltip : ""); }
+        clicked => { root.clicked(); }
+    }
+    label-text := Text {
+        x: 4px;
+        width: parent.width - (root.editing ? 18px : 8px);
+        height: parent.height;
+        text: root.label;
+        color: Theme.text-primary;
+        font-size: 9px;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+        overflow: elide;
+    }
+    if root.editing : Rectangle {
+        x: parent.width - 14px;
+        y: 3px;
+        width: 12px;
+        height: 12px;
+        border-radius: 6px;
+        background: del-ta.has-hover ? Theme.danger : Theme.danger.with-alpha(0.68);
+        del-ta := TouchArea {
+            width: parent.width;
+            height: parent.height;
+            mouse-cursor: pointer;
+            clicked => { root.remove(); }
+        }
+        Text { text: "×"; color: #ffffff; font-size: 8px; horizontal-alignment: center; vertical-alignment: center; }
+    }
 }
-label-text := Text {
-x: 4px;
-width: parent.width - (root.editing ? 18px : 8px);
-height: parent.height;
-text: root.label;
-color: Theme.text-primary;
-font-size: 9px;
-vertical-alignment: center;
-horizontal-alignment: center;
-overflow: elide;
-}
-if root.editing : Rectangle {
-x: parent.width - 14px;
-y: 3px;
-width: 12px;
-height: 12px;
-border-radius: 6px;
-background: del-ta.has-hover ? Theme.danger : Theme.danger.with-alpha(0.68);
-del-ta := TouchArea {
-width: parent.width;
-height: parent.height;
-mouse-cursor: pointer;
-clicked => { root.remove(); }
-}
-Text { text: "×"; color: #ffffff; font-size: 8px; horizontal-alignment: center; vertical-alignment: center; }
-}
-}
+
 component QuickGroupItem inherits Rectangle {
-in property <string> label;
-in property <string> path;
-callback chosen(string);
-height: 34px;
-border-radius: Theme.radius-sm;
-background: item-ta.has-hover ? Theme.bg-hover : transparent;
-item-ta := TouchArea {
-width: parent.width; height: parent.height; mouse-cursor: pointer;
-clicked => { root.chosen(root.path); }
+    in property <string> label;
+    in property <string> path;
+    callback chosen(string);
+    height: 34px;
+    border-radius: Theme.radius-sm;
+    background: item-ta.has-hover ? Theme.bg-hover : transparent;
+    item-ta := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        mouse-cursor: pointer;
+        clicked => { root.chosen(root.path); }
+    }
+    VerticalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        padding-top: 3px;
+        padding-bottom: 3px;
+        spacing: 0px;
+        Text { text: root.label; color: Theme.text-primary; font-size: Theme.fs-xs; overflow: elide; }
+        Text { text: root.path; color: Theme.text-muted; font-size: 9px; overflow: elide; }
+    }
 }
-VerticalLayout {
-padding-left: 8px; padding-right: 8px; padding-top: 3px; padding-bottom: 3px;
-spacing: 0px;
-Text { text: root.label; color: Theme.text-primary; font-size: Theme.fs-xs; overflow: elide; }
-Text { text: root.path; color: Theme.text-muted; font-size: 9px; overflow: elide; }
-}
-}
+
 component QuickGroupButton inherits Rectangle {
-in property <string> group-name;
-in property <string> p1; in property <string> l1; in property <string> g1;
-in property <string> p2; in property <string> l2; in property <string> g2;
-in property <string> p3; in property <string> l3; in property <string> g3;
-in property <string> p4; in property <string> l4; in property <string> g4;
-in property <string> p5; in property <string> l5; in property <string> g5;
-callback navigate(string);
-callback hover-tip(string);
-property <int> item-count:
-(root.p1 != "" && root.g1 == root.group-name ? 1 : 0)
-+ (root.p2 != "" && root.g2 == root.group-name ? 1 : 0)
-+ (root.p3 != "" && root.g3 == root.group-name ? 1 : 0)
-+ (root.p4 != "" && root.g4 == root.group-name ? 1 : 0)
-+ (root.p5 != "" && root.g5 == root.group-name ? 1 : 0);
-width: clamp(group-label.preferred-width + 24px, 48px, 110px);
-height: 22px;
-border-radius: Theme.radius-sm;
-background: group-ta.has-hover ? Theme.bg-hover : transparent;
-border-width: 1px;
-border-color: group-ta.has-hover ? Theme.border-strong : transparent;
-group-ta := TouchArea {
-width: parent.width; height: parent.height; mouse-cursor: pointer;
-changed has-hover => { root.hover-tip(self.has-hover ? root.group-name : ""); }
-clicked => { group-menu.show(); }
+    in property <string> group-name;
+    in property <string> p1; in property <string> l1; in property <string> g1;
+    in property <string> p2; in property <string> l2; in property <string> g2;
+    in property <string> p3; in property <string> l3; in property <string> g3;
+    in property <string> p4; in property <string> l4; in property <string> g4;
+    in property <string> p5; in property <string> l5; in property <string> g5;
+    callback navigate(string);
+    callback hover-tip(string);
+    property <int> item-count:
+        (root.p1 != "" && root.g1 == root.group-name ? 1 : 0)
+        + (root.p2 != "" && root.g2 == root.group-name ? 1 : 0)
+        + (root.p3 != "" && root.g3 == root.group-name ? 1 : 0)
+        + (root.p4 != "" && root.g4 == root.group-name ? 1 : 0)
+        + (root.p5 != "" && root.g5 == root.group-name ? 1 : 0);
+    width: clamp(group-label.preferred-width + 24px, 48px, 110px);
+    height: 22px;
+    border-radius: Theme.radius-sm;
+    background: group-ta.has-hover ? Theme.bg-hover : transparent;
+    border-width: 1px;
+    border-color: group-ta.has-hover ? Theme.border-strong : transparent;
+    group-ta := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        mouse-cursor: pointer;
+        changed has-hover => { root.hover-tip(self.has-hover ? root.group-name : ""); }
+        clicked => { group-menu.show(); }
+    }
+    group-label := Text {
+        x: 5px;
+        width: parent.width - 20px;
+        height: parent.height;
+        text: root.group-name;
+        color: Theme.text-primary;
+        font-size: 9px;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+        overflow: elide;
+    }
+    Text {
+        x: parent.width - 17px;
+        width: 14px;
+        height: parent.height;
+        text: "\u{E5C5}";
+        font-family: "Material Icons";
+        color: Theme.text-muted;
+        font-size: 14px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    group-menu := PopupWindow {
+        x: 0px;
+        y: parent.height + 2px;
+        width: 220px;
+        height: 8px + root.item-count * 34px;
+        Rectangle {
+            background: Theme.bg-panel;
+            border-radius: Theme.radius-sm;
+            border-width: 1px;
+            border-color: Theme.border-strong;
+            drop-shadow-blur: 12px;
+            drop-shadow-color: #00000055;
+            VerticalLayout {
+                padding: 4px;
+                spacing: 0px;
+                if root.p1 != "" && root.g1 == root.group-name : QuickGroupItem { label: root.l1; path: root.p1; chosen(path) => { group-menu.close(); root.navigate(path); } }
+                if root.p2 != "" && root.g2 == root.group-name : QuickGroupItem { label: root.l2; path: root.p2; chosen(path) => { group-menu.close(); root.navigate(path); } }
+                if root.p3 != "" && root.g3 == root.group-name : QuickGroupItem { label: root.l3; path: root.p3; chosen(path) => { group-menu.close(); root.navigate(path); } }
+                if root.p4 != "" && root.g4 == root.group-name : QuickGroupItem { label: root.l4; path: root.p4; chosen(path) => { group-menu.close(); root.navigate(path); } }
+                if root.p5 != "" && root.g5 == root.group-name : QuickGroupItem { label: root.l5; path: root.p5; chosen(path) => { group-menu.close(); root.navigate(path); } }
+            }
+        }
+    }
 }
-group-label := Text {
-x: 5px; width: parent.width - 20px; height: parent.height;
-text: root.group-name; color: Theme.text-primary; font-size: 9px;
-vertical-alignment: center; horizontal-alignment: center; overflow: elide;
-}
-Text {
-x: parent.width - 15px; width: 12px; height: parent.height;
-text: "⌄"; color: Theme.text-muted; font-size: 9px;
-horizontal-alignment: center; vertical-alignment: center;
-}
-group-menu := PopupWindow {
-x: 0px; y: parent.height + 2px; width: 220px;
-height: 8px + root.item-count * 34px;
-Rectangle {
-background: Theme.bg-panel; border-radius: Theme.radius-sm;
-border-width: 1px; border-color: Theme.border-strong;
-drop-shadow-blur: 12px; drop-shadow-color: #00000055;
-VerticalLayout {
-padding: 4px; spacing: 0px;
-if root.p1 != "" && root.g1 == root.group-name : QuickGroupItem { label: root.l1; path: root.p1; chosen(path) => { group-menu.close(); root.navigate(path); } }
-if root.p2 != "" && root.g2 == root.group-name : QuickGroupItem { label: root.l2; path: root.p2; chosen(path) => { group-menu.close(); root.navigate(path); } }
-if root.p3 != "" && root.g3 == root.group-name : QuickGroupItem { label: root.l3; path: root.p3; chosen(path) => { group-menu.close(); root.navigate(path); } }
-if root.p4 != "" && root.g4 == root.group-name : QuickGroupItem { label: root.l4; path: root.p4; chosen(path) => { group-menu.close(); root.navigate(path); } }
-if root.p5 != "" && root.g5 == root.group-name : QuickGroupItem { label: root.l5; path: root.p5; chosen(path) => { group-menu.close(); root.navigate(path); } }
-}
-}
-}
-}
+
 component QuickDirManageRow inherits Rectangle {
-in property <int> item-index: -1;
-in property <string> label;
-in property <string> path;
-in property <bool> can-edit: true;
-in property <bool> can-delete: true;
-callback edit(int);
-callback remove(int);
-height: 34px;
-border-radius: Theme.radius-sm;
-background: row-ta.has-hover ? Theme.bg-hover : transparent;
-row-ta := TouchArea {
-width: parent.width - 58px; height: parent.height;
-mouse-cursor: root.can-edit ? pointer : default;
-clicked => { if (root.can-edit) { root.edit(root.item-index); } }
+    in property <int> item-index: -1;
+    in property <string> label;
+    in property <string> path;
+    in property <bool> can-edit: true;
+    in property <bool> can-delete: true;
+    callback edit(int);
+    callback remove(int);
+    height: 34px;
+    border-radius: Theme.radius-sm;
+    background: row-ta.has-hover ? Theme.bg-hover : transparent;
+    row-ta := TouchArea {
+        width: parent.width - 58px;
+        height: parent.height;
+        mouse-cursor: root.can-edit ? pointer : default;
+        clicked => { if (root.can-edit) { root.edit(root.item-index); } }
+    }
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 64px;
+        spacing: 8px;
+        Text { width: 128px; text: root.label; color: Theme.text-primary; font-size: Theme.fs-xs; vertical-alignment: center; overflow: elide; }
+        Text { horizontal-stretch: 1; text: root.path; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; overflow: elide; }
+    }
+    if root.can-edit : Rectangle {
+        x: parent.width - 54px;
+        y: 5px;
+        width: 24px;
+        height: 24px;
+        border-radius: 12px;
+        background: edit-ta.has-hover ? Theme.bg-elevated : transparent;
+        edit-ta := TouchArea { mouse-cursor: pointer; clicked => { root.edit(root.item-index); } }
+        Text { text: "\u{E3C9}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+    }
+    if root.can-delete : Rectangle {
+        x: parent.width - 28px;
+        y: 5px;
+        width: 24px;
+        height: 24px;
+        border-radius: 12px;
+        background: remove-ta.has-hover ? Theme.danger.with-alpha(0.18) : transparent;
+        remove-ta := TouchArea { mouse-cursor: pointer; clicked => { root.remove(root.item-index); } }
+        Text { text: "\u{E872}"; font-family: "Material Icons"; color: Theme.danger; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+    }
 }
-HorizontalLayout {
-padding-left: 8px; padding-right: 64px; spacing: 8px;
-Text { width: 128px; text: root.label; color: Theme.text-primary; font-size: Theme.fs-xs; vertical-alignment: center; overflow: elide; }
-Text { horizontal-stretch: 1; text: root.path; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; overflow: elide; }
-}
-if root.can-edit : Rectangle {
-x: parent.width - 54px; y: 5px; width: 24px; height: 24px; border-radius: 12px;
-background: edit-ta.has-hover ? Theme.bg-elevated : transparent;
-edit-ta := TouchArea { mouse-cursor: pointer; clicked => { root.edit(root.item-index); } }
-Text { text: "\u{E3C9}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
-}
-if root.can-delete : Rectangle {
-x: parent.width - 28px; y: 5px; width: 24px; height: 24px; border-radius: 12px;
-background: remove-ta.has-hover ? Theme.danger.with-alpha(0.18) : transparent;
-remove-ta := TouchArea { mouse-cursor: pointer; clicked => { root.remove(root.item-index); } }
-Text { text: "\u{E872}"; font-family: "Material Icons"; color: Theme.danger; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
-}
-}
+
 component QuickDirSection inherits Rectangle {
-in property <string> group-name;
-in property <string> p1; in property <string> l1; in property <string> g1;
-in property <string> p2; in property <string> l2; in property <string> g2;
-in property <string> p3; in property <string> l3; in property <string> g3;
-in property <string> p4; in property <string> l4; in property <string> g4;
-in property <string> p5; in property <string> l5; in property <string> g5;
-callback edit(int);
-callback remove(int);
-property <int> item-count:
-(root.p1 != "" && root.g1 == root.group-name ? 1 : 0)
-+ (root.p2 != "" && root.g2 == root.group-name ? 1 : 0)
-+ (root.p3 != "" && root.g3 == root.group-name ? 1 : 0)
-+ (root.p4 != "" && root.g4 == root.group-name ? 1 : 0)
-+ (root.p5 != "" && root.g5 == root.group-name ? 1 : 0);
-visible: root.item-count > 0;
-height: self.visible ? section.preferred-height : 0px;
-section := VerticalLayout {
-spacing: 1px;
-Rectangle {
-height: 22px; background: Theme.bg-panel-alt; border-radius: Theme.radius-sm;
-Text {
-x: 8px; width: parent.width - 16px; height: parent.height;
-text: root.group-name == "" ? @tr("未分组") : root.group-name;
-color: Theme.text-secondary; font-size: Theme.fs-xs; font-weight: 600;
-vertical-alignment: center; overflow: elide;
+    in property <string> group-name;
+    in property <string> p1; in property <string> l1; in property <string> g1;
+    in property <string> p2; in property <string> l2; in property <string> g2;
+    in property <string> p3; in property <string> l3; in property <string> g3;
+    in property <string> p4; in property <string> l4; in property <string> g4;
+    in property <string> p5; in property <string> l5; in property <string> g5;
+    callback edit(int);
+    callback remove(int);
+    property <int> item-count:
+        (root.p1 != "" && root.g1 == root.group-name ? 1 : 0)
+        + (root.p2 != "" && root.g2 == root.group-name ? 1 : 0)
+        + (root.p3 != "" && root.g3 == root.group-name ? 1 : 0)
+        + (root.p4 != "" && root.g4 == root.group-name ? 1 : 0)
+        + (root.p5 != "" && root.g5 == root.group-name ? 1 : 0);
+    visible: root.item-count > 0;
+    height: self.visible ? section.preferred-height : 0px;
+    section := VerticalLayout {
+        spacing: 1px;
+        Rectangle {
+            height: 22px;
+            background: Theme.bg-panel-alt;
+            border-radius: Theme.radius-sm;
+            Text {
+                x: 8px;
+                width: parent.width - 16px;
+                height: parent.height;
+                text: root.group-name == "" ? @tr("未分组") : root.group-name;
+                color: Theme.text-secondary;
+                font-size: Theme.fs-xs;
+                font-weight: 600;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+        if root.p1 != "" && root.g1 == root.group-name : QuickDirManageRow { item-index: 0; label: root.l1; path: root.p1; edit(i) => { root.edit(i); } remove(i) => { root.remove(i); } }
+        if root.p2 != "" && root.g2 == root.group-name : QuickDirManageRow { item-index: 1; label: root.l2; path: root.p2; edit(i) => { root.edit(i); } remove(i) => { root.remove(i); } }
+        if root.p3 != "" && root.g3 == root.group-name : QuickDirManageRow { item-index: 2; label: root.l3; path: root.p3; edit(i) => { root.edit(i); } remove(i) => { root.remove(i); } }
+        if root.p4 != "" && root.g4 == root.group-name : QuickDirManageRow { item-index: 3; label: root.l4; path: root.p4; edit(i) => { root.edit(i); } remove(i) => { root.remove(i); } }
+        if root.p5 != "" && root.g5 == root.group-name : QuickDirManageRow { item-index: 4; label: root.l5; path: root.p5; edit(i) => { root.edit(i); } remove(i) => { root.remove(i); } }
+    }
 }
+
+component QuickDirGroupedList inherits VerticalLayout {
+    in property <string> p1; in property <string> l1; in property <string> g1;
+    in property <string> p2; in property <string> l2; in property <string> g2;
+    in property <string> p3; in property <string> l3; in property <string> g3;
+    in property <string> p4; in property <string> l4; in property <string> g4;
+    in property <string> p5; in property <string> l5; in property <string> g5;
+    callback edit(int);
+    callback remove(int);
+    spacing: 3px;
+
+    if root.p1 != "" && root.g1 != "" : QuickDirSection {
+        group-name: root.g1;
+        p1: root.p1; l1: root.l1; g1: root.g1; p2: root.p2; l2: root.l2; g2: root.g2; p3: root.p3; l3: root.l3; g3: root.g3; p4: root.p4; l4: root.l4; g4: root.g4; p5: root.p5; l5: root.l5; g5: root.g5;
+        edit(i) => { root.edit(i); }
+        remove(i) => { root.remove(i); }
+    }
+    if root.p2 != "" && root.g2 != "" && !(root.p1 != "" && root.g1 == root.g2) : QuickDirSection {
+        group-name: root.g2;
+        p1: root.p1; l1: root.l1; g1: root.g1; p2: root.p2; l2: root.l2; g2: root.g2; p3: root.p3; l3: root.l3; g3: root.g3; p4: root.p4; l4: root.l4; g4: root.g4; p5: root.p5; l5: root.l5; g5: root.g5;
+        edit(i) => { root.edit(i); }
+        remove(i) => { root.remove(i); }
+    }
+    if root.p3 != "" && root.g3 != "" && !(root.p1 != "" && root.g1 == root.g3) && !(root.p2 != "" && root.g2 == root.g3) : QuickDirSection {
+        group-name: root.g3;
+        p1: root.p1; l1: root.l1; g1: root.g1; p2: root.p2; l2: root.l2; g2: root.g2; p3: root.p3; l3: root.l3; g3: root.g3; p4: root.p4; l4: root.l4; g4: root.g4; p5: root.p5; l5: root.l5; g5: root.g5;
+        edit(i) => { root.edit(i); }
+        remove(i) => { root.remove(i); }
+    }
+    if root.p4 != "" && root.g4 != "" && !(root.p1 != "" && root.g1 == root.g4) && !(root.p2 != "" && root.g2 == root.g4) && !(root.p3 != "" && root.g3 == root.g4) : QuickDirSection {
+        group-name: root.g4;
+        p1: root.p1; l1: root.l1; g1: root.g1; p2: root.p2; l2: root.l2; g2: root.g2; p3: root.p3; l3: root.l3; g3: root.g3; p4: root.p4; l4: root.l4; g4: root.g4; p5: root.p5; l5: root.l5; g5: root.g5;
+        edit(i) => { root.edit(i); }
+        remove(i) => { root.remove(i); }
+    }
+    if root.p5 != "" && root.g5 != "" && !(root.p1 != "" && root.g1 == root.g5) && !(root.p2 != "" && root.g2 == root.g5) && !(root.p3 != "" && root.g3 == root.g5) && !(root.p4 != "" && root.g4 == root.g5) : QuickDirSection {
+        group-name: root.g5;
+        p1: root.p1; l1: root.l1; g1: root.g1; p2: root.p2; l2: root.l2; g2: root.g2; p3: root.p3; l3: root.l3; g3: root.g3; p4: root.p4; l4: root.l4; g4: root.g4; p5: root.p5; l5: root.l5; g5: root.g5;
+        edit(i) => { root.edit(i); }
+        remove(i) => { root.remove(i); }
+    }
+    if (root.p1 != "" && root.g1 == "") || (root.p2 != "" && root.g2 == "") || (root.p3 != "" && root.g3 == "") || (root.p4 != "" && root.g4 == "") || (root.p5 != "" && root.g5 == "") : QuickDirSection {
+        group-name: "";
+        p1: root.p1; l1: root.l1; g1: root.g1; p2: root.p2; l2: root.l2; g2: root.g2; p3: root.p3; l3: root.l3; g3: root.g3; p4: root.p4; l4: root.l4; g4: root.g4; p5: root.p5; l5: root.l5; g5: root.g5;
+        edit(i) => { root.edit(i); }
+        remove(i) => { root.remove(i); }
+    }
 }
-if root.p1 != "" && root.g1 == root.group-name : QuickDirManageRow { item-index: 0; label: root.l1; path: root.p1; edit(i) => { root.edit(i); } remove(i) => { root.remove(i); } }
-if root.p2 != "" && root.g2 == root.group-name : QuickDirManageRow { item-index: 1; label: root.l2; path: root.p2; edit(i) => { root.edit(i); } remove(i) => { root.remove(i); } }
-if root.p3 != "" && root.g3 == root.group-name : QuickDirManageRow { item-index: 2; label: root.l3; path: root.p3; edit(i) => { root.edit(i); } remove(i) => { root.remove(i); } }
-if root.p4 != "" && root.g4 == root.group-name : QuickDirManageRow { item-index: 3; label: root.l4; path: root.p4; edit(i) => { root.edit(i); } remove(i) => { root.remove(i); } }
-if root.p5 != "" && root.g5 == root.group-name : QuickDirManageRow { item-index: 4; label: root.l5; path: root.p5; edit(i) => { root.edit(i); } remove(i) => { root.remove(i); } }
-}
-}
+
 export component SftpPanel inherits Rectangle {
-in property <string> current-path: "/";
-in property <string> back-path: "";
-in property <[SftpEntry]> entries;
-in property <string> status: @tr("SFTP not connected");
-in property <bool> loading: false;
-in property <bool> search-running: false;
-in property <[SftpTreeNode]> tree-nodes: [];
-in property <bool> collapsed: false;
-in property <string> search-query: "";
-in property <string> tree-scope: "";
-in property <bool> show-tree: true;
-in property <bool> compact: false;
-property <length> tree-width: 180px;
-property <bool> tree-resizing: false;
-property <length> tree-grab-x;
-property <length> tree-base-width;
-property <length> list-w: root.show-tree ? root.width - root.tree-width - 6px : root.width;
-property <length> name-min: 180px;
-property <bool> show-size-col: !root.search-mode && (root.show-tree || (root.list-w - 36px - 76px - 62px - 120px > root.name-min));
-property <bool> show-mode-col: !root.search-mode && (root.show-tree || (root.list-w - 36px - 62px - 120px > root.name-min));
-property <bool> show-modified-col: !root.search-mode && (root.show-tree || (root.list-w - 36px - 120px > root.name-min));
-property <int> selected-row: -1;
-in property <int> selected-count;
-property <length> menu-x;
-property <length> menu-y;
-property <string> menu-target;
-property <string> menu-target-name;
-property <bool> menu-target-is-dir;
-property <int> menu-target-mode;
-property <int> menu-target-index: -1;
-property <string> tree-active-path: "";
-property <string> file-active-path: "";
-property <length> tree-menu-x;
-property <length> tree-menu-y;
-property <string> tree-menu-target;
-property <string> toolbar-tip: "";
-property <bool> toolbar-tip-ready: false;
-property <length> qa-popup-width: clamp(root.width - 48px, 500px, 560px);
-property <length> qa-popup-height: 330px;
-property <length> qa-popup-offset-x: 0px;
-property <length> qa-popup-offset-y: 0px;
-property <bool> qa-popup-dragging: false;
-property <length> qa-popup-drag-start-x;
-property <length> qa-popup-drag-start-y;
-property <length> qa-popup-drag-base-x;
-property <length> qa-popup-drag-base-y;
-property <string> pending-local-search: "";
-property <bool> local-search-pending: false;
-property <bool> search-mode: false;
-property <string> search-restore-path: "";
-property <bool> quick-edit-mode: false;
-property <bool> qa-add-open: false;
-property <string> qa-manual-path: "";
-property <string> qa-manual-label: "";
-property <string> qa-manual-group: "";
-property <int> qa-edit-index: -1;
-property <bool> qa-show-root: true;
-property <bool> qa-show-home: false;
-property <bool> qa-show-etc: false;
-property <bool> qa-show-var: false;
-property <bool> qa-show-tmp: false;
-property <bool> qa-show-www: false;
-property <bool> qa-show-over: false;
-in-out property <string> qa1-path: ""; in-out property <string> qa1-label: ""; in-out property <string> qa1-group: "";
-in-out property <string> qa2-path: ""; in-out property <string> qa2-label: ""; in-out property <string> qa2-group: "";
-in-out property <string> qa3-path: ""; in-out property <string> qa3-label: ""; in-out property <string> qa3-group: "";
-in-out property <string> qa4-path: ""; in-out property <string> qa4-label: ""; in-out property <string> qa4-group: "";
-in-out property <string> qa5-path: ""; in-out property <string> qa5-label: ""; in-out property <string> qa5-group: "";
-local-search-debounce := Timer {
-interval: 250ms;
-running: root.local-search-pending;
-triggered => {
-root.local-search-pending = false;
-root.search-changed(root.pending-local-search);
-}
-}
-changed toolbar-tip => {
-root.toolbar-tip-ready = false;
-root.hide-tooltip();
-}
-toolbar-tooltip-delay := Timer {
-interval: 350ms;
-running: root.toolbar-tip != "" && !root.toolbar-tip-ready;
-triggered => {
-root.toolbar-tip-ready = true;
-root.show-tooltip(root.toolbar-tip, root.absolute-position.x + root.width - 320px, root.absolute-position.y + 34px);
-}
-}
-callback toggle-collapsed();
-callback navigate(string);
-callback navigate-back();
-callback locate-result(string, bool);
-callback download(string);
-callback upload-clicked(string, bool);
-callback refresh(string);
-callback quick-dir-changed(int, string, string, string);
-callback search-changed(string);
-callback search-folder(string, string);
-callback cancel-search();
-callback tree-expand(string);
-callback toggle-tree-scope(string);
-callback set-tree-scope(string);
-callback clear-tree-scope();
-callback delete(string);
-callback toggle-select(int);
-callback download-selected();
-callback delete-selected();
-callback copy-selected-paths();
-callback clear-selected();
-callback view(string);
-callback edit(string);
-callback open-external(string);
-callback edit-external(string);
-callback rename-request(string, string);
-callback chmod-request(string, string, int);
-callback copy-path(string);
-callback new-folder(string);
-callback new-file(string);
-callback open-operation-log();
-callback copy-status(string);
-callback show-tooltip(string, length, length);
-callback hide-tooltip();
-callback toast(string);
-callback dock-drag-move(length, length);
-callback dock-drag-end();
-background: Theme.bg-panel;
-changed current-path => { path-input.text = root.current-path; root.selected-row = -1; root.file-active-path = ""; }
-dock-bg := TouchArea {
-width: parent.width;
-height: parent.height;
-mouse-cursor: move;
-moved => { root.dock-drag-move(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y); }
-pointer-event(ev) => { if (ev.kind == PointerEventKind.up) { root.dock-drag-end(); } }
-}
-VerticalLayout {
-visible: !root.compact;
-spacing: 0;
-Rectangle {
-height: 30px;
-background: Theme.bg-panel-alt;
-HorizontalLayout {
-padding-left: 6px;
-padding-right: 6px;
-spacing: 4px;
-Rectangle {
-width: 16px;
-y: (parent.height - self.height) / 2;
-height: 22px;
-grip-ta := TouchArea {
-mouse-cursor: move;
-moved => { root.dock-drag-move(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y); }
-pointer-event(ev) => { if (ev.kind == PointerEventKind.up) { root.dock-drag-end(); } }
-}
-Text { text: "\u{E945}"; font-family: "Material Icons"; color: grip-ta.has-hover ? Theme.text-secondary : Theme.text-muted; font-size: 16px; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
-}
-Rectangle {
-horizontal-stretch: 1;
-height: 22px;
-border-radius: Theme.radius-sm;
-background: Theme.bg-root;
-border-width: 1px;
-border-color: path-input.has-focus ? Theme.accent : Theme.border-subtle;
-path-input := TextInput {
-x: 6px;
-width: parent.width - 12px;
-height: parent.height;
-text: root.current-path;
-color: Theme.text-primary;
-font-family: Theme.ui-font-family;
-font-size: Theme.fs-sm;
-vertical-alignment: center;
-single-line: true;
-accepted => { root.navigate(self.text); self.text = root.current-path; }
-}
-}
-Rectangle {
-width: root.width > 900px ? 180px : 128px;
-height: 22px;
-border-radius: Theme.radius-sm;
-background: Theme.bg-root;
-border-width: 1px;
-border-color: file-search.has-focus ? Theme.accent : Theme.border-subtle;
-file-search := TextInput {
-x: 24px;
-width: parent.width - (root.search-mode || self.text != "" ? 48px : 30px);
-height: parent.height;
-text: root.search-query;
-color: Theme.text-primary;
-font-family: Theme.ui-font-family;
-font-size: Theme.fs-sm;
-vertical-alignment: center;
-single-line: true;
-changed has-focus => { root.toolbar-tip = self.has-focus ? @tr("输入关键词后按 Enter 搜索；点 X 可退出搜索结果") : ""; }
-edited => { root.pending-local-search = self.text; root.local-search-pending = true; }
-accepted => {
-root.local-search-pending = false;
-if (!root.search-mode) { root.search-restore-path = root.current-path; }
-root.search-mode = true;
-root.search-folder(root.tree-scope != "" ? root.tree-scope : root.current-path, self.text);
-}
-}
-Text { x: 6px; width: 16px; height: parent.height; text: "\u{E8B6}"; font-family: "Material Icons"; color: Theme.text-muted; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
-if file-search.text == "" : Text {
-x: 24px; width: parent.width - 30px; height: parent.height;
-text: root.tree-scope == "/" ? @tr("全局搜索") : (root.tree-scope != "" ? @tr("已选目录搜索") : @tr("目录搜索"));
-color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center;
-}
-if root.search-mode || file-search.text != "" : Rectangle {
-x: parent.width - 22px; y: 2px; width: 18px; height: 18px; border-radius: 9px;
-background: clear-search-ta.has-hover ? Theme.bg-hover : transparent;
-clear-search-ta := TouchArea {
-width: parent.width; height: parent.height; mouse-cursor: pointer;
-changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("清空搜索并取消目录勾选") : ""; }
-clicked => {
-if (root.search-running) { root.cancel-search(); }
-file-search.text = ""; root.search-changed(""); root.clear-tree-scope(); root.tree-active-path = ""; root.search-mode = false;
-root.navigate(root.search-restore-path != "" ? root.search-restore-path : root.current-path); root.search-restore-path = "";
-}
-}
-Text { text: "×"; color: Theme.text-muted; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
-}
-}
-Rectangle {
-width: root.search-running ? 42px : 24px; height: 22px; border-radius: Theme.radius-sm;
-background: search-action-ta.has-hover ? (root.search-running ? Theme.danger.with-alpha(0.18) : Theme.bg-hover) : transparent;
-search-action-ta := TouchArea {
-mouse-cursor: pointer;
-changed has-hover => { root.toolbar-tip = self.has-hover ? (root.search-running ? @tr("停止正在运行的搜索") : @tr("搜索文件/文件夹（递归）")) : ""; }
-clicked => {
-if (root.search-running) { root.cancel-search(); root.toast(@tr("正在停止搜索...")); }
-else { if (!root.search-mode) { root.search-restore-path = root.current-path; } root.search-mode = true; root.search-folder(root.tree-scope != "" ? root.tree-scope : root.current-path, file-search.text); }
-}
-}
-Text { text: root.search-running ? @tr("停止") : "\u{F02F}"; font-family: root.search-running ? Theme.ui-font-family : "Material Icons"; color: root.search-running ? Theme.danger : (root.tree-scope != "" ? Theme.accent : Theme.text-secondary); font-size: root.search-running ? Theme.fs-xs : Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
-}
-Rectangle {
-width: 24px; height: 22px; border-radius: Theme.radius-sm; background: oplog-ta.has-hover ? Theme.bg-hover : transparent;
-oplog-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("打开本地操作日志") : ""; } clicked => { root.open-operation-log(); } }
-Text { text: "\u{E889}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
-}
-Rectangle {
-width: 24px; height: 22px; border-radius: Theme.radius-sm; background: copy-ta.has-hover ? Theme.bg-hover : transparent;
-copy-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("复制当前路径") : ""; } clicked => { path-input.select-all(); path-input.copy(); path-input.clear-selection(); root.toast(@tr("已复制路径")); } }
-Text { text: "\u{E14D}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
-}
-Rectangle {
-width: 24px; height: 22px; border-radius: Theme.radius-sm; background: pj-ta.has-hover ? Theme.bg-hover : transparent;
-pj-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("粘贴路径并跳转") : ""; } clicked => { path-input.select-all(); path-input.paste(); root.navigate(path-input.text); } }
-Text { text: "\u{E14F}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
-}
-up-btn := Rectangle {
-width: 24px; height: 22px; border-radius: Theme.radius-sm; background: up-ta.has-hover ? Theme.bg-hover : transparent;
-up-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("返回上一级目录") : ""; } clicked => { root.navigate(".."); } }
-Text { text: "↑"; color: Theme.text-secondary; font-size: Theme.fs-md; horizontal-alignment: center; vertical-alignment: center; }
-}
-ul-btn := Rectangle {
-width: 52px; height: 22px; border-radius: Theme.radius-sm; background: ul-ta.has-hover ? Theme.accent-hover : Theme.accent;
-ul-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("上传文件或文件夹") : ""; } clicked => { ul-menu.show(); } }
-Text { text: @tr("Upload"); color: #ffffff; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
-ul-menu := PopupWindow {
-x: 0; y: parent.height + 2px; width: 124px; height: 62px;
-Rectangle { background: Theme.bg-panel; border-radius: Theme.radius-sm; border-width: 1px; border-color: Theme.border-strong; drop-shadow-blur: 12px; drop-shadow-color: #00000060;
-VerticalLayout { padding: 4px; spacing: 1px;
-SftpMenuItem { label: @tr("Upload file"); clicked => { root.upload-clicked(root.current-path, false); } }
-SftpMenuItem { label: @tr("Upload folder"); clicked => { root.upload-clicked(root.current-path, true); } }
-}
-}
-}
-}
-if root.selected-count > 0 : Rectangle {
-width: 168px; height: 24px; border-radius: Theme.radius-sm; background: Theme.accent.with-alpha(0.12);
-HorizontalLayout { padding-left: 8px; padding-right: 6px; spacing: 6px;
-Text { text: "✓ " + root.selected-count + @tr(" 项"); color: Theme.accent; font-size: Theme.fs-xs; vertical-alignment: center; }
-Rectangle { width: 1px; background: Theme.border-subtle; }
-Rectangle { width: 48px; height: parent.height; cp-sel-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("复制已勾选项目的完整路径") : ""; } clicked => { root.copy-selected-paths(); } } Text { text: @tr("复制"); color: Theme.text-primary; font-size: Theme.fs-xs; vertical-alignment: center; horizontal-alignment: center; } }
-Rectangle { width: 36px; height: parent.height; dl-sel-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("下载已勾选文件") : ""; } clicked => { root.download-selected(); } } Text { text: @tr("下载"); color: Theme.text-primary; font-size: Theme.fs-xs; vertical-alignment: center; horizontal-alignment: center; } }
-Rectangle { width: 36px; height: parent.height; clr-sel-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("清除所有勾选") : ""; } clicked => { root.clear-selected(); } } Text { text: @tr("清除"); color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; horizontal-alignment: center; } }
-}
-}
-Rectangle { width: 24px; height: 22px; border-radius: Theme.radius-sm; background: ref-ta.has-hover ? Theme.bg-hover : transparent; ref-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("刷新当前目录") : ""; } clicked => { root.toast(@tr("正在刷新当前目录...")); root.refresh(root.current-path); } } Text { text: "\u{E5D5}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; } }
-Rectangle { width: 24px; height: 22px; border-radius: Theme.radius-sm; background: min-ta.has-hover ? Theme.bg-hover : transparent; min-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("折叠/展开文件面板") : ""; } clicked => { root.toggle-collapsed(); } } Text { text: root.collapsed ? "\u{E5CE}" : "\u{E5CF}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: Theme.fs-md; horizontal-alignment: center; vertical-alignment: center; } }
-}
-}
-Rectangle {
-height: 28px;
-background: Theme.bg-panel-alt;
-HorizontalLayout {
-padding-left: 8px; padding-right: 8px; spacing: 3px;
-if root.qa-show-root : QuickAccessButton { label: @tr("根目录"); path: "/"; editing: false; tooltip: "/"; hover-tip(t) => { root.toolbar-tip = t; } clicked => { root.navigate("/"); } remove => { } }
-if root.qa1-path != "" && root.qa1-group == "" : QuickAccessButton { label: root.qa1-label; path: root.qa1-path; tooltip: root.qa1-path; hover-tip(t) => { root.toolbar-tip = t; } clicked => { root.navigate(root.qa1-path); } remove => { } }
-if root.qa1-path != "" && root.qa1-group != "" : QuickGroupButton {
-group-name: root.qa1-group; p1: root.qa1-path; l1: root.qa1-label; g1: root.qa1-group; p2: root.qa2-path; l2: root.qa2-label; g2: root.qa2-group; p3: root.qa3-path; l3: root.qa3-label; g3: root.qa3-group; p4: root.qa4-path; l4: root.qa4-label; g4: root.qa4-group; p5: root.qa5-path; l5: root.qa5-label; g5: root.qa5-group;
-hover-tip(t) => { root.toolbar-tip = t; } navigate(path) => { root.navigate(path); }
-}
-if root.qa2-path != "" && root.qa2-group == "" : QuickAccessButton { label: root.qa2-label; path: root.qa2-path; tooltip: root.qa2-path; hover-tip(t) => { root.toolbar-tip = t; } clicked => { root.navigate(root.qa2-path); } remove => { } }
-if root.qa2-path != "" && root.qa2-group != "" && !(root.qa1-path != "" && root.qa1-group == root.qa2-group) : QuickGroupButton {
-group-name: root.qa2-group; p1: root.qa1-path; l1: root.qa1-label; g1: root.qa1-group; p2: root.qa2-path; l2: root.qa2-label; g2: root.qa2-group; p3: root.qa3-path; l3: root.qa3-label; g3: root.qa3-group; p4: root.qa4-path; l4: root.qa4-label; g4: root.qa4-group; p5: root.qa5-path; l5: root.qa5-label; g5: root.qa5-group;
-hover-tip(t) => { root.toolbar-tip = t; } navigate(path) => { root.navigate(path); }
-}
-if root.qa3-path != "" && root.qa3-group == "" : QuickAccessButton { label: root.qa3-label; path: root.qa3-path; tooltip: root.qa3-path; hover-tip(t) => { root.toolbar-tip = t; } clicked => { root.navigate(root.qa3-path); } remove => { } }
-if root.qa3-path != "" && root.qa3-group != "" && !(root.qa1-path != "" && root.qa1-group == root.qa3-group) && !(root.qa2-path != "" && root.qa2-group == root.qa3-group) : QuickGroupButton {
-group-name: root.qa3-group; p1: root.qa1-path; l1: root.qa1-label; g1: root.qa1-group; p2: root.qa2-path; l2: root.qa2-label; g2: root.qa2-group; p3: root.qa3-path; l3: root.qa3-label; g3: root.qa3-group; p4: root.qa4-path; l4: root.qa4-label; g4: root.qa4-group; p5: root.qa5-path; l5: root.qa5-label; g5: root.qa5-group;
-hover-tip(t) => { root.toolbar-tip = t; } navigate(path) => { root.navigate(path); }
-}
-if root.qa4-path != "" && root.qa4-group == "" : QuickAccessButton { label: root.qa4-label; path: root.qa4-path; tooltip: root.qa4-path; hover-tip(t) => { root.toolbar-tip = t; } clicked => { root.navigate(root.qa4-path); } remove => { } }
-if root.qa4-path != "" && root.qa4-group != "" && !(root.qa1-path != "" && root.qa1-group == root.qa4-group) && !(root.qa2-path != "" && root.qa2-group == root.qa4-group) && !(root.qa3-path != "" && root.qa3-group == root.qa4-group) : QuickGroupButton {
-group-name: root.qa4-group; p1: root.qa1-path; l1: root.qa1-label; g1: root.qa1-group; p2: root.qa2-path; l2: root.qa2-label; g2: root.qa2-group; p3: root.qa3-path; l3: root.qa3-label; g3: root.qa3-group; p4: root.qa4-path; l4: root.qa4-label; g4: root.qa4-group; p5: root.qa5-path; l5: root.qa5-label; g5: root.qa5-group;
-hover-tip(t) => { root.toolbar-tip = t; } navigate(path) => { root.navigate(path); }
-}
-if root.qa5-path != "" && root.qa5-group == "" : QuickAccessButton { label: root.qa5-label; path: root.qa5-path; tooltip: root.qa5-path; hover-tip(t) => { root.toolbar-tip = t; } clicked => { root.navigate(root.qa5-path); } remove => { } }
-if root.qa5-path != "" && root.qa5-group != "" && !(root.qa1-path != "" && root.qa1-group == root.qa5-group) && !(root.qa2-path != "" && root.qa2-group == root.qa5-group) && !(root.qa3-path != "" && root.qa3-group == root.qa5-group) && !(root.qa4-path != "" && root.qa4-group == root.qa5-group) : QuickGroupButton {
-group-name: root.qa5-group; p1: root.qa1-path; l1: root.qa1-label; g1: root.qa1-group; p2: root.qa2-path; l2: root.qa2-label; g2: root.qa2-group; p3: root.qa3-path; l3: root.qa3-label; g3: root.qa3-group; p4: root.qa4-path; l4: root.qa4-label; g4: root.qa4-group; p5: root.qa5-path; l5: root.qa5-label; g5: root.qa5-group;
-hover-tip(t) => { root.toolbar-tip = t; } navigate(path) => { root.navigate(path); }
-}
-Rectangle {
-width: 22px; height: 22px; border-radius: Theme.radius-sm; background: qa-manage-ta.has-hover ? Theme.bg-hover : transparent;
-qa-manage-ta := TouchArea {
-mouse-cursor: pointer;
-changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("管理快捷目录：添加、编辑、分组或删除") : ""; }
-clicked => {
-root.quick-edit-mode = true; root.qa-edit-index = -1;
-root.qa-manual-path = root.current-path; root.qa-manual-label = ""; root.qa-manual-group = "";
-root.qa-popup-offset-x = 0px; root.qa-popup-offset-y = 0px; qa-manager.show();
-}
-}
-Text { text: "\u{E8B8}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
-qa-manager := PopupWindow {
-x: root.absolute-position.x - qa-manage-ta.absolute-position.x + (root.width - root.qa-popup-width) / 2 + root.qa-popup-offset-x;
-y: root.absolute-position.y - qa-manage-ta.absolute-position.y + (root.height - root.qa-popup-height) / 2 + root.qa-popup-offset-y;
-width: root.qa-popup-width; height: root.qa-popup-height; close-policy: no-auto-close;
-Rectangle {
-background: Theme.bg-panel; border-width: 1px; border-color: Theme.border-strong; border-radius: Theme.radius-sm;
-drop-shadow-blur: 16px; drop-shadow-color: #00000065;
-VerticalLayout {
-padding: 10px; spacing: 6px;
-Rectangle {
-height: 24px;
-title-drag := TouchArea {
-width: parent.width - 62px; height: parent.height; mouse-cursor: move;
-pointer-event(ev) => {
-if (ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left) {
-root.qa-popup-dragging = true; root.qa-popup-drag-start-x = self.absolute-position.x + self.mouse-x; root.qa-popup-drag-start-y = self.absolute-position.y + self.mouse-y; root.qa-popup-drag-base-x = root.qa-popup-offset-x; root.qa-popup-drag-base-y = root.qa-popup-offset-y;
-}
-if (ev.kind == PointerEventKind.up || ev.kind == PointerEventKind.cancel) { root.qa-popup-dragging = false; }
-}
-moved => { if (root.qa-popup-dragging && self.pressed) { root.qa-popup-offset-x = root.qa-popup-drag-base-x + self.absolute-position.x + self.mouse-x - root.qa-popup-drag-start-x; root.qa-popup-offset-y = root.qa-popup-drag-base-y + self.absolute-position.y + self.mouse-y - root.qa-popup-drag-start-y; } }
-}
-Text { x: 0px; width: parent.width - 62px; height: parent.height; text: root.qa-edit-index >= 0 ? @tr("编辑快捷目录") : @tr("管理快捷目录"); color: Theme.text-primary; font-size: Theme.fs-xs; font-weight: 600; vertical-alignment: center; }
-Rectangle { x: parent.width - 54px; width: 24px; height: 24px; border-radius: 12px; background: qa-info-ta.has-hover ? Theme.bg-hover : transparent;
-qa-info-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("分组会在外部显示为可展开入口，备注是组内收藏名称") : ""; } }
-Text { text: "\u{E88E}"; font-family: "Material Icons"; color: Theme.text-muted; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
-}
-Rectangle { x: parent.width - 26px; width: 24px; height: 24px; border-radius: 12px; background: qa-close-ta.has-hover ? Theme.bg-hover : transparent;
-qa-close-ta := TouchArea { mouse-cursor: pointer; clicked => { root.quick-edit-mode = false; root.qa-popup-dragging = false; root.qa-edit-index = -1; qa-manager.close(); } }
-Text { text: "\u{E5CD}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: 14px; horizontal-alignment: center; vertical-alignment: center; }
-}
-}
-HorizontalLayout { height: 30px; spacing: 6px;
-Text { width: 54px; text: @tr("目录路径"); color: Theme.text-secondary; font-size: Theme.fs-xs; vertical-alignment: center; }
-Rectangle { horizontal-stretch: 1; border-radius: Theme.radius-sm; border-width: 1px; border-color: qa-path-input.has-focus ? Theme.accent : Theme.border-subtle; background: Theme.bg-root;
-qa-path-input := TextInput { x: 9px; width: parent.width - 18px; height: parent.height; text <=> root.qa-manual-path; single-line: true; font-size: Theme.fs-sm; color: Theme.text-primary; vertical-alignment: center; }
-}
-}
-HorizontalLayout { height: 30px; spacing: 6px;
-Text { width: 36px; text: @tr("备注"); color: Theme.text-secondary; font-size: Theme.fs-xs; vertical-alignment: center; }
-Rectangle { horizontal-stretch: 1; min-width: 140px; border-radius: Theme.radius-sm; border-width: 1px; border-color: qa-label-input.has-focus ? Theme.accent : Theme.border-subtle; background: Theme.bg-root;
-qa-label-input := TextInput { x: 9px; width: parent.width - 18px; height: parent.height; text <=> root.qa-manual-label; single-line: true; font-size: Theme.fs-sm; color: Theme.text-primary; vertical-alignment: center; }
-}
-Text { width: 36px; text: @tr("分组"); color: Theme.text-secondary; font-size: Theme.fs-xs; vertical-alignment: center; }
-Rectangle { horizontal-stretch: 1; min-width: 140px; border-radius: Theme.radius-sm; border-width: 1px; border-color: qa-group-input.has-focus ? Theme.accent : Theme.border-subtle; background: Theme.bg-root;
-qa-group-input := TextInput { x: 9px; width: parent.width - 18px; height: parent.height; text <=> root.qa-manual-group; single-line: true; font-size: Theme.fs-sm; color: Theme.text-primary; vertical-alignment: center; }
-}
-if root.qa-edit-index >= 0 : Rectangle { width: 54px; border-radius: Theme.radius-sm; background: cancel-edit-ta.has-hover ? Theme.bg-hover : Theme.bg-elevated;
-cancel-edit-ta := TouchArea { mouse-cursor: pointer; clicked => { root.qa-edit-index = -1; root.qa-manual-path = root.current-path; root.qa-manual-label = ""; root.qa-manual-group = ""; } }
-Text { text: @tr("取消"); color: Theme.text-secondary; font-size: Theme.fs-xs; horizontal-alignment: center; vertical-alignment: center; }
-}
-Rectangle { width: 68px; border-radius: Theme.radius-sm; background: save-qa-ta.has-hover ? Theme.accent.with-alpha(0.86) : Theme.accent;
-save-qa-ta := TouchArea { mouse-cursor: pointer; clicked => {
-if (root.qa-manual-path == "") { root.toast(@tr("请输入目录路径")); }
-else if ((root.qa-edit-index != 0 && root.qa-manual-path == root.qa1-path) || (root.qa-edit-index != 1 && root.qa-manual-path == root.qa2-path) || (root.qa-edit-index != 2 && root.qa-manual-path == root.qa3-path) || (root.qa-edit-index != 3 && root.qa-manual-path == root.qa4-path) || (root.qa-edit-index != 4 && root.qa-manual-path == root.qa5-path)) { root.toast(@tr("快捷目录已存在")); }
-else if (root.qa-edit-index < 0 && root.qa1-path != "" && root.qa2-path != "" && root.qa3-path != "" && root.qa4-path != "" && root.qa5-path != "") { root.toast(@tr("最多只能添加 5 个自定义快捷目录")); }
-else {
-if (root.qa-edit-index == 0 || (root.qa-edit-index < 0 && root.qa1-path == "")) { root.qa1-path = root.qa-manual-path; root.qa1-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.qa1-group = root.qa-manual-group; root.quick-dir-changed(0, root.qa1-label, root.qa1-group, root.qa1-path); }
-else if (root.qa-edit-index == 1 || (root.qa-edit-index < 0 && root.qa2-path == "")) { root.qa2-path = root.qa-manual-path; root.qa2-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.qa2-group = root.qa-manual-group; root.quick-dir-changed(1, root.qa2-label, root.qa2-group, root.qa2-path); }
-else if (root.qa-edit-index == 2 || (root.qa-edit-index < 0 && root.qa3-path == "")) { root.qa3-path = root.qa-manual-path; root.qa3-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.qa3-group = root.qa-manual-group; root.quick-dir-changed(2, root.qa3-label, root.qa3-group, root.qa3-path); }
-else if (root.qa-edit-index == 3 || (root.qa-edit-index < 0 && root.qa4-path == "")) { root.qa4-path = root.qa-manual-path; root.qa4-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.qa4-group = root.qa-manual-group; root.quick-dir-changed(3, root.qa4-label, root.qa4-group, root.qa4-path); }
-else if (root.qa-edit-index == 4 || (root.qa-edit-index < 0 && root.qa5-path == "")) { root.qa5-path = root.qa-manual-path; root.qa5-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.qa5-group = root.qa-manual-group; root.quick-dir-changed(4, root.qa5-label, root.qa5-group, root.qa5-path); }
-root.toast(root.qa-edit-index >= 0 ? @tr("已保存快捷目录") : @tr("已添加快捷目录")); root.qa-edit-index = -1; root.qa-manual-path = root.current-path; root.qa-manual-label = ""; root.qa-manual-group = "";
-}
-} }
-Text { text: root.qa-edit-index >= 0 ? @tr("保存") : @tr("添加"); color: #ffffff; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
-}
-}
-Text { height: 16px; text: @tr("已有快捷目录（点击一行或铅笔编辑，红色按钮删除）"); color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; }
-Rectangle { vertical-stretch: 1; clip: true; border-radius: Theme.radius-sm; border-width: 1px; border-color: Theme.border-subtle; background: Theme.bg-root;
-ScrollView { width: parent.width; height: parent.height; viewport-width: self.visible-width; viewport-height: max(self.visible-height, manage-list.preferred-height);
-manage-list := VerticalLayout { padding: 6px; spacing: 3px;
-if root.qa-show-root : QuickDirManageRow { item-index: -1; label: @tr("根目录"); path: "/"; can-edit: false; can-delete: true; remove(i) => { root.qa-show-root = false; root.toast(@tr("已删除快捷目录")); } edit(i) => { } }
-if root.qa1-path != "" && root.qa1-group != "" : QuickDirSection { group-name: root.qa1-group; p1: root.qa1-path; l1: root.qa1-label; g1: root.qa1-group; p2: root.qa2-path; l2: root.qa2-label; g2: root.qa2-group; p3: root.qa3-path; l3: root.qa3-label; g3: root.qa3-group; p4: root.qa4-path; l4: root.qa4-label; g4: root.qa4-group; p5: root.qa5-path; l5: root.qa5-label; g5: root.qa5-group; edit(i) => { root.qa-edit-index = i; if (i == 0) { root.qa-manual-path=root.qa1-path; root.qa-manual-label=root.qa1-label; root.qa-manual-group=root.qa1-group; } else if (i == 1) { root.qa-manual-path=root.qa2-path; root.qa-manual-label=root.qa2-label; root.qa-manual-group=root.qa2-group; } else if (i == 2) { root.qa-manual-path=root.qa3-path; root.qa-manual-label=root.qa3-label; root.qa-manual-group=root.qa3-group; } else if (i == 3) { root.qa-manual-path=root.qa4-path; root.qa-manual-label=root.qa4-label; root.qa-manual-group=root.qa4-group; } else { root.qa-manual-path=root.qa5-path; root.qa-manual-label=root.qa5-label; root.qa-manual-group=root.qa5-group; } } remove(i) => { if (i == 0) { root.qa1-path=""; root.qa1-label=""; root.qa1-group=""; } else if (i == 1) { root.qa2-path=""; root.qa2-label=""; root.qa2-group=""; } else if (i == 2) { root.qa3-path=""; root.qa3-label=""; root.qa3-group=""; } else if (i == 3) { root.qa4-path=""; root.qa4-label=""; root.qa4-group=""; } else { root.qa5-path=""; root.qa5-label=""; root.qa5-group=""; } root.quick-dir-changed(i,"","",""); if (root.qa-edit-index == i) { root.qa-edit-index = -1; root.qa-manual-path = root.current-path; root.qa-manual-label = ""; root.qa-manual-group = ""; } } }
-if root.qa2-path != "" && root.qa2-group != "" && !(root.qa1-path != "" && root.qa1-group == root.qa2-group) : QuickDirSection { group-name: root.qa2-group; p1: root.qa1-path; l1: root.qa1-label; g1: root.qa1-group; p2: root.qa2-path; l2: root.qa2-label; g2: root.qa2-group; p3: root.qa3-path; l3: root.qa3-label; g3: root.qa3-group; p4: root.qa4-path; l4: root.qa4-label; g4: root.qa4-group; p5: root.qa5-path; l5: root.qa5-label; g5: root.qa5-group; edit(i) => { root.qa-edit-index=i; if (i==0){root.qa-manual-path=root.qa1-path;root.qa-manual-label=root.qa1-label;root.qa-manual-group=root.qa1-group;} else if(i==1){root.qa-manual-path=root.qa2-path;root.qa-manual-label=root.qa2-label;root.qa-manual-group=root.qa2-group;} else if(i==2){root.qa-manual-path=root.qa3-path;root.qa-manual-label=root.qa3-label;root.qa-manual-group=root.qa3-group;} else if(i==3){root.qa-manual-path=root.qa4-path;root.qa-manual-label=root.qa4-label;root.qa-manual-group=root.qa4-group;} else{root.qa-manual-path=root.qa5-path;root.qa-manual-label=root.qa5-label;root.qa-manual-group=root.qa5-group;} } remove(i)=>{ if(i==0){root.qa1-path="";root.qa1-label="";root.qa1-group="";}else if(i==1){root.qa2-path="";root.qa2-label="";root.qa2-group="";}else if(i==2){root.qa3-path="";root.qa3-label="";root.qa3-group="";}else if(i==3){root.qa4-path="";root.qa4-label="";root.qa4-group="";}else{root.qa5-path="";root.qa5-label="";root.qa5-group="";}root.quick-dir-changed(i,"","",""); if (root.qa-edit-index == i) { root.qa-edit-index = -1; root.qa-manual-path = root.current-path; root.qa-manual-label = ""; root.qa-manual-group = ""; }} }
-if root.qa3-path != "" && root.qa3-group != "" && !(root.qa1-path != "" && root.qa1-group == root.qa3-group) && !(root.qa2-path != "" && root.qa2-group == root.qa3-group) : QuickDirSection { group-name: root.qa3-group; p1: root.qa1-path; l1: root.qa1-label; g1: root.qa1-group; p2: root.qa2-path; l2: root.qa2-label; g2: root.qa2-group; p3: root.qa3-path; l3: root.qa3-label; g3: root.qa3-group; p4: root.qa4-path; l4: root.qa4-label; g4: root.qa4-group; p5: root.qa5-path; l5: root.qa5-label; g5: root.qa5-group; edit(i)=>{root.qa-edit-index=i;if(i==0){root.qa-manual-path=root.qa1-path;root.qa-manual-label=root.qa1-label;root.qa-manual-group=root.qa1-group;}else if(i==1){root.qa-manual-path=root.qa2-path;root.qa-manual-label=root.qa2-label;root.qa-manual-group=root.qa2-group;}else if(i==2){root.qa-manual-path=root.qa3-path;root.qa-manual-label=root.qa3-label;root.qa-manual-group=root.qa3-group;}else if(i==3){root.qa-manual-path=root.qa4-path;root.qa-manual-label=root.qa4-label;root.qa-manual-group=root.qa4-group;}else{root.qa-manual-path=root.qa5-path;root.qa-manual-label=root.qa5-label;root.qa-manual-group=root.qa5-group;}} remove(i)=>{if(i==0){root.qa1-path="";root.qa1-label="";root.qa1-group="";}else if(i==1){root.qa2-path="";root.qa2-label="";root.qa2-group="";}else if(i==2){root.qa3-path="";root.qa3-label="";root.qa3-group="";}else if(i==3){root.qa4-path="";root.qa4-label="";root.qa4-group="";}else{root.qa5-path="";root.qa5-label="";root.qa5-group="";}root.quick-dir-changed(i,"","",""); if (root.qa-edit-index == i) { root.qa-edit-index = -1; root.qa-manual-path = root.current-path; root.qa-manual-label = ""; root.qa-manual-group = ""; }} }
-if root.qa4-path != "" && root.qa4-group != "" && !(root.qa1-path != "" && root.qa1-group == root.qa4-group) && !(root.qa2-path != "" && root.qa2-group == root.qa4-group) && !(root.qa3-path != "" && root.qa3-group == root.qa4-group) : QuickDirSection { group-name: root.qa4-group; p1: root.qa1-path; l1: root.qa1-label; g1: root.qa1-group; p2: root.qa2-path; l2: root.qa2-label; g2: root.qa2-group; p3: root.qa3-path; l3: root.qa3-label; g3: root.qa3-group; p4: root.qa4-path; l4: root.qa4-label; g4: root.qa4-group; p5: root.qa5-path; l5: root.qa5-label; g5: root.qa5-group; edit(i)=>{root.qa-edit-index=i;if(i==0){root.qa-manual-path=root.qa1-path;root.qa-manual-label=root.qa1-label;root.qa-manual-group=root.qa1-group;}else if(i==1){root.qa-manual-path=root.qa2-path;root.qa-manual-label=root.qa2-label;root.qa-manual-group=root.qa2-group;}else if(i==2){root.qa-manual-path=root.qa3-path;root.qa-manual-label=root.qa3-label;root.qa-manual-group=root.qa3-group;}else if(i==3){root.qa-manual-path=root.qa4-path;root.qa-manual-label=root.qa4-label;root.qa-manual-group=root.qa4-group;}else{root.qa-manual-path=root.qa5-path;root.qa-manual-label=root.qa5-label;root.qa-manual-group=root.qa5-group;}} remove(i)=>{if(i==0){root.qa1-path="";root.qa1-label="";root.qa1-group="";}else if(i==1){root.qa2-path="";root.qa2-label="";root.qa2-group="";}else if(i==2){root.qa3-path="";root.qa3-label="";root.qa3-group="";}else if(i==3){root.qa4-path="";root.qa4-label="";root.qa4-group="";}else{root.qa5-path="";root.qa5-label="";root.qa5-group="";}root.quick-dir-changed(i,"","",""); if (root.qa-edit-index == i) { root.qa-edit-index = -1; root.qa-manual-path = root.current-path; root.qa-manual-label = ""; root.qa-manual-group = ""; }} }
-if root.qa5-path != "" && root.qa5-group != "" && !(root.qa1-path != "" && root.qa1-group == root.qa5-group) && !(root.qa2-path != "" && root.qa2-group == root.qa5-group) && !(root.qa3-path != "" && root.qa3-group == root.qa5-group) && !(root.qa4-path != "" && root.qa4-group == root.qa5-group) : QuickDirSection { group-name: root.qa5-group; p1: root.qa1-path; l1: root.qa1-label; g1: root.qa1-group; p2: root.qa2-path; l2: root.qa2-label; g2: root.qa2-group; p3: root.qa3-path; l3: root.qa3-label; g3: root.qa3-group; p4: root.qa4-path; l4: root.qa4-label; g4: root.qa4-group; p5: root.qa5-path; l5: root.qa5-label; g5: root.qa5-group; edit(i)=>{root.qa-edit-index=i;if(i==0){root.qa-manual-path=root.qa1-path;root.qa-manual-label=root.qa1-label;root.qa-manual-group=root.qa1-group;}else if(i==1){root.qa-manual-path=root.qa2-path;root.qa-manual-label=root.qa2-label;root.qa-manual-group=root.qa2-group;}else if(i==2){root.qa-manual-path=root.qa3-path;root.qa-manual-label=root.qa3-label;root.qa-manual-group=root.qa3-group;}else if(i==3){root.qa-manual-path=root.qa4-path;root.qa-manual-label=root.qa4-label;root.qa-manual-group=root.qa4-group;}else{root.qa-manual-path=root.qa5-path;root.qa-manual-label=root.qa5-label;root.qa-manual-group=root.qa5-group;}} remove(i)=>{if(i==0){root.qa1-path="";root.qa1-label="";root.qa1-group="";}else if(i==1){root.qa2-path="";root.qa2-label="";root.qa2-group="";}else if(i==2){root.qa3-path="";root.qa3-label="";root.qa3-group="";}else if(i==3){root.qa4-path="";root.qa4-label="";root.qa4-group="";}else{root.qa5-path="";root.qa5-label="";root.qa5-group="";}root.quick-dir-changed(i,"","",""); if (root.qa-edit-index == i) { root.qa-edit-index = -1; root.qa-manual-path = root.current-path; root.qa-manual-label = ""; root.qa-manual-group = ""; }} }
-if (root.qa1-path != "" && root.qa1-group == "") || (root.qa2-path != "" && root.qa2-group == "") || (root.qa3-path != "" && root.qa3-group == "") || (root.qa4-path != "" && root.qa4-group == "") || (root.qa5-path != "" && root.qa5-group == "") : QuickDirSection { group-name: ""; p1: root.qa1-path; l1: root.qa1-label; g1: root.qa1-group; p2: root.qa2-path; l2: root.qa2-label; g2: root.qa2-group; p3: root.qa3-path; l3: root.qa3-label; g3: root.qa3-group; p4: root.qa4-path; l4: root.qa4-label; g4: root.qa4-group; p5: root.qa5-path; l5: root.qa5-label; g5: root.qa5-group; edit(i)=>{root.qa-edit-index=i;if(i==0){root.qa-manual-path=root.qa1-path;root.qa-manual-label=root.qa1-label;root.qa-manual-group=root.qa1-group;}else if(i==1){root.qa-manual-path=root.qa2-path;root.qa-manual-label=root.qa2-label;root.qa-manual-group=root.qa2-group;}else if(i==2){root.qa-manual-path=root.qa3-path;root.qa-manual-label=root.qa3-label;root.qa-manual-group=root.qa3-group;}else if(i==3){root.qa-manual-path=root.qa4-path;root.qa-manual-label=root.qa4-label;root.qa-manual-group=root.qa4-group;}else{root.qa-manual-path=root.qa5-path;root.qa-manual-label=root.qa5-label;root.qa-manual-group=root.qa5-group;}} remove(i)=>{if(i==0){root.qa1-path="";root.qa1-label="";root.qa1-group="";}else if(i==1){root.qa2-path="";root.qa2-label="";root.qa2-group="";}else if(i==2){root.qa3-path="";root.qa3-label="";root.qa3-group="";}else if(i==3){root.qa4-path="";root.qa4-label="";root.qa4-group="";}else{root.qa5-path="";root.qa5-label="";root.qa5-group="";}root.quick-dir-changed(i,"","",""); if (root.qa-edit-index == i) { root.qa-edit-index = -1; root.qa-manual-path = root.current-path; root.qa-manual-label = ""; root.qa-manual-group = ""; }} }
-}
-}
-}
-}
-}
-}
-}
-QuickAccessButton { width: 30px; label: "←"; path: "back"; editing: false; tooltip: @tr("返回上一次打开的目录"); hover-tip(t) => { root.toolbar-tip = t; } clicked => { root.navigate-back(); } remove => { } }
-QuickAccessButton { width: 30px; label: "↑"; path: ".."; editing: false; tooltip: @tr("返回上一级目录"); hover-tip(t) => { root.toolbar-tip = t; } clicked => { root.navigate(".."); } remove => { } }
-Rectangle { horizontal-stretch: 1; }
-Text { text: root.tree-scope == "/" ? @tr("搜索范围: 全局 /") : (root.tree-scope != "" ? @tr("搜索范围: ") + root.tree-scope : (root.search-mode ? @tr("搜索模式: 当前目录") : @tr("搜索范围: 当前目录"))); color: Theme.text-muted; font-size: 10px; vertical-alignment: center; overflow: elide; width: 280px; }
-}
-}
-HorizontalLayout {
-vertical-stretch: 1;
-spacing: 0;
-if root.show-tree : VerticalLayout {
-width: root.tree-width; opacity: root.search-mode ? 0.42 : 1.0; spacing: 0;
-Rectangle { height: 20px; background: Theme.bg-root; Text { x: 8px; text: @tr("目录导航"); color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; height: parent.height; } }
-Rectangle { height: 1px; background: Theme.border-subtle; }
-tree-area := Rectangle {
-vertical-stretch: 1; clip: true;
-ScrollView { width: parent.width; height: parent.height;
-tree-list := VerticalLayout { spacing: 0;
-for node[i] in root.tree-nodes : Rectangle {
-height: 24px;
-background: node-ta.has-hover ? Theme.bg-hover : (node.path == root.current-path ? #4a90e23c : (node.path == root.tree-active-path || (root.tree-scope == "/" && node.path == "/") ? #4a90e228 : (mod(i, 2) == 0 ? transparent : #ffffff08)));
-node-ta := TouchArea {
-width: parent.width; height: parent.height; mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? node.path : ""; }
-clicked => { if (node.path == "/") { root.tree-active-path = "/"; } else if (!root.search-mode) { root.tree-active-path = node.path; if (root.tree-scope == "/") { root.clear-tree-scope(); } root.navigate(node.path); } }
-double-clicked => { if (node.path == "/") { root.tree-active-path = "/"; if (root.tree-scope == "/" || root.search-mode || root.search-running) { if (root.search-running) { root.cancel-search(); } file-search.text = ""; root.search-changed(""); root.clear-tree-scope(); root.search-mode = false; root.navigate(root.search-restore-path != "" ? root.search-restore-path : root.current-path); root.search-restore-path = ""; } else { root.set-tree-scope("/"); file-search.focus(); } } else if (!root.search-mode) { root.tree-expand(node.path); } }
-pointer-event(ev) => { if (ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right) { root.tree-menu-target = node.path; root.tree-menu-x = self.absolute-position.x + self.mouse-x - tree-area.absolute-position.x; root.tree-menu-y = self.absolute-position.y + self.mouse-y - tree-area.absolute-position.y; tree-menu.show(); } }
-}
-if node.path == root.current-path || node.path == root.tree-active-path || (root.tree-scope == "/" && node.path == "/") : Rectangle { x: 0px; y: 3px; width: 3px; height: parent.height - 6px; border-radius: 2px; background: Theme.accent; }
-HorizontalLayout { spacing: 4px; padding-left: 4px + node.depth * 8px; padding-right: 4px; FileKindIcon { is-dir: true; kind: "dir"; expanded: node.expanded; hovered: node-ta.has-hover; } Text { text: node.path == "/" ? @tr("根目录") : node.name; color: (node.path == root.current-path || node.path == root.tree-active-path || (root.tree-scope == "/" && node.path == "/")) ? Theme.accent : Theme.text-primary; font-size: Theme.fs-xs; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; } }
-}
-}
-}
-tree-menu := PopupWindow {
-x: root.tree-menu-x; y: root.tree-menu-y; width: 156px; height: 230px;
-Rectangle { background: Theme.bg-panel; border-radius: Theme.radius-sm; border-width: 1px; border-color: Theme.border-strong; drop-shadow-blur: 10px; drop-shadow-color: #00000040;
-VerticalLayout { padding: 4px; spacing: 1px;
-SftpMenuItem { label: @tr("打开目录"); clicked => { root.search-mode = false; file-search.text = ""; root.search-changed(""); root.tree-active-path = root.tree-menu-target; if (root.tree-scope == "/") { root.clear-tree-scope(); } root.navigate(root.tree-menu-target); } }
-SftpMenuItem { label: @tr("加入/移出搜索范围"); clicked => { root.toggle-tree-scope(root.tree-menu-target); } }
-SftpMenuItem { label: @tr("在此搜索"); clicked => { root.tree-active-path = root.tree-menu-target; root.set-tree-scope(root.tree-menu-target); file-search.focus(); root.toast(@tr("已设置搜索范围")); } }
-SftpMenuItem { label: @tr("复制路径"); clicked => { root.copy-path(root.tree-menu-target); } }
-SftpMenuItem { label: @tr("权限"); enabled: root.tree-menu-target != ""; clicked => { root.chmod-request(root.tree-menu-target, root.tree-menu-target, 493); } }
-Rectangle { height: 1px; background: Theme.border-subtle; }
-SftpMenuItem { label: @tr("刷新此目录"); clicked => { root.toast(@tr("正在刷新此目录...")); root.refresh(root.tree-menu-target); } }
-SftpMenuItem { label: @tr("删除文件夹"); tint: #d86c6c; enabled: root.tree-menu-target != "/"; clicked => { root.delete(root.tree-menu-target); } }
-}
-}
-}
-}
-}
-if root.show-tree : Rectangle {
-width: 7px; background: transparent;
-Rectangle { x: 3px; width: 1px; height: parent.height; background: split-ta.has-hover || root.tree-resizing ? Theme.border-strong : Theme.border-subtle; }
-split-ta := TouchArea {
-width: parent.width; height: parent.height; mouse-cursor: ew-resize;
-pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { root.tree-resizing = true; root.tree-grab-x = self.absolute-position.x + self.mouse-x; root.tree-base-width = root.tree-width; } if (e.kind == PointerEventKind.up) { root.tree-resizing = false; } }
-moved => { if (root.tree-resizing) { root.tree-width = clamp(root.tree-base-width + (self.absolute-position.x + self.mouse-x - root.tree-grab-x), 120px, min(420px, max(120px, root.width - 260px))); } }
-}
-}
-VerticalLayout {
-horizontal-stretch: 1; spacing: 0;
-Rectangle {
-height: 20px; background: Theme.bg-root;
-HorizontalLayout { padding-left: 8px; padding-right: 8px; spacing: 8px;
-Rectangle { width: 16px; }
-if root.search-mode : Text { text: @tr("名称"); color: Theme.text-muted; font-size: Theme.fs-xs; width: 180px; vertical-alignment: center; }
-if !root.search-mode : Text { text: @tr("名称"); color: Theme.text-muted; font-size: Theme.fs-xs; horizontal-stretch: 1; vertical-alignment: center; }
-if root.search-mode : Text { text: @tr("位置"); color: Theme.text-muted; font-size: Theme.fs-xs; horizontal-stretch: 1; min-width: 180px; horizontal-alignment: left; vertical-alignment: center; }
-if root.show-size-col : Text { text: @tr("大小"); color: Theme.text-muted; font-size: Theme.fs-xs; width: 72px; horizontal-alignment: right; vertical-alignment: center; }
-if root.show-mode-col : Text { text: @tr("权限"); color: Theme.text-muted; font-size: Theme.fs-xs; width: 56px; horizontal-alignment: right; vertical-alignment: center; }
-if root.show-modified-col : Text { text: @tr("修改时间"); color: Theme.text-muted; font-size: Theme.fs-xs; width: 116px; horizontal-alignment: right; vertical-alignment: center; }
-}
-}
-Rectangle { height: 1px; background: Theme.border-subtle; }
-file-area := Rectangle {
-vertical-stretch: 1; clip: true;
-ScrollView { width: parent.width; height: parent.height; viewport-width: self.visible-width; viewport-height: max(self.visible-height, file-list.preferred-height);
-file-list := VerticalLayout { spacing: 0;
-if root.loading : Rectangle { height: 40px; Text { text: @tr("Loading..."); color: Theme.text-muted; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; } }
-if !root.loading && root.entries.length == 0 : Rectangle { height: 52px; VerticalLayout { spacing: 2px; Text { text: "📂"; color: Theme.text-muted; font-size: Theme.fs-md; horizontal-alignment: center; vertical-alignment: center; } Text { text: @tr("目录为空"); color: Theme.text-muted; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; } } }
-for entry[i] in root.entries : row := Rectangle {
-height: 24px;
-background: entry.selected ? #4a90e235 : (i == root.selected-row ? #4a90e240 : (row-ta.has-hover ? #4a90e225 : (mod(i, 2) == 0 ? transparent : #ffffff08)));
-row-ta := TouchArea {
-width: parent.width; height: parent.height; mouse-cursor: pointer;
-clicked => { root.selected-row = i; root.file-active-path = entry.full-path; }
-double-clicked => { root.file-active-path = entry.full-path; if (root.search-mode) { root.locate-result(entry.full-path, entry.is-dir); root.search-mode = false; root.search-restore-path = ""; file-search.text = ""; root.search-changed(""); } else if (entry.kind == "dead-link") { root.toast(@tr("死链接，无法打开")); } else if (entry.is-dir) { root.navigate(entry.full-path); } else { root.download(entry.full-path); } }
-pointer-event(ev) => { if (ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right) { root.selected-row = i; root.file-active-path = entry.full-path; root.menu-target = entry.full-path; root.menu-target-name = entry.name; root.menu-target-is-dir = entry.is-dir; root.menu-target-mode = entry.mode; root.menu-target-index = i; root.menu-x = self.absolute-position.x + self.mouse-x - file-area.absolute-position.x; root.menu-y = self.absolute-position.y + self.mouse-y - file-area.absolute-position.y; file-menu.show(); } }
-}
-HorizontalLayout { padding-left: 8px; padding-right: 8px; spacing: 8px;
-Rectangle { width: 13px; y: (parent.height - self.height) / 2; height: 13px; border-radius: 3px; border-width: 1px; border-color: entry.selected ? Theme.accent : Theme.border-strong; background: entry.selected ? Theme.accent : transparent;
-cb-ta := TouchArea { width: parent.width; height: parent.height; mouse-cursor: pointer; clicked => { root.selected-row = i; root.file-active-path = entry.full-path; root.toggle-select(i); } }
-if entry.selected : Text { text: "\u{E5CA}"; font-family: "Material Icons"; color: #ffffff; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
-}
-FileKindIcon { is-dir: entry.is-dir; kind: entry.kind; }
-if root.search-mode : Text { text: entry.name; color: entry.kind == "dead-link" ? Theme.text-muted : (entry.is-dir ? Theme.accent : Theme.text-primary); font-size: Theme.fs-sm; width: 180px; overflow: elide; vertical-alignment: center; }
-if !root.search-mode : Text { text: entry.name; color: entry.kind == "dead-link" ? Theme.text-muted : (entry.is-dir ? Theme.accent : Theme.text-primary); font-size: Theme.fs-sm; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
-if root.search-mode : Text { text: entry.full-path; color: Theme.text-muted; font-size: Theme.fs-xs; horizontal-stretch: 1; min-width: 180px; overflow: elide; vertical-alignment: center; }
-if root.show-size-col : Text { text: entry.kind == "dead-link" ? @tr("死链接") : (entry.kind == "symlink-dir" ? @tr("链接目录") : (entry.kind == "symlink-file" ? @tr("链接文件") : (entry.is-dir ? @tr("文件夹") : entry.size))); color: entry.kind == "dead-link" ? Theme.text-muted : Theme.text-secondary; font-size: Theme.fs-xs; width: 72px; horizontal-alignment: right; vertical-alignment: center; }
-if root.show-mode-col : Text { text: entry.mode-text; color: Theme.text-muted; font-size: Theme.fs-xs; width: 56px; horizontal-alignment: right; vertical-alignment: center; }
-if root.show-modified-col : Text { text: entry.modified; color: Theme.text-muted; font-size: Theme.fs-xs; width: 116px; horizontal-alignment: right; vertical-alignment: center; }
-}
-}
-ws := Rectangle { vertical-stretch: 1; min-height: 24px;
-ws-ta := TouchArea { width: parent.width; height: parent.height; pointer-event(ev) => { if (ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right) { root.selected-row = -1; root.file-active-path = ""; root.menu-target = ""; root.menu-target-index = -1; root.menu-x = self.absolute-position.x + self.mouse-x - file-area.absolute-position.x; root.menu-y = self.absolute-position.y + self.mouse-y - file-area.absolute-position.y; file-menu.show(); } } }
-}
-}
-}
-file-menu := PopupWindow {
-x: root.menu-x; y: root.menu-y; width: 154px; height: 365px;
-Rectangle { background: Theme.bg-panel; border-radius: Theme.radius-sm; border-width: 1px; border-color: Theme.border-strong; drop-shadow-blur: 10px; drop-shadow-color: #00000040;
-VerticalLayout { padding: 4px; spacing: 1px;
-SftpMenuItem { label: @tr("在此搜索"); enabled: root.menu-target != "" && root.menu-target-is-dir; clicked => { root.tree-active-path = root.menu-target; root.set-tree-scope(root.menu-target); file-search.focus(); root.toast(@tr("已设置搜索范围")); } }
-Rectangle { height: 1px; background: Theme.border-subtle; }
-SftpMenuItem { label: @tr("下载"); enabled: root.menu-target != ""; clicked => { root.download(root.menu-target); } }
-SftpMenuItem { label: @tr("查看"); enabled: root.menu-target != "" && !root.menu-target-is-dir; clicked => { root.view(root.menu-target); } }
-SftpMenuItem { label: @tr("编辑"); enabled: root.menu-target != "" && !root.menu-target-is-dir; clicked => { root.edit(root.menu-target); } }
-SftpMenuItem { label: @tr("外部程序查看"); enabled: root.menu-target != "" && !root.menu-target-is-dir; clicked => { root.open-external(root.menu-target); } }
-SftpMenuItem { label: @tr("外部程序编辑"); enabled: root.menu-target != "" && !root.menu-target-is-dir; clicked => { root.edit-external(root.menu-target); } }
-SftpMenuItem { label: @tr("重命名"); enabled: root.menu-target != ""; clicked => { root.rename-request(root.menu-target, root.menu-target-name); } }
-SftpMenuItem { label: @tr("权限"); enabled: root.menu-target != ""; clicked => { root.chmod-request(root.menu-target, root.menu-target-name, root.menu-target-mode); } }
-SftpMenuItem { label: @tr("复制路径"); enabled: root.menu-target != ""; clicked => { root.copy-path(root.menu-target); } }
-SftpMenuItem { label: @tr("删除"); tint: #d86c6c; enabled: root.menu-target != ""; clicked => { root.delete(root.menu-target); } }
-Rectangle { height: 1px; background: Theme.border-subtle; }
-SftpMenuItem { label: @tr("新建文件夹"); clicked => { root.new-folder(root.current-path); } }
-SftpMenuItem { label: @tr("新建文件"); clicked => { root.new-file(root.current-path); } }
-SftpMenuItem { label: @tr("刷新当前目录"); clicked => { root.toast(@tr("正在刷新当前目录...")); root.refresh(root.current-path); } }
-}
-}
-}
-}
-}
-}
-Rectangle {
-height: 18px; background: Theme.bg-panel-alt;
-status-ta := TouchArea { width: parent.width; height: parent.height; mouse-cursor: pointer; clicked => { root.copy-status(status-text.text); } }
-status-text := Text { x: 8px; text: (root.search-mode ? @tr("搜索模式") + "  ·  " : "") + root.status + "  ·  当前目录: " + (root.current-path != "" ? root.current-path : "未打开") + (root.file-active-path != "" ? "  ·  右侧选中: " + root.file-active-path : "") + (root.tree-active-path != "" ? "  ·  左侧选中: " + root.tree-active-path : "") + (root.tree-scope != "" ? "  ·  搜索范围: " + (root.tree-scope == "/" ? "全局 /" : root.tree-scope) : "") + (root.selected-count > 0 ? "  ·  已勾选: " + root.selected-count + " 项" : ""); color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; height: parent.height; overflow: elide; width: parent.width - 16px; }
-}
-}
+    in property <string> current-path: "/";
+    in property <string> back-path: "";
+    in property <[SftpEntry]> entries;
+    in property <string> status: @tr("SFTP not connected");
+    in property <bool> loading: false;
+    in property <bool> search-running: false;
+    in property <[SftpTreeNode]> tree-nodes: [];
+    in property <bool> collapsed: false;
+    in property <string> search-query: "";
+    in property <string> tree-scope: "";
+    in property <bool> show-tree: true;
+    in property <bool> compact: false;
+    property <length> tree-width: 180px;
+    property <bool> tree-resizing: false;
+    property <length> tree-grab-x;
+    property <length> tree-base-width;
+    property <length> list-w: root.show-tree ? root.width - root.tree-width - 6px : root.width;
+    property <length> name-min: 180px;
+    property <bool> show-size-col: !root.search-mode && (root.show-tree || (root.list-w - 36px - 76px - 62px - 120px > root.name-min));
+    property <bool> show-mode-col: !root.search-mode && (root.show-tree || (root.list-w - 36px - 62px - 120px > root.name-min));
+    property <bool> show-modified-col: !root.search-mode && (root.show-tree || (root.list-w - 36px - 120px > root.name-min));
+    property <int> selected-row: -1;
+    in property <int> selected-count;
+    property <length> menu-x;
+    property <length> menu-y;
+    property <string> menu-target;
+    property <string> menu-target-name;
+    property <bool> menu-target-is-dir;
+    property <int> menu-target-mode;
+    property <int> menu-target-index: -1;
+    property <string> tree-active-path: "";
+    property <string> file-active-path: "";
+    property <length> tree-menu-x;
+    property <length> tree-menu-y;
+    property <string> tree-menu-target;
+    property <string> toolbar-tip: "";
+    property <bool> toolbar-tip-ready: false;
+    property <length> qa-popup-width: clamp(root.width - 48px, 500px, 560px);
+    property <length> qa-popup-height: 330px;
+    property <length> qa-popup-offset-x: 0px;
+    property <length> qa-popup-offset-y: 0px;
+    property <bool> qa-popup-dragging: false;
+    property <length> qa-popup-drag-start-x;
+    property <length> qa-popup-drag-start-y;
+    property <length> qa-popup-drag-base-x;
+    property <length> qa-popup-drag-base-y;
+    property <string> pending-local-search: "";
+    property <bool> local-search-pending: false;
+    property <bool> search-mode: false;
+    property <string> search-restore-path: "";
+    property <bool> quick-edit-mode: false;
+    property <string> qa-manual-path: "";
+    property <string> qa-manual-label: "";
+    property <string> qa-manual-group: "";
+    property <int> qa-edit-index: -1;
+    property <bool> qa-show-root: true;
+    property <bool> qa-show-home: false;
+    property <bool> qa-show-etc: false;
+    property <bool> qa-show-var: false;
+    property <bool> qa-show-tmp: false;
+    property <bool> qa-show-www: false;
+    property <bool> qa-show-over: false;
+    in-out property <string> qa1-path: ""; in-out property <string> qa1-label: ""; in-out property <string> qa1-group: "";
+    in-out property <string> qa2-path: ""; in-out property <string> qa2-label: ""; in-out property <string> qa2-group: "";
+    in-out property <string> qa3-path: ""; in-out property <string> qa3-label: ""; in-out property <string> qa3-group: "";
+    in-out property <string> qa4-path: ""; in-out property <string> qa4-label: ""; in-out property <string> qa4-group: "";
+    in-out property <string> qa5-path: ""; in-out property <string> qa5-label: ""; in-out property <string> qa5-group: "";
+
+    public function begin-quick-edit(index: int) {
+        root.qa-edit-index = index;
+        if (index == 0) { root.qa-manual-path = root.qa1-path; root.qa-manual-label = root.qa1-label; root.qa-manual-group = root.qa1-group; }
+        else if (index == 1) { root.qa-manual-path = root.qa2-path; root.qa-manual-label = root.qa2-label; root.qa-manual-group = root.qa2-group; }
+        else if (index == 2) { root.qa-manual-path = root.qa3-path; root.qa-manual-label = root.qa3-label; root.qa-manual-group = root.qa3-group; }
+        else if (index == 3) { root.qa-manual-path = root.qa4-path; root.qa-manual-label = root.qa4-label; root.qa-manual-group = root.qa4-group; }
+        else if (index == 4) { root.qa-manual-path = root.qa5-path; root.qa-manual-label = root.qa5-label; root.qa-manual-group = root.qa5-group; }
+    }
+
+    public function delete-quick-dir(index: int) {
+        if (index == 0) { root.qa1-path = ""; root.qa1-label = ""; root.qa1-group = ""; }
+        else if (index == 1) { root.qa2-path = ""; root.qa2-label = ""; root.qa2-group = ""; }
+        else if (index == 2) { root.qa3-path = ""; root.qa3-label = ""; root.qa3-group = ""; }
+        else if (index == 3) { root.qa4-path = ""; root.qa4-label = ""; root.qa4-group = ""; }
+        else if (index == 4) { root.qa5-path = ""; root.qa5-label = ""; root.qa5-group = ""; }
+        root.quick-dir-changed(index, "", "", "");
+        if (root.qa-edit-index == index) {
+            root.qa-edit-index = -1;
+            root.qa-manual-path = root.current-path;
+            root.qa-manual-label = "";
+            root.qa-manual-group = "";
+        }
+        root.toast(@tr("已删除快捷目录"));
+    }
+
+    public function save-quick-dir() {
+        if (root.qa-manual-path == "") {
+            root.toast(@tr("请输入目录路径"));
+        } else if ((root.qa-edit-index != 0 && root.qa-manual-path == root.qa1-path)
+                || (root.qa-edit-index != 1 && root.qa-manual-path == root.qa2-path)
+                || (root.qa-edit-index != 2 && root.qa-manual-path == root.qa3-path)
+                || (root.qa-edit-index != 3 && root.qa-manual-path == root.qa4-path)
+                || (root.qa-edit-index != 4 && root.qa-manual-path == root.qa5-path)) {
+            root.toast(@tr("快捷目录已存在"));
+        } else if (root.qa-edit-index < 0 && root.qa1-path != "" && root.qa2-path != "" && root.qa3-path != "" && root.qa4-path != "" && root.qa5-path != "") {
+            root.toast(@tr("最多只能添加 5 个自定义快捷目录"));
+        } else {
+            if (root.qa-edit-index == 0 || (root.qa-edit-index < 0 && root.qa1-path == "")) {
+                root.qa1-path = root.qa-manual-path; root.qa1-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.qa1-group = root.qa-manual-group; root.quick-dir-changed(0, root.qa1-label, root.qa1-group, root.qa1-path);
+            } else if (root.qa-edit-index == 1 || (root.qa-edit-index < 0 && root.qa2-path == "")) {
+                root.qa2-path = root.qa-manual-path; root.qa2-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.qa2-group = root.qa-manual-group; root.quick-dir-changed(1, root.qa2-label, root.qa2-group, root.qa2-path);
+            } else if (root.qa-edit-index == 2 || (root.qa-edit-index < 0 && root.qa3-path == "")) {
+                root.qa3-path = root.qa-manual-path; root.qa3-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.qa3-group = root.qa-manual-group; root.quick-dir-changed(2, root.qa3-label, root.qa3-group, root.qa3-path);
+            } else if (root.qa-edit-index == 3 || (root.qa-edit-index < 0 && root.qa4-path == "")) {
+                root.qa4-path = root.qa-manual-path; root.qa4-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.qa4-group = root.qa-manual-group; root.quick-dir-changed(3, root.qa4-label, root.qa4-group, root.qa4-path);
+            } else if (root.qa-edit-index == 4 || (root.qa-edit-index < 0 && root.qa5-path == "")) {
+                root.qa5-path = root.qa-manual-path; root.qa5-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.qa5-group = root.qa-manual-group; root.quick-dir-changed(4, root.qa5-label, root.qa5-group, root.qa5-path);
+            }
+            root.toast(root.qa-edit-index >= 0 ? @tr("已保存快捷目录") : @tr("已添加快捷目录"));
+            root.qa-edit-index = -1;
+            root.qa-manual-path = root.current-path;
+            root.qa-manual-label = "";
+            root.qa-manual-group = "";
+        }
+    }
+
+    local-search-debounce := Timer {
+        interval: 250ms;
+        running: root.local-search-pending;
+        triggered => {
+            root.local-search-pending = false;
+            root.search-changed(root.pending-local-search);
+        }
+    }
+    changed toolbar-tip => {
+        root.toolbar-tip-ready = false;
+        root.hide-tooltip();
+    }
+    toolbar-tooltip-delay := Timer {
+        interval: 350ms;
+        running: root.toolbar-tip != "" && !root.toolbar-tip-ready;
+        triggered => {
+            root.toolbar-tip-ready = true;
+            root.show-tooltip(root.toolbar-tip, root.absolute-position.x + root.width - 320px, root.absolute-position.y + 34px);
+        }
+    }
+
+    callback toggle-collapsed();
+    callback navigate(string);
+    callback navigate-back();
+    callback locate-result(string, bool);
+    callback download(string);
+    callback upload-clicked(string, bool);
+    callback refresh(string);
+    callback quick-dir-changed(int, string, string, string);
+    callback search-changed(string);
+    callback search-folder(string, string);
+    callback cancel-search();
+    callback tree-expand(string);
+    callback toggle-tree-scope(string);
+    callback set-tree-scope(string);
+    callback clear-tree-scope();
+    callback delete(string);
+    callback toggle-select(int);
+    callback download-selected();
+    callback delete-selected();
+    callback copy-selected-paths();
+    callback clear-selected();
+    callback view(string);
+    callback edit(string);
+    callback open-external(string);
+    callback edit-external(string);
+    callback rename-request(string, string);
+    callback chmod-request(string, string, int);
+    callback copy-path(string);
+    callback new-folder(string);
+    callback new-file(string);
+    callback open-operation-log();
+    callback copy-status(string);
+    callback show-tooltip(string, length, length);
+    callback hide-tooltip();
+    callback toast(string);
+    callback dock-drag-move(length, length);
+    callback dock-drag-end();
+
+    background: Theme.bg-panel;
+    changed current-path => { path-input.text = root.current-path; root.selected-row = -1; root.file-active-path = ""; }
+
+    dock-bg := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        mouse-cursor: move;
+        moved => { root.dock-drag-move(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y); }
+        pointer-event(ev) => { if (ev.kind == PointerEventKind.up) { root.dock-drag-end(); } }
+    }
+
+    VerticalLayout {
+        visible: !root.compact;
+        spacing: 0;
+
+        Rectangle {
+            height: 30px;
+            background: Theme.bg-panel-alt;
+            HorizontalLayout {
+                padding-left: 6px;
+                padding-right: 6px;
+                spacing: 4px;
+                Rectangle {
+                    width: 16px;
+                    y: (parent.height - self.height) / 2;
+                    height: 22px;
+                    grip-ta := TouchArea {
+                        mouse-cursor: move;
+                        moved => { root.dock-drag-move(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y); }
+                        pointer-event(ev) => { if (ev.kind == PointerEventKind.up) { root.dock-drag-end(); } }
+                    }
+                    Text { text: "\u{E945}"; font-family: "Material Icons"; color: grip-ta.has-hover ? Theme.text-secondary : Theme.text-muted; font-size: 16px; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
+                }
+                Rectangle {
+                    horizontal-stretch: 1;
+                    height: 22px;
+                    border-radius: Theme.radius-sm;
+                    background: Theme.bg-root;
+                    border-width: 1px;
+                    border-color: path-input.has-focus ? Theme.accent : Theme.border-subtle;
+                    path-input := TextInput {
+                        x: 6px;
+                        width: parent.width - 12px;
+                        height: parent.height;
+                        text: root.current-path;
+                        color: Theme.text-primary;
+                        font-family: Theme.ui-font-family;
+                        font-size: Theme.fs-sm;
+                        vertical-alignment: center;
+                        single-line: true;
+                        accepted => { root.navigate(self.text); self.text = root.current-path; }
+                    }
+                }
+                Rectangle {
+                    width: root.width > 900px ? 180px : 128px;
+                    height: 22px;
+                    border-radius: Theme.radius-sm;
+                    background: Theme.bg-root;
+                    border-width: 1px;
+                    border-color: file-search.has-focus ? Theme.accent : Theme.border-subtle;
+                    file-search := TextInput {
+                        x: 24px;
+                        width: parent.width - (root.search-mode || self.text != "" ? 48px : 30px);
+                        height: parent.height;
+                        text: root.search-query;
+                        color: Theme.text-primary;
+                        font-family: Theme.ui-font-family;
+                        font-size: Theme.fs-sm;
+                        vertical-alignment: center;
+                        single-line: true;
+                        changed has-focus => { root.toolbar-tip = self.has-focus ? @tr("输入关键词后按 Enter 搜索；点 X 可退出搜索结果") : ""; }
+                        edited => { root.pending-local-search = self.text; root.local-search-pending = true; }
+                        accepted => {
+                            root.local-search-pending = false;
+                            if (!root.search-mode) { root.search-restore-path = root.current-path; }
+                            root.search-mode = true;
+                            root.search-folder(root.tree-scope != "" ? root.tree-scope : root.current-path, self.text);
+                        }
+                    }
+                    Text { x: 6px; width: 16px; height: parent.height; text: "\u{E8B6}"; font-family: "Material Icons"; color: Theme.text-muted; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                    if file-search.text == "" : Text {
+                        x: 24px; width: parent.width - 30px; height: parent.height;
+                        text: root.tree-scope == "/" ? @tr("全局搜索") : (root.tree-scope != "" ? @tr("已选目录搜索") : @tr("目录搜索"));
+                        color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center;
+                    }
+                    if root.search-mode || file-search.text != "" : Rectangle {
+                        x: parent.width - 22px; y: 2px; width: 18px; height: 18px; border-radius: 9px;
+                        background: clear-search-ta.has-hover ? Theme.bg-hover : transparent;
+                        clear-search-ta := TouchArea {
+                            width: parent.width; height: parent.height; mouse-cursor: pointer;
+                            changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("清空搜索并取消目录勾选") : ""; }
+                            clicked => {
+                                if (root.search-running) { root.cancel-search(); }
+                                file-search.text = ""; root.search-changed(""); root.clear-tree-scope(); root.tree-active-path = ""; root.search-mode = false;
+                                root.navigate(root.search-restore-path != "" ? root.search-restore-path : root.current-path); root.search-restore-path = "";
+                            }
+                        }
+                        Text { text: "×"; color: Theme.text-muted; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+                Rectangle {
+                    width: root.search-running ? 42px : 24px; height: 22px; border-radius: Theme.radius-sm;
+                    background: search-action-ta.has-hover ? (root.search-running ? Theme.danger.with-alpha(0.18) : Theme.bg-hover) : transparent;
+                    search-action-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        changed has-hover => { root.toolbar-tip = self.has-hover ? (root.search-running ? @tr("停止正在运行的搜索") : @tr("搜索文件/文件夹（递归）")) : ""; }
+                        clicked => {
+                            if (root.search-running) { root.cancel-search(); root.toast(@tr("正在停止搜索...")); }
+                            else { if (!root.search-mode) { root.search-restore-path = root.current-path; } root.search-mode = true; root.search-folder(root.tree-scope != "" ? root.tree-scope : root.current-path, file-search.text); }
+                        }
+                    }
+                    Text { text: root.search-running ? @tr("停止") : "\u{F02F}"; font-family: root.search-running ? Theme.ui-font-family : "Material Icons"; color: root.search-running ? Theme.danger : (root.tree-scope != "" ? Theme.accent : Theme.text-secondary); font-size: root.search-running ? Theme.fs-xs : Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                }
+                Rectangle {
+                    width: 24px; height: 22px; border-radius: Theme.radius-sm; background: oplog-ta.has-hover ? Theme.bg-hover : transparent;
+                    oplog-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("打开本地操作日志") : ""; } clicked => { root.open-operation-log(); } }
+                    Text { text: "\u{E889}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                }
+                Rectangle {
+                    width: 24px; height: 22px; border-radius: Theme.radius-sm; background: copy-ta.has-hover ? Theme.bg-hover : transparent;
+                    copy-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("复制当前路径") : ""; } clicked => { path-input.select-all(); path-input.copy(); path-input.clear-selection(); root.toast(@tr("已复制路径")); } }
+                    Text { text: "\u{E14D}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                }
+                Rectangle {
+                    width: 24px; height: 22px; border-radius: Theme.radius-sm; background: pj-ta.has-hover ? Theme.bg-hover : transparent;
+                    pj-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("粘贴路径并跳转") : ""; } clicked => { path-input.select-all(); path-input.paste(); root.navigate(path-input.text); } }
+                    Text { text: "\u{E14F}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                }
+                up-btn := Rectangle {
+                    width: 24px; height: 22px; border-radius: Theme.radius-sm; background: up-ta.has-hover ? Theme.bg-hover : transparent;
+                    up-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("返回上一级目录") : ""; } clicked => { root.navigate(".."); } }
+                    Text { text: "↑"; color: Theme.text-secondary; font-size: Theme.fs-md; horizontal-alignment: center; vertical-alignment: center; }
+                }
+                ul-btn := Rectangle {
+                    width: 52px; height: 22px; border-radius: Theme.radius-sm; background: ul-ta.has-hover ? Theme.accent-hover : Theme.accent;
+                    ul-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("上传文件或文件夹") : ""; } clicked => { ul-menu.show(); } }
+                    Text { text: @tr("Upload"); color: #ffffff; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                    ul-menu := PopupWindow {
+                        x: 0; y: parent.height + 2px; width: 124px; height: 62px;
+                        Rectangle { background: Theme.bg-panel; border-radius: Theme.radius-sm; border-width: 1px; border-color: Theme.border-strong; drop-shadow-blur: 12px; drop-shadow-color: #00000060;
+                            VerticalLayout { padding: 4px; spacing: 1px;
+                                SftpMenuItem { label: @tr("Upload file"); clicked => { root.upload-clicked(root.current-path, false); } }
+                                SftpMenuItem { label: @tr("Upload folder"); clicked => { root.upload-clicked(root.current-path, true); } }
+                            }
+                        }
+                    }
+                }
+                if root.selected-count > 0 : Rectangle {
+                    width: 168px; height: 24px; border-radius: Theme.radius-sm; background: Theme.accent.with-alpha(0.12);
+                    HorizontalLayout { padding-left: 8px; padding-right: 6px; spacing: 6px;
+                        Text { text: "✓ " + root.selected-count + @tr(" 项"); color: Theme.accent; font-size: Theme.fs-xs; vertical-alignment: center; }
+                        Rectangle { width: 1px; background: Theme.border-subtle; }
+                        Rectangle { width: 48px; height: parent.height; cp-sel-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("复制已勾选项目的完整路径") : ""; } clicked => { root.copy-selected-paths(); } } Text { text: @tr("复制"); color: Theme.text-primary; font-size: Theme.fs-xs; vertical-alignment: center; horizontal-alignment: center; } }
+                        Rectangle { width: 36px; height: parent.height; dl-sel-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("下载已勾选文件") : ""; } clicked => { root.download-selected(); } } Text { text: @tr("下载"); color: Theme.text-primary; font-size: Theme.fs-xs; vertical-alignment: center; horizontal-alignment: center; } }
+                        Rectangle { width: 36px; height: parent.height; clr-sel-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("清除所有勾选") : ""; } clicked => { root.clear-selected(); } } Text { text: @tr("清除"); color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; horizontal-alignment: center; } }
+                    }
+                }
+                Rectangle { width: 24px; height: 22px; border-radius: Theme.radius-sm; background: ref-ta.has-hover ? Theme.bg-hover : transparent; ref-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("刷新当前目录") : ""; } clicked => { root.toast(@tr("正在刷新当前目录...")); root.refresh(root.current-path); } } Text { text: "\u{E5D5}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; } }
+                Rectangle { width: 24px; height: 22px; border-radius: Theme.radius-sm; background: min-ta.has-hover ? Theme.bg-hover : transparent; min-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("折叠/展开文件面板") : ""; } clicked => { root.toggle-collapsed(); } } Text { text: root.collapsed ? "\u{E5CE}" : "\u{E5CF}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: Theme.fs-md; horizontal-alignment: center; vertical-alignment: center; } }
+            }
+        }
+
+        Rectangle {
+            height: 28px;
+            background: Theme.bg-panel-alt;
+            HorizontalLayout {
+                padding-left: 8px; padding-right: 8px; spacing: 3px;
+                if root.qa-show-root : QuickAccessButton { label: @tr("根目录"); path: "/"; editing: false; tooltip: "/"; hover-tip(t) => { root.toolbar-tip = t; } clicked => { root.navigate("/"); } remove => { } }
+                if root.qa1-path != "" && root.qa1-group == "" : QuickAccessButton { label: root.qa1-label; path: root.qa1-path; tooltip: root.qa1-path; hover-tip(t) => { root.toolbar-tip = t; } clicked => { root.navigate(root.qa1-path); } remove => { } }
+                if root.qa1-path != "" && root.qa1-group != "" : QuickGroupButton {
+                    group-name: root.qa1-group; p1: root.qa1-path; l1: root.qa1-label; g1: root.qa1-group; p2: root.qa2-path; l2: root.qa2-label; g2: root.qa2-group; p3: root.qa3-path; l3: root.qa3-label; g3: root.qa3-group; p4: root.qa4-path; l4: root.qa4-label; g4: root.qa4-group; p5: root.qa5-path; l5: root.qa5-label; g5: root.qa5-group;
+                    hover-tip(t) => { root.toolbar-tip = t; } navigate(path) => { root.navigate(path); }
+                }
+                if root.qa2-path != "" && root.qa2-group == "" : QuickAccessButton { label: root.qa2-label; path: root.qa2-path; tooltip: root.qa2-path; hover-tip(t) => { root.toolbar-tip = t; } clicked => { root.navigate(root.qa2-path); } remove => { } }
+                if root.qa2-path != "" && root.qa2-group != "" && !(root.qa1-path != "" && root.qa1-group == root.qa2-group) : QuickGroupButton {
+                    group-name: root.qa2-group; p1: root.qa1-path; l1: root.qa1-label; g1: root.qa1-group; p2: root.qa2-path; l2: root.qa2-label; g2: root.qa2-group; p3: root.qa3-path; l3: root.qa3-label; g3: root.qa3-group; p4: root.qa4-path; l4: root.qa4-label; g4: root.qa4-group; p5: root.qa5-path; l5: root.qa5-label; g5: root.qa5-group;
+                    hover-tip(t) => { root.toolbar-tip = t; } navigate(path) => { root.navigate(path); }
+                }
+                if root.qa3-path != "" && root.qa3-group == "" : QuickAccessButton { label: root.qa3-label; path: root.qa3-path; tooltip: root.qa3-path; hover-tip(t) => { root.toolbar-tip = t; } clicked => { root.navigate(root.qa3-path); } remove => { } }
+                if root.qa3-path != "" && root.qa3-group != "" && !(root.qa1-path != "" && root.qa1-group == root.qa3-group) && !(root.qa2-path != "" && root.qa2-group == root.qa3-group) : QuickGroupButton {
+                    group-name: root.qa3-group; p1: root.qa1-path; l1: root.qa1-label; g1: root.qa1-group; p2: root.qa2-path; l2: root.qa2-label; g2: root.qa2-group; p3: root.qa3-path; l3: root.qa3-label; g3: root.qa3-group; p4: root.qa4-path; l4: root.qa4-label; g4: root.qa4-group; p5: root.qa5-path; l5: root.qa5-label; g5: root.qa5-group;
+                    hover-tip(t) => { root.toolbar-tip = t; } navigate(path) => { root.navigate(path); }
+                }
+                if root.qa4-path != "" && root.qa4-group == "" : QuickAccessButton { label: root.qa4-label; path: root.qa4-path; tooltip: root.qa4-path; hover-tip(t) => { root.toolbar-tip = t; } clicked => { root.navigate(root.qa4-path); } remove => { } }
+                if root.qa4-path != "" && root.qa4-group != "" && !(root.qa1-path != "" && root.qa1-group == root.qa4-group) && !(root.qa2-path != "" && root.qa2-group == root.qa4-group) && !(root.qa3-path != "" && root.qa3-group == root.qa4-group) : QuickGroupButton {
+                    group-name: root.qa4-group; p1: root.qa1-path; l1: root.qa1-label; g1: root.qa1-group; p2: root.qa2-path; l2: root.qa2-label; g2: root.qa2-group; p3: root.qa3-path; l3: root.qa3-label; g3: root.qa3-group; p4: root.qa4-path; l4: root.qa4-label; g4: root.qa4-group; p5: root.qa5-path; l5: root.qa5-label; g5: root.qa5-group;
+                    hover-tip(t) => { root.toolbar-tip = t; } navigate(path) => { root.navigate(path); }
+                }
+                if root.qa5-path != "" && root.qa5-group == "" : QuickAccessButton { label: root.qa5-label; path: root.qa5-path; tooltip: root.qa5-path; hover-tip(t) => { root.toolbar-tip = t; } clicked => { root.navigate(root.qa5-path); } remove => { } }
+                if root.qa5-path != "" && root.qa5-group != "" && !(root.qa1-path != "" && root.qa1-group == root.qa5-group) && !(root.qa2-path != "" && root.qa2-group == root.qa5-group) && !(root.qa3-path != "" && root.qa3-group == root.qa5-group) && !(root.qa4-path != "" && root.qa4-group == root.qa5-group) : QuickGroupButton {
+                    group-name: root.qa5-group; p1: root.qa1-path; l1: root.qa1-label; g1: root.qa1-group; p2: root.qa2-path; l2: root.qa2-label; g2: root.qa2-group; p3: root.qa3-path; l3: root.qa3-label; g3: root.qa3-group; p4: root.qa4-path; l4: root.qa4-label; g4: root.qa4-group; p5: root.qa5-path; l5: root.qa5-label; g5: root.qa5-group;
+                    hover-tip(t) => { root.toolbar-tip = t; } navigate(path) => { root.navigate(path); }
+                }
+                Rectangle {
+                    width: 22px; height: 22px; border-radius: Theme.radius-sm; background: qa-manage-ta.has-hover ? Theme.bg-hover : transparent;
+                    qa-manage-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("管理快捷目录：添加、编辑、分组或删除") : ""; }
+                        clicked => {
+                            root.quick-edit-mode = true;
+                            root.qa-edit-index = -1;
+                            root.qa-manual-path = root.current-path;
+                            root.qa-manual-label = "";
+                            root.qa-manual-group = "";
+                            root.qa-popup-offset-x = 0px;
+                            root.qa-popup-offset-y = 0px;
+                        }
+                    }
+                    Text { text: "\u{E8B8}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                }
+                QuickAccessButton { width: 30px; label: "←"; path: "back"; editing: false; tooltip: @tr("返回上一次打开的目录"); hover-tip(t) => { root.toolbar-tip = t; } clicked => { root.navigate-back(); } remove => { } }
+                QuickAccessButton { width: 30px; label: "↑"; path: ".."; editing: false; tooltip: @tr("返回上一级目录"); hover-tip(t) => { root.toolbar-tip = t; } clicked => { root.navigate(".."); } remove => { } }
+                Rectangle { horizontal-stretch: 1; }
+                Text { text: root.tree-scope == "/" ? @tr("搜索范围: 全局 /") : (root.tree-scope != "" ? @tr("搜索范围: ") + root.tree-scope : (root.search-mode ? @tr("搜索模式: 当前目录") : @tr("搜索范围: 当前目录"))); color: Theme.text-muted; font-size: 10px; vertical-alignment: center; overflow: elide; width: 280px; }
+            }
+        }
+
+        HorizontalLayout {
+            vertical-stretch: 1;
+            spacing: 0;
+            if root.show-tree : VerticalLayout {
+                width: root.tree-width; opacity: root.search-mode ? 0.42 : 1.0; spacing: 0;
+                Rectangle { height: 20px; background: Theme.bg-root; Text { x: 8px; text: @tr("目录导航"); color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; height: parent.height; } }
+                Rectangle { height: 1px; background: Theme.border-subtle; }
+                tree-area := Rectangle {
+                    vertical-stretch: 1; clip: true;
+                    ScrollView { width: parent.width; height: parent.height;
+                        tree-list := VerticalLayout { spacing: 0;
+                            for node[i] in root.tree-nodes : Rectangle {
+                                height: 24px;
+                                background: node-ta.has-hover ? Theme.bg-hover : (node.path == root.current-path ? #4a90e23c : (node.path == root.tree-active-path || (root.tree-scope == "/" && node.path == "/") ? #4a90e228 : (mod(i, 2) == 0 ? transparent : #ffffff08)));
+                                node-ta := TouchArea {
+                                    width: parent.width; height: parent.height; mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? node.path : ""; }
+                                    clicked => { if (node.path == "/") { root.tree-active-path = "/"; } else if (!root.search-mode) { root.tree-active-path = node.path; if (root.tree-scope == "/") { root.clear-tree-scope(); } root.navigate(node.path); } }
+                                    double-clicked => { if (node.path == "/") { root.tree-active-path = "/"; if (root.tree-scope == "/" || root.search-mode || root.search-running) { if (root.search-running) { root.cancel-search(); } file-search.text = ""; root.search-changed(""); root.clear-tree-scope(); root.search-mode = false; root.navigate(root.search-restore-path != "" ? root.search-restore-path : root.current-path); root.search-restore-path = ""; } else { root.set-tree-scope("/"); file-search.focus(); } } else if (!root.search-mode) { root.tree-expand(node.path); } }
+                                    pointer-event(ev) => { if (ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right) { root.tree-menu-target = node.path; root.tree-menu-x = self.absolute-position.x + self.mouse-x - tree-area.absolute-position.x; root.tree-menu-y = self.absolute-position.y + self.mouse-y - tree-area.absolute-position.y; tree-menu.show(); } }
+                                }
+                                if node.path == root.current-path || node.path == root.tree-active-path || (root.tree-scope == "/" && node.path == "/") : Rectangle { x: 0px; y: 3px; width: 3px; height: parent.height - 6px; border-radius: 2px; background: Theme.accent; }
+                                HorizontalLayout { spacing: 4px; padding-left: 4px + node.depth * 8px; padding-right: 4px; FileKindIcon { is-dir: true; kind: "dir"; expanded: node.expanded; hovered: node-ta.has-hover; } Text { text: node.path == "/" ? @tr("根目录") : node.name; color: (node.path == root.current-path || node.path == root.tree-active-path || (root.tree-scope == "/" && node.path == "/")) ? Theme.accent : Theme.text-primary; font-size: Theme.fs-xs; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; } }
+                            }
+                        }
+                    }
+                    tree-menu := PopupWindow {
+                        x: root.tree-menu-x; y: root.tree-menu-y; width: 156px; height: 230px;
+                        Rectangle { background: Theme.bg-panel; border-radius: Theme.radius-sm; border-width: 1px; border-color: Theme.border-strong; drop-shadow-blur: 10px; drop-shadow-color: #00000040;
+                            VerticalLayout { padding: 4px; spacing: 1px;
+                                SftpMenuItem { label: @tr("打开目录"); clicked => { root.search-mode = false; file-search.text = ""; root.search-changed(""); root.tree-active-path = root.tree-menu-target; if (root.tree-scope == "/") { root.clear-tree-scope(); } root.navigate(root.tree-menu-target); } }
+                                SftpMenuItem { label: @tr("加入/移出搜索范围"); clicked => { root.toggle-tree-scope(root.tree-menu-target); } }
+                                SftpMenuItem { label: @tr("在此搜索"); clicked => { root.tree-active-path = root.tree-menu-target; root.set-tree-scope(root.tree-menu-target); file-search.focus(); root.toast(@tr("已设置搜索范围")); } }
+                                SftpMenuItem { label: @tr("复制路径"); clicked => { root.copy-path(root.tree-menu-target); } }
+                                SftpMenuItem { label: @tr("权限"); enabled: root.tree-menu-target != ""; clicked => { root.chmod-request(root.tree-menu-target, root.tree-menu-target, 493); } }
+                                Rectangle { height: 1px; background: Theme.border-subtle; }
+                                SftpMenuItem { label: @tr("刷新此目录"); clicked => { root.toast(@tr("正在刷新此目录...")); root.refresh(root.tree-menu-target); } }
+                                SftpMenuItem { label: @tr("删除文件夹"); tint: #d86c6c; enabled: root.tree-menu-target != "/"; clicked => { root.delete(root.tree-menu-target); } }
+                            }
+                        }
+                    }
+                }
+            }
+            if root.show-tree : Rectangle {
+                width: 7px; background: transparent;
+                Rectangle { x: 3px; width: 1px; height: parent.height; background: split-ta.has-hover || root.tree-resizing ? Theme.border-strong : Theme.border-subtle; }
+                split-ta := TouchArea {
+                    width: parent.width; height: parent.height; mouse-cursor: ew-resize;
+                    pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { root.tree-resizing = true; root.tree-grab-x = self.absolute-position.x + self.mouse-x; root.tree-base-width = root.tree-width; } if (e.kind == PointerEventKind.up) { root.tree-resizing = false; } }
+                    moved => { if (root.tree-resizing) { root.tree-width = clamp(root.tree-base-width + (self.absolute-position.x + self.mouse-x - root.tree-grab-x), 120px, min(420px, max(120px, root.width - 260px))); } }
+                }
+            }
+            VerticalLayout {
+                horizontal-stretch: 1; spacing: 0;
+                Rectangle {
+                    height: 20px; background: Theme.bg-root;
+                    HorizontalLayout { padding-left: 8px; padding-right: 8px; spacing: 8px;
+                        Rectangle { width: 16px; }
+                        if root.search-mode : Text { text: @tr("名称"); color: Theme.text-muted; font-size: Theme.fs-xs; width: 180px; vertical-alignment: center; }
+                        if !root.search-mode : Text { text: @tr("名称"); color: Theme.text-muted; font-size: Theme.fs-xs; horizontal-stretch: 1; vertical-alignment: center; }
+                        if root.search-mode : Text { text: @tr("位置"); color: Theme.text-muted; font-size: Theme.fs-xs; horizontal-stretch: 1; min-width: 180px; horizontal-alignment: left; vertical-alignment: center; }
+                        if root.show-size-col : Text { text: @tr("大小"); color: Theme.text-muted; font-size: Theme.fs-xs; width: 72px; horizontal-alignment: right; vertical-alignment: center; }
+                        if root.show-mode-col : Text { text: @tr("权限"); color: Theme.text-muted; font-size: Theme.fs-xs; width: 56px; horizontal-alignment: right; vertical-alignment: center; }
+                        if root.show-modified-col : Text { text: @tr("修改时间"); color: Theme.text-muted; font-size: Theme.fs-xs; width: 116px; horizontal-alignment: right; vertical-alignment: center; }
+                    }
+                }
+                Rectangle { height: 1px; background: Theme.border-subtle; }
+                file-area := Rectangle {
+                    vertical-stretch: 1; clip: true;
+                    ScrollView { width: parent.width; height: parent.height; viewport-width: self.visible-width; viewport-height: max(self.visible-height, file-list.preferred-height);
+                        file-list := VerticalLayout { spacing: 0;
+                            if root.loading : Rectangle { height: 40px; Text { text: @tr("Loading..."); color: Theme.text-muted; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; } }
+                            if !root.loading && root.entries.length == 0 : Rectangle { height: 52px; VerticalLayout { spacing: 2px; Text { text: "📂"; color: Theme.text-muted; font-size: Theme.fs-md; horizontal-alignment: center; vertical-alignment: center; } Text { text: @tr("目录为空"); color: Theme.text-muted; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; } } }
+                            for entry[i] in root.entries : row := Rectangle {
+                                height: 24px;
+                                background: entry.selected ? #4a90e235 : (i == root.selected-row ? #4a90e240 : (row-ta.has-hover ? #4a90e225 : (mod(i, 2) == 0 ? transparent : #ffffff08)));
+                                row-ta := TouchArea {
+                                    width: parent.width; height: parent.height; mouse-cursor: pointer;
+                                    clicked => { root.selected-row = i; root.file-active-path = entry.full-path; }
+                                    double-clicked => { root.file-active-path = entry.full-path; if (root.search-mode) { root.locate-result(entry.full-path, entry.is-dir); root.search-mode = false; root.search-restore-path = ""; file-search.text = ""; root.search-changed(""); } else if (entry.kind == "dead-link") { root.toast(@tr("死链接，无法打开")); } else if (entry.is-dir) { root.navigate(entry.full-path); } else { root.download(entry.full-path); } }
+                                    pointer-event(ev) => { if (ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right) { root.selected-row = i; root.file-active-path = entry.full-path; root.menu-target = entry.full-path; root.menu-target-name = entry.name; root.menu-target-is-dir = entry.is-dir; root.menu-target-mode = entry.mode; root.menu-target-index = i; root.menu-x = self.absolute-position.x + self.mouse-x - file-area.absolute-position.x; root.menu-y = self.absolute-position.y + self.mouse-y - file-area.absolute-position.y; file-menu.show(); } }
+                                }
+                                HorizontalLayout { padding-left: 8px; padding-right: 8px; spacing: 8px;
+                                    Rectangle { width: 13px; y: (parent.height - self.height) / 2; height: 13px; border-radius: 3px; border-width: 1px; border-color: entry.selected ? Theme.accent : Theme.border-strong; background: entry.selected ? Theme.accent : transparent;
+                                        cb-ta := TouchArea { width: parent.width; height: parent.height; mouse-cursor: pointer; clicked => { root.selected-row = i; root.file-active-path = entry.full-path; root.toggle-select(i); } }
+                                        if entry.selected : Text { text: "\u{E5CA}"; font-family: "Material Icons"; color: #ffffff; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
+                                    }
+                                    FileKindIcon { is-dir: entry.is-dir; kind: entry.kind; }
+                                    if root.search-mode : Text { text: entry.name; color: entry.kind == "dead-link" ? Theme.text-muted : (entry.is-dir ? Theme.accent : Theme.text-primary); font-size: Theme.fs-sm; width: 180px; overflow: elide; vertical-alignment: center; }
+                                    if !root.search-mode : Text { text: entry.name; color: entry.kind == "dead-link" ? Theme.text-muted : (entry.is-dir ? Theme.accent : Theme.text-primary); font-size: Theme.fs-sm; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+                                    if root.search-mode : Text { text: entry.full-path; color: Theme.text-muted; font-size: Theme.fs-xs; horizontal-stretch: 1; min-width: 180px; overflow: elide; vertical-alignment: center; }
+                                    if root.show-size-col : Text { text: entry.kind == "dead-link" ? @tr("死链接") : (entry.kind == "symlink-dir" ? @tr("链接目录") : (entry.kind == "symlink-file" ? @tr("链接文件") : (entry.is-dir ? @tr("文件夹") : entry.size))); color: entry.kind == "dead-link" ? Theme.text-muted : Theme.text-secondary; font-size: Theme.fs-xs; width: 72px; horizontal-alignment: right; vertical-alignment: center; }
+                                    if root.show-mode-col : Text { text: entry.mode-text; color: Theme.text-muted; font-size: Theme.fs-xs; width: 56px; horizontal-alignment: right; vertical-alignment: center; }
+                                    if root.show-modified-col : Text { text: entry.modified; color: Theme.text-muted; font-size: Theme.fs-xs; width: 116px; horizontal-alignment: right; vertical-alignment: center; }
+                                }
+                            }
+                            ws := Rectangle { vertical-stretch: 1; min-height: 24px;
+                                ws-ta := TouchArea { width: parent.width; height: parent.height; pointer-event(ev) => { if (ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right) { root.selected-row = -1; root.file-active-path = ""; root.menu-target = ""; root.menu-target-index = -1; root.menu-x = self.absolute-position.x + self.mouse-x - file-area.absolute-position.x; root.menu-y = self.absolute-position.y + self.mouse-y - file-area.absolute-position.y; file-menu.show(); } } }
+                            }
+                        }
+                    }
+                    file-menu := PopupWindow {
+                        x: root.menu-x; y: root.menu-y; width: 154px; height: 365px;
+                        Rectangle { background: Theme.bg-panel; border-radius: Theme.radius-sm; border-width: 1px; border-color: Theme.border-strong; drop-shadow-blur: 10px; drop-shadow-color: #00000040;
+                            VerticalLayout { padding: 4px; spacing: 1px;
+                                SftpMenuItem { label: @tr("在此搜索"); enabled: root.menu-target != "" && root.menu-target-is-dir; clicked => { root.tree-active-path = root.menu-target; root.set-tree-scope(root.menu-target); file-search.focus(); root.toast(@tr("已设置搜索范围")); } }
+                                Rectangle { height: 1px; background: Theme.border-subtle; }
+                                SftpMenuItem { label: @tr("下载"); enabled: root.menu-target != ""; clicked => { root.download(root.menu-target); } }
+                                SftpMenuItem { label: @tr("查看"); enabled: root.menu-target != "" && !root.menu-target-is-dir; clicked => { root.view(root.menu-target); } }
+                                SftpMenuItem { label: @tr("编辑"); enabled: root.menu-target != "" && !root.menu-target-is-dir; clicked => { root.edit(root.menu-target); } }
+                                SftpMenuItem { label: @tr("外部程序查看"); enabled: root.menu-target != "" && !root.menu-target-is-dir; clicked => { root.open-external(root.menu-target); } }
+                                SftpMenuItem { label: @tr("外部程序编辑"); enabled: root.menu-target != "" && !root.menu-target-is-dir; clicked => { root.edit-external(root.menu-target); } }
+                                SftpMenuItem { label: @tr("重命名"); enabled: root.menu-target != ""; clicked => { root.rename-request(root.menu-target, root.menu-target-name); } }
+                                SftpMenuItem { label: @tr("权限"); enabled: root.menu-target != ""; clicked => { root.chmod-request(root.menu-target, root.menu-target-name, root.menu-target-mode); } }
+                                SftpMenuItem { label: @tr("复制路径"); enabled: root.menu-target != ""; clicked => { root.copy-path(root.menu-target); } }
+                                SftpMenuItem { label: @tr("删除"); tint: #d86c6c; enabled: root.menu-target != ""; clicked => { root.delete(root.menu-target); } }
+                                Rectangle { height: 1px; background: Theme.border-subtle; }
+                                SftpMenuItem { label: @tr("新建文件夹"); clicked => { root.new-folder(root.current-path); } }
+                                SftpMenuItem { label: @tr("新建文件"); clicked => { root.new-file(root.current-path); } }
+                                SftpMenuItem { label: @tr("刷新当前目录"); clicked => { root.toast(@tr("正在刷新当前目录...")); root.refresh(root.current-path); } }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Rectangle {
+            height: 18px; background: Theme.bg-panel-alt;
+            status-ta := TouchArea { width: parent.width; height: parent.height; mouse-cursor: pointer; clicked => { root.copy-status(status-text.text); } }
+            status-text := Text { x: 8px; text: (root.search-mode ? @tr("搜索模式") + "  ·  " : "") + root.status + "  ·  当前目录: " + (root.current-path != "" ? root.current-path : "未打开") + (root.file-active-path != "" ? "  ·  右侧选中: " + root.file-active-path : "") + (root.tree-active-path != "" ? "  ·  左侧选中: " + root.tree-active-path : "") + (root.tree-scope != "" ? "  ·  搜索范围: " + (root.tree-scope == "/" ? "全局 /" : root.tree-scope) : "") + (root.selected-count > 0 ? "  ·  已勾选: " + root.selected-count + " 项" : ""); color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; height: parent.height; overflow: elide; width: parent.width - 16px; }
+        }
+    }
+
+    if root.quick-edit-mode : Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: #00000028;
+        TouchArea { width: parent.width; height: parent.height; }
+    }
+
+    if root.quick-edit-mode : Rectangle {
+        x: clamp((root.width - root.qa-popup-width) / 2 + root.qa-popup-offset-x, 8px, max(8px, root.width - root.qa-popup-width - 8px));
+        y: clamp((root.height - root.qa-popup-height) / 2 + root.qa-popup-offset-y, 8px, max(8px, root.height - root.qa-popup-height - 8px));
+        width: root.qa-popup-width;
+        height: root.qa-popup-height;
+        background: Theme.bg-panel;
+        border-width: 1px;
+        border-color: Theme.border-strong;
+        border-radius: Theme.radius-sm;
+        drop-shadow-blur: 16px;
+        drop-shadow-color: #00000065;
+
+        VerticalLayout {
+            padding: 10px;
+            spacing: 6px;
+            Rectangle {
+                height: 24px;
+                title-drag := TouchArea {
+                    width: parent.width - 62px;
+                    height: parent.height;
+                    mouse-cursor: move;
+                    pointer-event(ev) => {
+                        if (ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left) {
+                            root.qa-popup-dragging = true;
+                            root.qa-popup-drag-start-x = self.absolute-position.x + self.mouse-x;
+                            root.qa-popup-drag-start-y = self.absolute-position.y + self.mouse-y;
+                            root.qa-popup-drag-base-x = root.qa-popup-offset-x;
+                            root.qa-popup-drag-base-y = root.qa-popup-offset-y;
+                        }
+                        if (ev.kind == PointerEventKind.up || ev.kind == PointerEventKind.cancel) {
+                            root.qa-popup-dragging = false;
+                        }
+                    }
+                    moved => {
+                        if (root.qa-popup-dragging) {
+                            root.qa-popup-offset-x = root.qa-popup-drag-base-x + self.absolute-position.x + self.mouse-x - root.qa-popup-drag-start-x;
+                            root.qa-popup-offset-y = root.qa-popup-drag-base-y + self.absolute-position.y + self.mouse-y - root.qa-popup-drag-start-y;
+                        }
+                    }
+                }
+                Text { x: 0px; width: parent.width - 62px; height: parent.height; text: root.qa-edit-index >= 0 ? @tr("编辑快捷目录") : @tr("管理快捷目录"); color: Theme.text-primary; font-size: Theme.fs-xs; font-weight: 600; vertical-alignment: center; }
+                Rectangle {
+                    x: parent.width - 54px; width: 24px; height: 24px; border-radius: 12px; background: qa-info-ta.has-hover ? Theme.bg-hover : transparent;
+                    qa-info-ta := TouchArea { mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("分组会在外部显示为可展开入口，备注是组内收藏名称") : ""; } }
+                    Text { text: "\u{E88E}"; font-family: "Material Icons"; color: Theme.text-muted; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
+                }
+                Rectangle {
+                    x: parent.width - 26px; width: 24px; height: 24px; border-radius: 12px; background: qa-close-ta.has-hover ? Theme.bg-hover : transparent;
+                    qa-close-ta := TouchArea { mouse-cursor: pointer; clicked => { root.quick-edit-mode = false; root.qa-popup-dragging = false; root.qa-edit-index = -1; } }
+                    Text { text: "\u{E5CD}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: 14px; horizontal-alignment: center; vertical-alignment: center; }
+                }
+            }
+            HorizontalLayout {
+                height: 30px;
+                spacing: 6px;
+                Text { width: 54px; text: @tr("目录路径"); color: Theme.text-secondary; font-size: Theme.fs-xs; vertical-alignment: center; }
+                Rectangle {
+                    horizontal-stretch: 1;
+                    border-radius: Theme.radius-sm;
+                    border-width: 1px;
+                    border-color: qa-path-input.has-focus ? Theme.accent : Theme.border-subtle;
+                    background: Theme.bg-root;
+                    qa-path-input := TextInput { x: 9px; width: parent.width - 18px; height: parent.height; text <=> root.qa-manual-path; single-line: true; font-size: Theme.fs-sm; color: Theme.text-primary; vertical-alignment: center; }
+                }
+            }
+            HorizontalLayout {
+                height: 30px;
+                spacing: 6px;
+                Text { width: 36px; text: @tr("备注"); color: Theme.text-secondary; font-size: Theme.fs-xs; vertical-alignment: center; }
+                Rectangle {
+                    horizontal-stretch: 1; min-width: 140px; border-radius: Theme.radius-sm; border-width: 1px; border-color: qa-label-input.has-focus ? Theme.accent : Theme.border-subtle; background: Theme.bg-root;
+                    qa-label-input := TextInput { x: 9px; width: parent.width - 18px; height: parent.height; text <=> root.qa-manual-label; single-line: true; font-size: Theme.fs-sm; color: Theme.text-primary; vertical-alignment: center; }
+                }
+                Text { width: 36px; text: @tr("分组"); color: Theme.text-secondary; font-size: Theme.fs-xs; vertical-alignment: center; }
+                Rectangle {
+                    horizontal-stretch: 1; min-width: 140px; border-radius: Theme.radius-sm; border-width: 1px; border-color: qa-group-input.has-focus ? Theme.accent : Theme.border-subtle; background: Theme.bg-root;
+                    qa-group-input := TextInput { x: 9px; width: parent.width - 18px; height: parent.height; text <=> root.qa-manual-group; single-line: true; font-size: Theme.fs-sm; color: Theme.text-primary; vertical-alignment: center; }
+                }
+                if root.qa-edit-index >= 0 : Rectangle {
+                    width: 54px; border-radius: Theme.radius-sm; background: cancel-edit-ta.has-hover ? Theme.bg-hover : Theme.bg-elevated;
+                    cancel-edit-ta := TouchArea { mouse-cursor: pointer; clicked => { root.qa-edit-index = -1; root.qa-manual-path = root.current-path; root.qa-manual-label = ""; root.qa-manual-group = ""; } }
+                    Text { text: @tr("取消"); color: Theme.text-secondary; font-size: Theme.fs-xs; horizontal-alignment: center; vertical-alignment: center; }
+                }
+                Rectangle {
+                    width: 68px; border-radius: Theme.radius-sm; background: save-qa-ta.has-hover ? Theme.accent.with-alpha(0.86) : Theme.accent;
+                    save-qa-ta := TouchArea { mouse-cursor: pointer; clicked => { root.save-quick-dir(); } }
+                    Text { text: root.qa-edit-index >= 0 ? @tr("保存") : @tr("添加"); color: #ffffff; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                }
+            }
+            Text { height: 16px; text: @tr("已有快捷目录（点击一行或铅笔编辑，红色按钮删除）"); color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; }
+            Rectangle {
+                vertical-stretch: 1;
+                clip: true;
+                border-radius: Theme.radius-sm;
+                border-width: 1px;
+                border-color: Theme.border-subtle;
+                background: Theme.bg-root;
+                ScrollView {
+                    width: parent.width;
+                    height: parent.height;
+                    viewport-width: self.visible-width;
+                    viewport-height: max(self.visible-height, manage-list.preferred-height);
+                    manage-list := VerticalLayout {
+                        padding: 6px;
+                        spacing: 3px;
+                        if root.qa-show-root : QuickDirManageRow {
+                            item-index: -1;
+                            label: @tr("根目录");
+                            path: "/";
+                            can-edit: false;
+                            can-delete: true;
+                            remove(i) => { root.qa-show-root = false; root.toast(@tr("已删除快捷目录")); }
+                            edit(i) => { }
+                        }
+                        QuickDirGroupedList {
+                            p1: root.qa1-path; l1: root.qa1-label; g1: root.qa1-group;
+                            p2: root.qa2-path; l2: root.qa2-label; g2: root.qa2-group;
+                            p3: root.qa3-path; l3: root.qa3-label; g3: root.qa3-group;
+                            p4: root.qa4-path; l4: root.qa4-label; g4: root.qa4-group;
+                            p5: root.qa5-path; l5: root.qa5-label; g5: root.qa5-group;
+                            edit(i) => { root.begin-quick-edit(i); }
+                            remove(i) => { root.delete-quick-dir(i); }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
