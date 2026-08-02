@@ -60,6 +60,8 @@ component SftpMenuItem inherits Rectangle {
 component FileKindIcon inherits Rectangle {
     in property <bool> is-dir: false;
     in property <string> kind: "file"; // file / dir / symlink-file / symlink-dir / dead-link
+    in property <bool> expanded: false;
+    in property <bool> hovered: false;
     width: 18px;
     height: 18px;
 
@@ -69,7 +71,7 @@ component FileKindIcon inherits Rectangle {
         font-size: 17px;
         // Warm folders stay legible against both themes; files retain the
         // existing blue-grey treatment.
-        color: root.kind == "dead-link" ? Theme.text-muted : (root.is-dir ? #D9AE55 : Theme.text-secondary);
+        color: root.kind == "dead-link" ? Theme.text-muted : (root.is-dir ? (root.hovered ? #F6D784 : (root.expanded ? #F0C66A : #D9AE55)) : Theme.text-secondary);
         horizontal-alignment: center;
         vertical-alignment: center;
         width: parent.width;
@@ -219,11 +221,11 @@ export component SftpPanel inherits Rectangle {
     property <bool> qa-show-tmp: false;
     property <bool> qa-show-www: false;
     property <bool> qa-show-over: false;
-    in-out property <string> qa1-path: ""; in-out property <string> qa1-label: "";
-    in-out property <string> qa2-path: ""; in-out property <string> qa2-label: "";
-    in-out property <string> qa3-path: ""; in-out property <string> qa3-label: "";
-    in-out property <string> qa4-path: ""; in-out property <string> qa4-label: "";
-    in-out property <string> qa5-path: ""; in-out property <string> qa5-label: "";
+    in-out property <string> qa1-path: ""; in-out property <string> qa1-label: ""; in-out property <string> qa1-group: "";
+    in-out property <string> qa2-path: ""; in-out property <string> qa2-label: ""; in-out property <string> qa2-group: "";
+    in-out property <string> qa3-path: ""; in-out property <string> qa3-label: ""; in-out property <string> qa3-group: "";
+    in-out property <string> qa4-path: ""; in-out property <string> qa4-label: ""; in-out property <string> qa4-group: "";
+    in-out property <string> qa5-path: ""; in-out property <string> qa5-label: ""; in-out property <string> qa5-group: "";
 
     // Filtering the current cached directory is delayed so fast CJK/IME input
     // does not rebuild the table on every composition commit. Enter bypasses it.
@@ -250,7 +252,7 @@ export component SftpPanel inherits Rectangle {
     callback download(string);
     callback upload-clicked(string /* remote dir */, bool /* folder */);
     callback refresh(string);
-    callback quick-dir-changed(int, string, string);
+    callback quick-dir-changed(int, string, string, string);
     callback search-changed(string); // filter files/folders in current directory
     callback search-folder(string /* root dir */, string /* query */); // recursive search from a selected/current folder
     callback cancel-search();       // stop the currently running recursive search
@@ -744,10 +746,57 @@ export component SftpPanel inherits Rectangle {
         if root.quick-edit-mode : Rectangle {
             // Compact manager: it is temporary and never reserves a large,
             // permanent strip above the file list.
-            height: 112px;
+            height: 0px;
+            Rectangle {
+            y: 2px;
+            width: parent.width;
+            height: min(126px, max(80px, root.height - 76px));
             background: Theme.bg-panel;
             border-width: 1px;
-            border-color: Theme.border-subtle;
+            border-color: Theme.border-strong;
+            border-radius: Theme.radius-sm;
+            drop-shadow-blur: 14px;
+            drop-shadow-color: #00000065;
+            Rectangle {
+                x: parent.width - 52px;
+                y: 5px;
+                width: 22px;
+                height: 22px;
+                border-radius: 11px;
+                background: qa-info-ta.has-hover ? Theme.bg-hover : transparent;
+                qa-info-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    changed has-hover => { root.toolbar-tip = self.has-hover ? @tr("最多添加 5 个快捷目录，备注最多 6 个字") : ""; }
+                }
+                Text {
+                    text: "\u{E88E}";
+                    font-family: "Material Icons";
+                    color: Theme.text-muted;
+                    font-size: 13px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+            Rectangle {
+                x: parent.width - 28px;
+                y: 5px;
+                width: 22px;
+                height: 22px;
+                border-radius: 11px;
+                background: qa-close-ta.has-hover ? Theme.bg-hover : transparent;
+                qa-close-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.quick-edit-mode = false; }
+                }
+                Text {
+                    text: "\u{E5CD}";
+                    font-family: "Material Icons";
+                    color: Theme.text-secondary;
+                    font-size: 14px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
             VerticalLayout {
                 padding: 8px;
                 spacing: 6px;
@@ -770,11 +819,11 @@ export component SftpPanel inherits Rectangle {
                     Rectangle { width: 56px; border-radius: Theme.radius-sm; background: Theme.accent;
                         TouchArea { mouse-cursor: pointer; clicked => {
                             if (root.qa-manual-path != "") {
-                                if (root.qa1-path == "") { root.qa1-path = root.qa-manual-path; root.qa1-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.quick-dir-changed(0, root.qa1-label, root.qa1-path); }
-                                else if (root.qa2-path == "") { root.qa2-path = root.qa-manual-path; root.qa2-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.quick-dir-changed(1, root.qa2-label, root.qa2-path); }
-                                else if (root.qa3-path == "") { root.qa3-path = root.qa-manual-path; root.qa3-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.quick-dir-changed(2, root.qa3-label, root.qa3-path); }
-                                else if (root.qa4-path == "") { root.qa4-path = root.qa-manual-path; root.qa4-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.quick-dir-changed(3, root.qa4-label, root.qa4-path); }
-                                else if (root.qa5-path == "") { root.qa5-path = root.qa-manual-path; root.qa5-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.quick-dir-changed(4, root.qa5-label, root.qa5-path); }
+                                if (root.qa1-path == "") { root.qa1-path = root.qa-manual-path; root.qa1-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.qa1-group = root.qa-manual-group; root.quick-dir-changed(0, root.qa1-label, root.qa1-group, root.qa1-path); }
+                                else if (root.qa2-path == "") { root.qa2-path = root.qa-manual-path; root.qa2-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.qa2-group = root.qa-manual-group; root.quick-dir-changed(1, root.qa2-label, root.qa2-group, root.qa2-path); }
+                                else if (root.qa3-path == "") { root.qa3-path = root.qa-manual-path; root.qa3-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.qa3-group = root.qa-manual-group; root.quick-dir-changed(2, root.qa3-label, root.qa3-group, root.qa3-path); }
+                                else if (root.qa4-path == "") { root.qa4-path = root.qa-manual-path; root.qa4-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.qa4-group = root.qa-manual-group; root.quick-dir-changed(3, root.qa4-label, root.qa4-group, root.qa4-path); }
+                                else if (root.qa5-path == "") { root.qa5-path = root.qa-manual-path; root.qa5-label = root.qa-manual-label != "" ? root.qa-manual-label : root.qa-manual-path; root.qa5-group = root.qa-manual-group; root.quick-dir-changed(4, root.qa5-label, root.qa5-group, root.qa5-path); }
                                 else { root.toolbar-tip = @tr("最多只能添加 5 个自定义快捷目录"); }
                             }
                         } }
@@ -789,17 +838,18 @@ export component SftpPanel inherits Rectangle {
                     if root.qa-show-tmp : QuickAccessButton { width: 44px; label: "TMP×"; path: "/tmp"; clicked => { root.qa-show-tmp = false; } remove => { } }
                     if root.qa-show-www : QuickAccessButton { width: 48px; label: "WWW×"; path: "/www"; clicked => { root.qa-show-www = false; } remove => { } }
                     if root.qa-show-over : QuickAccessButton { width: 48px; label: "OVER×"; path: "/overlay"; clicked => { root.qa-show-over = false; } remove => { } }
-                    if root.qa1-path != "" : QuickAccessButton { width: 58px; label: root.qa1-label + "×"; path: root.qa1-path; clicked => { root.qa1-path = ""; root.qa1-label = ""; root.quick-dir-changed(0, "", ""); } remove => { } }
-                    if root.qa2-path != "" : QuickAccessButton { width: 58px; label: root.qa2-label + "×"; path: root.qa2-path; clicked => { root.qa2-path = ""; root.qa2-label = ""; root.quick-dir-changed(1, "", ""); } remove => { } }
-                    if root.qa3-path != "" : QuickAccessButton { width: 58px; label: root.qa3-label + "×"; path: root.qa3-path; clicked => { root.qa3-path = ""; root.qa3-label = ""; root.quick-dir-changed(2, "", ""); } remove => { } }
-                    if root.qa4-path != "" : QuickAccessButton { width: 58px; label: root.qa4-label + "×"; path: root.qa4-path; clicked => { root.qa4-path = ""; root.qa4-label = ""; root.quick-dir-changed(3, "", ""); } remove => { } }
-                    if root.qa5-path != "" : QuickAccessButton { width: 58px; label: root.qa5-label + "×"; path: root.qa5-path; clicked => { root.qa5-path = ""; root.qa5-label = ""; root.quick-dir-changed(4, "", ""); } remove => { } }
+                    if root.qa1-path != "" : QuickAccessButton { width: 58px; label: root.qa1-label + "×"; path: root.qa1-path; clicked => { root.qa1-path = ""; root.qa1-label = ""; root.qa1-group = ""; root.quick-dir-changed(0, "", "", ""); } remove => { } }
+                    if root.qa2-path != "" : QuickAccessButton { width: 58px; label: root.qa2-label + "×"; path: root.qa2-path; clicked => { root.qa2-path = ""; root.qa2-label = ""; root.qa2-group = ""; root.quick-dir-changed(1, "", "", ""); } remove => { } }
+                    if root.qa3-path != "" : QuickAccessButton { width: 58px; label: root.qa3-label + "×"; path: root.qa3-path; clicked => { root.qa3-path = ""; root.qa3-label = ""; root.qa3-group = ""; root.quick-dir-changed(2, "", "", ""); } remove => { } }
+                    if root.qa4-path != "" : QuickAccessButton { width: 58px; label: root.qa4-label + "×"; path: root.qa4-path; clicked => { root.qa4-path = ""; root.qa4-label = ""; root.qa4-group = ""; root.quick-dir-changed(3, "", "", ""); } remove => { } }
+                    if root.qa5-path != "" : QuickAccessButton { width: 58px; label: root.qa5-label + "×"; path: root.qa5-path; clicked => { root.qa5-path = ""; root.qa5-label = ""; root.qa5-group = ""; root.quick-dir-changed(4, "", "", ""); } remove => { } }
                     Rectangle { horizontal-stretch: 1; }
                     Rectangle { width: 24px; height: 22px; border-radius: Theme.radius-sm; background: Theme.bg-hover;
                         TouchArea { mouse-cursor: pointer; clicked => { root.quick-edit-mode = false; } }
                         Text { text: "×"; color: Theme.text-secondary; font-size: Theme.fs-md; horizontal-alignment: center; vertical-alignment: center; }
                     }
                 }
+            }
             }
         }
 
@@ -853,6 +903,7 @@ export component SftpPanel inherits Rectangle {
                                     width: parent.width;
                                     height: parent.height;
                                     mouse-cursor: pointer;
+                                    changed has-hover => { root.toolbar-tip = self.has-hover ? node.path : ""; }
                                     clicked => {
                                         if (node.path == "/") {
                                             // Root single-click only moves the tree cursor; it must not
@@ -914,6 +965,8 @@ export component SftpPanel inherits Rectangle {
                                     FileKindIcon {
                                         is-dir: true;
                                         kind: "dir";
+                                        expanded: node.expanded;
+                                        hovered: node-ta.has-hover;
                                     }
 
                                     Text {

@@ -9,7 +9,7 @@
 //! via the shared `UnboundedSender<SessionEvent>` that already exists for the
 //! terminal tab.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -693,6 +693,7 @@ async fn run_sftp(
                 let sftp = sftp.clone();
                 let events = events.clone();
                 search_task = Some(tokio::spawn(async move {
+                    let started = Instant::now();
                     let _ = events.send(SessionEvent::SftpStatus(format!(
                         "{}: {}{}",
                         t("搜索中", "Searching"),
@@ -727,7 +728,11 @@ async fn run_sftp(
                         )));
                         return;
                     }
-                    let count = all.len();
+                    let count = format!(
+                        "{}  ·  {}",
+                        all.len(),
+                        format_search_elapsed(started.elapsed())
+                    );
                     let _ = events.send(SessionEvent::SftpSearchEntries {
                         root: result_path.clone(),
                         query: query.clone(),
@@ -1456,6 +1461,7 @@ async fn run_ssh_file_browser(
                 let handle = handle.clone();
                 let events = events.clone();
                 search_task = Some(tokio::spawn(async move {
+                    let started = Instant::now();
                     let _ = events.send(SessionEvent::SftpStatus(format!(
                         "{}: {}{}",
                         t("搜索中", "Searching"),
@@ -1488,7 +1494,11 @@ async fn run_ssh_file_browser(
                         )));
                         return;
                     }
-                    let count = all.len();
+                    let count = format!(
+                        "{}  ·  {}",
+                        all.len(),
+                        format_search_elapsed(started.elapsed())
+                    );
                     let _ = events.send(SessionEvent::SftpSearchEntries {
                         root: result_path.clone(),
                         query: query.clone(),
@@ -1795,6 +1805,7 @@ async fn shell_search_dir_impl(
     let q = query.trim().to_lowercase();
     let base = normalise_remote_dir(root);
     let mut stack = vec![base.clone()];
+    let mut seen: HashSet<String> = HashSet::new();
     let mut visited_dirs = 0usize;
     let mut out = Vec::new();
     let mut last_status = Instant::now();
@@ -1802,6 +1813,10 @@ async fn shell_search_dir_impl(
     while let Some(dir) = stack.pop() {
         if cancel.load(Ordering::Relaxed) {
             break;
+        }
+        let key = normalise_remote_dir(&dir).to_lowercase();
+        if !seen.insert(key) {
+            continue;
         }
         visited_dirs += 1;
         if visited_dirs > max_dirs || out.len() >= max_results {
@@ -1844,10 +1859,11 @@ async fn shell_search_dir_impl(
                     break;
                 }
             }
-            if entry.is_dir {
+            if entry.is_dir && entry.kind != "symlink-dir" {
                 let name = entry.name.rsplit('/').next().unwrap_or(&entry.name);
-                if name != "." && name != ".." {
-                    stack.push(entry.full_path.clone());
+                let next = normalise_remote_dir(&entry.full_path);
+                if name != "." && name != ".." && !seen.contains(&next.to_lowercase()) {
+                    stack.push(next);
                 }
             }
         }
@@ -2245,6 +2261,15 @@ fn search_roots_label(roots: &[String]) -> String {
     }
 }
 
+fn format_search_elapsed(duration: Duration) -> String {
+    let ms = duration.as_millis();
+    if ms < 1_000 {
+        format!("{ms} ms")
+    } else {
+        format!("{:.1} s", ms as f64 / 1_000.0)
+    }
+}
+
 async fn search_dir_impl(
     sftp: &SftpSession,
     root: &str,
@@ -2257,6 +2282,7 @@ async fn search_dir_impl(
     let q = query.trim().to_lowercase();
     let base = normalise_remote_dir(root);
     let mut stack = vec![base.clone()];
+    let mut seen: HashSet<String> = HashSet::new();
     let mut visited_dirs = 0usize;
     let mut out = Vec::new();
     let mut last_status = Instant::now();
@@ -2264,6 +2290,10 @@ async fn search_dir_impl(
     while let Some(dir) = stack.pop() {
         if cancel.load(Ordering::Relaxed) {
             break;
+        }
+        let key = normalise_remote_dir(&dir).to_lowercase();
+        if !seen.insert(key) {
+            continue;
         }
         visited_dirs += 1;
         if visited_dirs > max_dirs || out.len() >= max_results {
@@ -2309,10 +2339,11 @@ async fn search_dir_impl(
                     break;
                 }
             }
-            if entry.is_dir {
+            if entry.is_dir && entry.kind != "symlink-dir" {
                 let name = entry.name.rsplit('/').next().unwrap_or(&entry.name);
-                if name != "." && name != ".." {
-                    stack.push(entry.full_path.clone());
+                let next = normalise_remote_dir(&entry.full_path);
+                if name != "." && name != ".." && !seen.contains(&next.to_lowercase()) {
+                    stack.push(next);
                 }
             }
         }

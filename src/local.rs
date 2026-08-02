@@ -133,6 +133,7 @@ async fn run(
             SessionCommand::AddTunnel { .. } | SessionCommand::StopTunnel(_) => {}
         }
     }
+    let _ = child.lock().ok().and_then(|mut c| c.kill().ok());
     Ok(())
 }
 

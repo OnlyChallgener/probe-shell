@@ -109,6 +109,11 @@ export component TerminalView inherits Rectangle {
     in property <string>  sftp-search-query: "";
     in property <[SftpTreeNode]> sftp-tree-nodes: [];
     in property <string> sftp-tree-scope: "";
+    in-out property <string> sftp-quick1-path: ""; in-out property <string> sftp-quick1-label: ""; in-out property <string> sftp-quick1-group: "";
+    in-out property <string> sftp-quick2-path: ""; in-out property <string> sftp-quick2-label: ""; in-out property <string> sftp-quick2-group: "";
+    in-out property <string> sftp-quick3-path: ""; in-out property <string> sftp-quick3-label: ""; in-out property <string> sftp-quick3-group: "";
+    in-out property <string> sftp-quick4-path: ""; in-out property <string> sftp-quick4-label: ""; in-out property <string> sftp-quick4-group: "";
+    in-out property <string> sftp-quick5-path: ""; in-out property <string> sftp-quick5-label: ""; in-out property <string> sftp-quick5-group: "";
 
     // Per-session now (#v0.5): the AppWindow stores these in each TerminalState
     // and writes back via the set-* callbacks, so each tab/pane keeps its own SFTP
@@ -180,6 +185,7 @@ export component TerminalView inherits Rectangle {
     callback sftp-search-changed(string);
     callback sftp-search-folder(string, string);
     callback sftp-cancel-search();
+    callback sftp-quick-dir-changed(int, string, string, string);
     callback sftp-tree-expand(string);
     callback sftp-toggle-tree-scope(string);
     callback sftp-set-tree-scope(string);
@@ -1554,6 +1560,21 @@ export component TerminalView inherits Rectangle {
             tree-nodes:    root.sftp-tree-nodes;
             tree-scope:    root.sftp-tree-scope;
             selected-count: root.sftp-selected-count;
+            qa1-path <=> root.sftp-quick1-path;
+            qa1-label <=> root.sftp-quick1-label;
+            qa1-group <=> root.sftp-quick1-group;
+            qa2-path <=> root.sftp-quick2-path;
+            qa2-label <=> root.sftp-quick2-label;
+            qa2-group <=> root.sftp-quick2-group;
+            qa3-path <=> root.sftp-quick3-path;
+            qa3-label <=> root.sftp-quick3-label;
+            qa3-group <=> root.sftp-quick3-group;
+            qa4-path <=> root.sftp-quick4-path;
+            qa4-label <=> root.sftp-quick4-label;
+            qa4-group <=> root.sftp-quick4-group;
+            qa5-path <=> root.sftp-quick5-path;
+            qa5-label <=> root.sftp-quick5-label;
+            qa5-group <=> root.sftp-quick5-group;
             toggle-collapsed => {
                 if (root.sftp-collapsed) {
                     // Re-expand; the panel height was preserved while collapsed.
@@ -1574,6 +1595,7 @@ export component TerminalView inherits Rectangle {
             search-changed(q)   => { root.sftp-search-changed(q); }
             search-folder(path, q) => { root.sftp-search-folder(path, q); }
             cancel-search()    => { root.sftp-cancel-search(); }
+            quick-dir-changed(i, label, group, path) => { root.sftp-quick-dir-changed(i, label, group, path); }
             tree-expand(path)   => { root.sftp-tree-expand(path); }
             toggle-tree-scope(path) => { root.sftp-toggle-tree-scope(path); }
             set-tree-scope(path) => { root.sftp-set-tree-scope(path); }
@@ -1632,6 +1654,7 @@ export component TerminalView inherits Rectangle {
             height: root.sftp-horizontal ? parent.height : parent.sf-h;
             dock-edge: root.sftp-dock;
             glyph: "\u{E2C7}";   // folder — SFTP
+            tooltip: @tr("SFTP 文件面板");
             expand => { root.set-sftp-collapsed(false); }
         }
         }

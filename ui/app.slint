@@ -493,6 +493,11 @@ export component AppWindow inherits Window {
     in-out property <length> sftp-panel-height: 220px; // shared; lets Rust locate the drop zone
     in-out property <length> sftp-panel-width: 340px;  // SFTP extent when docked left/right
     in-out property <string> sftp-dock: "bottom";      // SFTP dock edge, shared across tabs
+    in-out property <string> sftp-quick1-path: ""; in-out property <string> sftp-quick1-label: ""; in-out property <string> sftp-quick1-group: "";
+    in-out property <string> sftp-quick2-path: ""; in-out property <string> sftp-quick2-label: ""; in-out property <string> sftp-quick2-group: "";
+    in-out property <string> sftp-quick3-path: ""; in-out property <string> sftp-quick3-label: ""; in-out property <string> sftp-quick3-group: "";
+    in-out property <string> sftp-quick4-path: ""; in-out property <string> sftp-quick4-label: ""; in-out property <string> sftp-quick4-group: "";
+    in-out property <string> sftp-quick5-path: ""; in-out property <string> sftp-quick5-label: ""; in-out property <string> sftp-quick5-group: "";
     callback pick-download-dir();            // open a folder picker
     callback open-download-dir();            // reveal the folder in the OS
     callback clear-transfers();              // wipe the transfer history
@@ -665,6 +670,7 @@ export component AppWindow inherits Window {
     callback sftp-search-folder(string /* tab-id */, string /* root dir */, string /* query */);
     // Stop the active recursive file search for this tab.
     callback sftp-cancel-search(string /* tab-id */);
+    callback sftp-quick-dir-changed(int /* index */, string /* label */, string /* group */, string /* path */);
     // Toggle expand/collapse of a tree node (also navigates to that directory).
     callback sftp-tree-expand(string /* tab-id */, string /* path */);
     callback sftp-toggle-tree-scope(string /* tab-id */, string /* path */);
@@ -823,6 +829,7 @@ export component AppWindow inherits Window {
             x: 0; y: 0; width: parent.strip-w; height: parent.height;
             dock-edge: "left";
             glyph: "\u{E88A}";   // session list / welcome
+            tooltip: root.lang-en ? "Sessions" : "会话列表";
             expand => {
                 root.welcome-collapsed = false;
                 root.set-welcome-collapsed(false);
@@ -983,6 +990,7 @@ export component AppWindow inherits Window {
             height: root.sidebar-horizontal ? parent.height : parent.sb-h;
             dock-edge: root.sidebar-dock;
             glyph: "\u{E871}";   // dashboard — resource panel
+            tooltip: root.lang-en ? "Resources" : "资源面板";
             expand => { root.sidebar-collapsed = false; }
         }
 
@@ -1181,6 +1189,21 @@ export component AppWindow inherits Window {
                     sftp-tree-nodes: term.sftp-tree-nodes;
                     sftp-tree-scope: term.sftp-tree-scope;
                     sftp-selected-count: term.sftp-selected-count;
+                    sftp-quick1-path <=> root.sftp-quick1-path;
+                    sftp-quick1-label <=> root.sftp-quick1-label;
+                    sftp-quick1-group <=> root.sftp-quick1-group;
+                    sftp-quick2-path <=> root.sftp-quick2-path;
+                    sftp-quick2-label <=> root.sftp-quick2-label;
+                    sftp-quick2-group <=> root.sftp-quick2-group;
+                    sftp-quick3-path <=> root.sftp-quick3-path;
+                    sftp-quick3-label <=> root.sftp-quick3-label;
+                    sftp-quick3-group <=> root.sftp-quick3-group;
+                    sftp-quick4-path <=> root.sftp-quick4-path;
+                    sftp-quick4-label <=> root.sftp-quick4-label;
+                    sftp-quick4-group <=> root.sftp-quick4-group;
+                    sftp-quick5-path <=> root.sftp-quick5-path;
+                    sftp-quick5-label <=> root.sftp-quick5-label;
+                    sftp-quick5-group <=> root.sftp-quick5-group;
                     quick-commands: root.quick-commands;
                     command-history: root.command-history;
                     history-view: root.history-view;
@@ -1217,6 +1240,7 @@ export component AppWindow inherits Window {
                     sftp-search-changed(q) => { root.sftp-search(term.id, q); }
                     sftp-search-folder(path, q) => { root.sftp-search-folder(term.id, path, q); }
                     sftp-cancel-search() => { root.sftp-cancel-search(term.id); }
+                    sftp-quick-dir-changed(i, label, group, path) => { root.sftp-quick-dir-changed(i, label, group, path); }
                     sftp-tree-expand(path) => { root.sftp-tree-expand(term.id, path); }
                     sftp-toggle-tree-scope(path) => { root.sftp-toggle-tree-scope(term.id, path); }
                     sftp-set-tree-scope(path) => { root.sftp-set-tree-scope(term.id, path); }

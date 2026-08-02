@@ -87,7 +87,7 @@ use i_slint_backend_winit::WinitWindowAccessor;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use tokio::runtime::Runtime;
 
-use crate::config::{AuthMethod, ConfigStore, Secret, Session, SessionKind};
+use crate::config::{AuthMethod, ConfigStore, Secret, Session, SessionKind, SftpQuickDir};
 use crate::i18n::t;
 use crate::local::spawn_local_session;
 use crate::sftp::spawn_sftp;
@@ -200,6 +200,7 @@ fn is_sftp_search_running_status(msg: &str) -> bool {
         || m.contains("Scanning")
 }
 
+#[allow(dead_code)]
 fn is_sftp_search_finished_status(msg: &str) -> bool {
     let m = msg.trim();
     m.contains("搜索完成")
@@ -437,6 +438,7 @@ pub fn run() -> Result<()> {
     // Windows the icon comes from the embedded .ico, so this is a no-op there.)
     let _ = slint::set_xdg_app_id("probe-shell");
     let window = AppWindow::new().context("failed to build Slint window")?;
+    apply_sftp_quick_dirs_to_window(&window, store.borrow().sftp_quick_dirs());
 
     // Show the crate version (from Cargo.toml at compile time) in the sidebar,
     // so the footer never drifts out of sync with the actual build.
@@ -1311,7 +1313,7 @@ pub fn run() -> Result<()> {
         sftp_handles.clone(),
         sftp_last_cwd.clone(),
     );
-    wire_sftp_callbacks(&window, sftp_handles.clone(), sftp_last_cwd.clone());
+    wire_sftp_callbacks(&window, store.clone(), sftp_handles.clone(), sftp_last_cwd.clone());
     wire_key_input(
         &window,
         handles.clone(),
@@ -2027,6 +2029,39 @@ fn builtin_local_session(id: &str, name: &str, host: &str) -> Session {
     session.group = "system".into();
     session.kind = SessionKind::Local;
     session
+}
+
+fn apply_sftp_quick_dirs_to_window(win: &AppWindow, dirs: &[SftpQuickDir]) {
+    let get = |idx: usize, field: &str| -> SharedString {
+        let Some(dir) = dirs.get(idx) else { return "".into(); };
+        match field {
+            "label" => {
+                if dir.label.trim().is_empty() {
+                    dir.path.clone().into()
+                } else {
+                    dir.label.clone().into()
+                }
+            }
+            "group" => dir.group.clone().into(),
+            "path" => dir.path.clone().into(),
+            _ => "".into(),
+        }
+    };
+    win.set_sftp_quick1_label(get(0, "label"));
+    win.set_sftp_quick1_group(get(0, "group"));
+    win.set_sftp_quick1_path(get(0, "path"));
+    win.set_sftp_quick2_label(get(1, "label"));
+    win.set_sftp_quick2_group(get(1, "group"));
+    win.set_sftp_quick2_path(get(1, "path"));
+    win.set_sftp_quick3_label(get(2, "label"));
+    win.set_sftp_quick3_group(get(2, "group"));
+    win.set_sftp_quick3_path(get(2, "path"));
+    win.set_sftp_quick4_label(get(3, "label"));
+    win.set_sftp_quick4_group(get(3, "group"));
+    win.set_sftp_quick4_path(get(3, "path"));
+    win.set_sftp_quick5_label(get(4, "label"));
+    win.set_sftp_quick5_group(get(4, "group"));
+    win.set_sftp_quick5_path(get(4, "path"));
 }
 
 // ---------------------------------------------------------------------------
@@ -4188,13 +4223,12 @@ fn apply_session_event_to_window(
         }
         SessionEvent::SftpStatus(msg) => {
             let running = is_sftp_search_running_status(msg.as_str());
-            let finished = is_sftp_search_finished_status(msg.as_str());
             update_terminal(&|t| {
                 // After the user presses X/Stop we mark the search as not running
                 // immediately. Ignore late "搜索中" progress messages from the
                 // background walker, otherwise the stop button turns red again
                 // and it looks like the cancelled search is still active.
-                if (running || finished) && !t.sftp_search_running {
+                if running && !t.sftp_search_running {
                     return;
                 }
                 t.sftp_status = msg.clone().into();
@@ -5318,9 +5352,40 @@ fn wire_tab_callbacks(
 
 fn wire_sftp_callbacks(
     window: &AppWindow,
+    store: Rc<RefCell<ConfigStore>>,
     sftp_handles: SftpHandles,
     sftp_last_cwd: SftpLastCwd,
 ) {
+    // User-managed SFTP shortcuts are global UI state and persist immediately.
+    {
+        let store = store.clone();
+        let weak = window.as_weak();
+        window.on_sftp_quick_dir_changed(
+            move |index: i32, label: SharedString, group: SharedString, path: SharedString| {
+                let idx = index.clamp(0, 4) as usize;
+                {
+                    let mut s = store.borrow_mut();
+                    let mut dirs = s.sftp_quick_dirs().to_vec();
+                    while dirs.len() <= idx {
+                        dirs.push(SftpQuickDir::default());
+                    }
+                    dirs[idx] = SftpQuickDir {
+                        label: label.to_string(),
+                        group: group.to_string(),
+                        path: path.to_string(),
+                    };
+                    s.set_sftp_quick_dirs(dirs);
+                    if let Err(err) = s.save() {
+                        tracing::warn!("failed to save SFTP quick dirs: {err:#}");
+                    }
+                }
+                if let Some(w) = weak.upgrade() {
+                    apply_sftp_quick_dirs_to_window(&w, store.borrow().sftp_quick_dirs());
+                }
+            },
+        );
+    }
+
     // Navigate to a remote path (or ".." to go up one level).
     {
         let sftp_handles = sftp_handles.clone();
@@ -6609,8 +6674,19 @@ fn wire_key_input(
                         }
                         d.insert(tab_id.to_string(), now);
                     }
-                    let Some(session) = store.borrow().get(&session_id).cloned() else {
-                        return;
+                    let session = if session_id.starts_with("system:") {
+                        match builtin_local_sessions()
+                            .into_iter()
+                            .find(|s| s.id == session_id)
+                        {
+                            Some(s) => s,
+                            None => return,
+                        }
+                    } else {
+                        match store.borrow().get(&session_id).cloned() {
+                            Some(s) => s,
+                            None => return,
+                        }
                     };
                     // Drop the dead shell/SFTP handles for this tab.
                     ctx.handles.borrow_mut().remove(tab_id.as_str());
