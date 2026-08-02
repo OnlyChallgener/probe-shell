@@ -54,6 +54,10 @@ struct TermBuffer {
     /// match — the way FinalShell rewraps on resize (#169). Only the most recent
     /// `RAW_CAP` bytes are kept; scrollback older than that won't reflow.
     raw: std::collections::VecDeque<u8>,
+    /// True after the front of `raw` has been discarded. Replaying an incomplete
+    /// stream into a fresh parser would erase valid history and reconstruct only
+    /// the retained tail.
+    raw_truncated: bool,
 }
 
 /// How much of the byte stream we retain per tab for resize-reflow (#169).
@@ -79,7 +83,6 @@ type TermBuffers = Arc<Mutex<HashMap<String, TermBuffer>>>;
 struct TerminalResizeState {
     last_valid: Option<(u32, u32)>,
     last_applied: Option<(u32, u32)>,
-    generation: i32,
 }
 
 use anyhow::{Context, Result};
@@ -2881,6 +2884,7 @@ fn wire_session_callbacks(
                     displayed_text: Vec::new(),
                     csi_state: CsiState::Normal,
                     raw: std::collections::VecDeque::new(),
+                    raw_truncated: false,
                 },
             );
             // No followed-cwd yet: the first OSC 7 always triggers a follow.
@@ -3630,13 +3634,14 @@ fn apply_terminal_resize(
     if (new_rows, new_cols) == (old_rows, old_cols) {
         return false;
     }
-    if buf.parser.screen().alternate_screen() || new_cols == old_cols {
-                // Alt-screen (tmux/vim/btop): the remote redraws the whole screen
-                // on SIGWINCH, so just resize the grid and let that redraw fill it.
+    if buf.parser.screen().alternate_screen() || new_cols == old_cols || buf.raw_truncated {
+        // Alt-screen (tmux/vim/btop): the remote redraws the whole screen on
+        // SIGWINCH. Row-only changes and incomplete raw streams must also use
+        // set_size so valid history is never destroyed by a partial replay.
         buf.parser.set_size(new_rows, new_cols);
     } else {
-                // Reflow already-printed output to the new width by replaying the
-                // byte stream — vt100's set_size only truncates/pads (#169).
+        // Reflow already-printed output to the new width by replaying the byte
+        // stream — vt100's set_size only truncates/pads (#169).
         buf.reflow(new_rows, new_cols);
     }
     // The pre/post-resize screens differ; drop the scroll-detection snapshot so
@@ -6708,6 +6713,7 @@ fn wire_key_input(
                             b.sel_anchor = None;
                             b.sel_focus = None;
                             b.raw.clear();
+                            b.raw_truncated = false;
                         }
                     }
                     if let Some(st) =
@@ -7019,18 +7025,9 @@ fn wire_key_input(
             let last_applied = {
                 let mut states = resize_states.borrow_mut();
                 let state = states.entry(tab.clone()).or_default();
-                if generation < state.generation {
-                    tracing::debug!(
-                        tab_id = %tab,
-                        visible = true,
-                        generation,
-                        latest_generation = state.generation,
-                        source = %source,
-                        "terminal_resize ignored: stale generation"
-                    );
-                    return;
-                }
-                state.generation = generation;
+                // Debounce generations belong to the current Slint component.
+                // A rebuilt TerminalView restarts at zero, so persisting that
+                // counter in Rust would reject every later request as stale.
                 state.last_valid = Some((cols, rows));
                 if state.last_applied == Some((cols, rows)) {
                     tracing::debug!(
@@ -7159,6 +7156,7 @@ fn wire_key_input(
                 buf.sel_focus = None;
                 buf.displayed_text = Vec::new();
                 buf.raw.clear();
+                buf.raw_truncated = false;
             }
             if let Some(win) = weak.upgrade() {
                 set_terminal_row(&win, &tid, |row| {
@@ -8176,6 +8174,7 @@ impl TermBuffer {
         if self.raw.len() <= RAW_CAP {
             return;
         }
+        self.raw_truncated = true;
         let overflow = self.raw.len() - RAW_CAP;
         self.raw.drain(0..overflow);
         while let Some(&b) = self.raw.front() {
@@ -8765,6 +8764,7 @@ mod selection_tests {
             displayed_text: Vec::new(),
             csi_state: CsiState::Normal,
             raw: std::collections::VecDeque::new(),
+            raw_truncated: false,
         }
     }
 
