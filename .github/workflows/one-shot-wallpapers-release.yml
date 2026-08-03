@@ -1,33 +1,55 @@
-name: One-shot wallpapers and v0.7.0 release
+name: Finalize wallpapers and v0.7.0
 
 "on":
   push:
     branches:
       - fix/sftp-local-terminal
     paths:
-      - .github/workflows/one-shot-wallpapers-release.yml
-      - scripts/prepare_v070.py
-      - assets/wallpapers/probe-wallpapers.zip
-      - .github/workflows/release.yml
+      - assets/wallpapers/dark-mecha.jpg
+      - assets/wallpapers/dark-city.jpg
+      - assets/wallpapers/dark-network.jpg
+      - assets/wallpapers/light-crystal.jpg
+      - assets/wallpapers/light-network.jpg
+      - assets/wallpapers/light-lab.jpg
+  workflow_dispatch:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
-  group: one-shot-wallpapers-v070
+  group: finalize-wallpapers-v070
   cancel-in-progress: true
 
 jobs:
-  prepare-test-tag:
-    name: Patch, verify and tag v0.7.0
+  finalize:
+    name: Integrate, verify and release v0.7.0
     runs-on: ubuntu-22.04
-    timeout-minutes: 50
+    timeout-minutes: 60
     steps:
       - name: Checkout fix branch
         uses: actions/checkout@v4
         with:
           ref: fix/sftp-local-terminal
           fetch-depth: 0
+
+      - name: Validate all six wallpaper files
+        id: assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(
+            assets/wallpapers/dark-mecha.jpg
+            assets/wallpapers/dark-city.jpg
+            assets/wallpapers/dark-network.jpg
+            assets/wallpapers/light-crystal.jpg
+            assets/wallpapers/light-network.jpg
+            assets/wallpapers/light-lab.jpg
+          )
+          for file in "${files[@]}"; do
+            test -s "$file"
+            file "$file" | grep -qiE 'JPEG image data|PNG image data'
+          done
 
       - name: Install Linux build dependencies
         id: deps
@@ -47,29 +69,11 @@ jobs:
         with:
           components: rustfmt
 
-      - name: Expand bundled wallpaper assets
-        id: assets
-        shell: bash
-        run: |
-          set -euo pipefail
-          archive="assets/wallpapers/probe-wallpapers.zip"
-          exact_archive="${RUNNER_TEMP}/probe-wallpapers.zip"
-          git cat-file blob "HEAD:${archive}" > "${exact_archive}"
-          unzip -t "${exact_archive}"
-          unzip -o "${exact_archive}" -d assets/wallpapers
-          rm "${archive}"
-          test -f assets/wallpapers/dark-mecha.jpg
-          test -f assets/wallpapers/dark-city.jpg
-          test -f assets/wallpapers/dark-network.jpg
-          test -f assets/wallpapers/light-crystal.jpg
-          test -f assets/wallpapers/light-network.jpg
-          test -f assets/wallpapers/light-lab.jpg
-
-      - name: Patch wallpaper integration and version
+      - name: Apply wallpaper settings and v0.7.0 version
         id: patch
         run: python scripts/prepare_v070.py
 
-      - name: Validate formatting and tests
+      - name: Verify formatting, compilation and tests
         id: verify
         shell: bash
         run: |
@@ -79,7 +83,7 @@ jobs:
           cargo check
           cargo test --locked
 
-      - name: Commit verified files and tag
+      - name: Commit verified integration and create tag
         id: publish
         shell: bash
         run: |
@@ -88,45 +92,58 @@ jobs:
             echo "Tag v0.7.0 already exists; refusing to move it." >&2
             exit 1
           fi
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm .github/workflows/one-shot-wallpapers-release.yml scripts/prepare_v070.py
+
+          git rm -f --ignore-unmatch assets/wallpapers/probe-wallpapers.zip
           git rm -f --ignore-unmatch ONE_SHOT_FAILURE.md
+          git rm .github/workflows/one-shot-wallpapers-release.yml scripts/prepare_v070.py
           git add Cargo.toml Cargo.lock src/config.rs src/wallpaper.rs ui/interface_panel.slint \
             .github/workflows/release.yml assets/wallpapers
           git commit -m "feat: add wallpaper collection and multi-platform release"
           git push origin HEAD:fix/sftp-local-terminal
+
           git tag -a v0.7.0 -m "Probe Shell v0.7.0"
           git push origin v0.7.0
+
+      - name: Start the multi-platform release workflow
+        id: dispatch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run release.yml --ref v0.7.0
 
       - name: Record failure stage on branch
         if: failure()
         shell: bash
         env:
+          ASSETS: ${{ steps.assets.outcome }}
           DEPS: ${{ steps.deps.outcome }}
           RUST: ${{ steps.rust.outcome }}
-          ASSETS: ${{ steps.assets.outcome }}
           PATCH: ${{ steps.patch.outcome }}
           VERIFY: ${{ steps.verify.outcome }}
           PUBLISH: ${{ steps.publish.outcome }}
+          DISPATCH: ${{ steps.dispatch.outcome }}
         run: |
           set -euo pipefail
           git reset --hard HEAD
           git clean -fd
           cat > ONE_SHOT_FAILURE.md <<EOF
-          # v0.7.0 one-shot failure
+          # v0.7.0 finalization failure
 
           Run: ${GITHUB_RUN_ID}
 
+          - assets: ${ASSETS}
           - dependencies: ${DEPS}
           - rust: ${RUST}
-          - assets: ${ASSETS}
           - patch: ${PATCH}
           - verify: ${VERIFY}
           - publish: ${PUBLISH}
+          - release dispatch: ${DISPATCH}
           EOF
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add ONE_SHOT_FAILURE.md
-          git commit -m "ci: record v0.7.0 one-shot failure" || true
+          git commit -m "ci: record v0.7.0 finalization failure" || true
           git push origin HEAD:fix/sftp-local-terminal
