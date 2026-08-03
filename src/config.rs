@@ -82,8 +82,7 @@ pub fn log_dir() -> PathBuf {
 /// Pre-0.4.15 location: the per-user OS config dir
 /// (`%APPDATA%/probe-shell`, `~/.config/probe-shell`, …).
 fn legacy_data_dir() -> Option<PathBuf> {
-    ProjectDirs::from("dev", "OnlyChallenger", "probe-shell")
-        .map(|d| d.config_dir().to_path_buf())
+    ProjectDirs::from("dev", "OnlyChallenger", "probe-shell").map(|d| d.config_dir().to_path_buf())
 }
 
 /// Portable location: a `config/` folder beside the executable.
@@ -151,8 +150,7 @@ fn migrate_legacy(legacy: &Path, portable: &Path) {
                     #[cfg(unix)]
                     if name == "secret.key" {
                         use std::os::unix::fs::PermissionsExt;
-                        let _ =
-                            fs::set_permissions(&dst, fs::Permissions::from_mode(0o600));
+                        let _ = fs::set_permissions(&dst, fs::Permissions::from_mode(0o600));
                     }
                     tracing::info!(
                         "migrated {name} to portable config dir {}",
@@ -198,7 +196,11 @@ impl Drop for Secret {
 impl std::fmt::Debug for Secret {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Never reveal the contents in logs / debug output.
-        f.write_str(if self.0.is_empty() { "Secret(\"\")" } else { "Secret(***)" })
+        f.write_str(if self.0.is_empty() {
+            "Secret(\"\")"
+        } else {
+            "Secret(***)"
+        })
     }
 }
 
@@ -270,7 +272,7 @@ fn default_wallpaper() -> String {
     // *existing* config that predates the field stays on tech — `migrate_defaults`
     // keeps those users on the sci-fi tech wallpaper. Brand-new installs get
     // the same Probe Shell default from `fresh_config`.
-    "builtin:tech".to_string()
+    "builtin:dark-mecha".to_string()
 }
 
 /// Bump when `migrate_defaults` gains a new one-time default-layout change.
@@ -282,7 +284,7 @@ pub const DEFAULTS_REV: u32 = 2;
 /// and marks the migration done so it is not re-applied.
 fn fresh_config() -> ConfigFile {
     ConfigFile {
-        wallpaper: "builtin:tech".to_string(),
+        wallpaper: "builtin:dark-mecha".to_string(),
         welcome_as_sidebar: true,
         sidebar_dock: "right".to_string(),
         wallpaper_overlay: 0.48,
@@ -650,7 +652,11 @@ pub struct ConfigFile {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ExportFile {
     /// Format marker / version so the schema can evolve later.
-    #[serde(rename = "probe_shell_export", alias = "meatshell_export", alias = "probe-shell_export")]
+    #[serde(
+        rename = "probe_shell_export",
+        alias = "meatshell_export",
+        alias = "probe-shell_export"
+    )]
     probe_shell_export: u32,
     sessions: Vec<Session>,
 }
@@ -700,7 +706,11 @@ impl ConfigStore {
             .map_err(|e| anyhow::anyhow!("password encrypt error: {e}"))?;
         let mut blob = nonce.to_vec();
         blob.extend_from_slice(&ciphertext);
-        Ok(format!("{}{}", Self::ENC_PREFIX, URL_SAFE_NO_PAD.encode(&blob)))
+        Ok(format!(
+            "{}{}",
+            Self::ENC_PREFIX,
+            URL_SAFE_NO_PAD.encode(&blob)
+        ))
     }
 
     /// Try to decrypt a value produced by [`Self::encrypt`].
@@ -748,9 +758,7 @@ impl ConfigStore {
         {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(&key_path, fs::Permissions::from_mode(0o600))
-                .with_context(|| {
-                    format!("failed to set permissions on {}", key_path.display())
-                })?;
+                .with_context(|| format!("failed to set permissions on {}", key_path.display()))?;
         }
         tracing::info!("generated new encryption key at {}", key_path.display());
         Ok(key)
@@ -768,9 +776,8 @@ impl ConfigStore {
             .context("config path has no parent directory")?
             .to_path_buf();
 
-        fs::create_dir_all(&config_dir).with_context(|| {
-            format!("failed to create config dir {}", config_dir.display())
-        })?;
+        fs::create_dir_all(&config_dir)
+            .with_context(|| format!("failed to create config dir {}", config_dir.display()))?;
 
         let key = Self::load_or_create_key(&config_dir)?;
 
@@ -783,9 +790,7 @@ impl ConfigStore {
                     // Decrypt any encrypted passwords; leave legacy plaintext
                     // values untouched (they will be encrypted on next save).
                     for session in &mut cfg.sessions {
-                        if let Some(plain) =
-                            Self::try_decrypt(&key, session.password.as_str())
-                        {
+                        if let Some(plain) = Self::try_decrypt(&key, session.password.as_str()) {
                             session.password = Secret::new(plain);
                         }
                     }
@@ -836,12 +841,7 @@ impl ConfigStore {
     }
 
     pub fn upsert(&mut self, session: Session) {
-        if let Some(existing) = self
-            .cache
-            .sessions
-            .iter_mut()
-            .find(|s| s.id == session.id)
-        {
+        if let Some(existing) = self.cache.sessions.iter_mut().find(|s| s.id == session.id) {
             *existing = session;
         } else {
             self.cache.sessions.push(session);
@@ -1093,14 +1093,22 @@ impl ConfigStore {
     /// sensible edge when the stored string is empty.
     pub fn sidebar_height(&self) -> f32 {
         let h = self.cache.sidebar_height;
-        if h <= 0.0 { default_sidebar_height() } else { h }
+        if h <= 0.0 {
+            default_sidebar_height()
+        } else {
+            h
+        }
     }
     pub fn set_sidebar_height(&mut self, v: f32) {
         self.cache.sidebar_height = v;
     }
     pub fn sidebar_dock(&self) -> String {
         let d = self.cache.sidebar_dock.trim();
-        if d.is_empty() { "left".into() } else { d.to_string() }
+        if d.is_empty() {
+            "left".into()
+        } else {
+            d.to_string()
+        }
     }
     pub fn set_sidebar_dock(&mut self, v: String) {
         self.cache.sidebar_dock = v;
@@ -1113,7 +1121,11 @@ impl ConfigStore {
     }
     pub fn welcome_sidebar_width(&self) -> f32 {
         let w = self.cache.welcome_sidebar_width;
-        if w <= 0.0 { 240.0 } else { w }
+        if w <= 0.0 {
+            240.0
+        } else {
+            w
+        }
     }
     pub fn set_welcome_sidebar_width(&mut self, v: f32) {
         self.cache.welcome_sidebar_width = v;
@@ -1141,34 +1153,54 @@ impl ConfigStore {
         let a = self.cache.wallpaper_overlay;
         // Floor lowered 0.40 → 0.30 so the new 0.38 default (and more see-through
         // panels) is reachable (#new-user-defaults).
-        if a <= 0.0 { 0.86 } else { a.clamp(0.30, 1.0) }
+        if a <= 0.0 {
+            0.86
+        } else {
+            a.clamp(0.30, 1.0)
+        }
     }
     pub fn set_wallpaper_overlay(&mut self, v: f32) {
         self.cache.wallpaper_overlay = v.clamp(0.30, 1.0);
     }
     pub fn panel_font(&self) -> u32 {
-        if self.cache.panel_font == 0 { 100 } else { self.cache.panel_font }
+        if self.cache.panel_font == 0 {
+            100
+        } else {
+            self.cache.panel_font
+        }
     }
     pub fn set_panel_font(&mut self, percent: u32) {
         self.cache.panel_font = percent.clamp(80, 160);
     }
     pub fn sftp_panel_width(&self) -> f32 {
         let w = self.cache.sftp_panel_width;
-        if w <= 0.0 { default_sftp_width() } else { w }
+        if w <= 0.0 {
+            default_sftp_width()
+        } else {
+            w
+        }
     }
     pub fn set_sftp_panel_width(&mut self, v: f32) {
         self.cache.sftp_panel_width = v;
     }
     pub fn sftp_panel_height(&self) -> f32 {
         let h = self.cache.sftp_panel_height;
-        if h <= 0.0 { default_sftp_height() } else { h }
+        if h <= 0.0 {
+            default_sftp_height()
+        } else {
+            h
+        }
     }
     pub fn set_sftp_panel_height(&mut self, v: f32) {
         self.cache.sftp_panel_height = v;
     }
     pub fn sftp_dock(&self) -> String {
         let d = self.cache.sftp_dock.trim();
-        if d.is_empty() { "bottom".into() } else { d.to_string() }
+        if d.is_empty() {
+            "bottom".into()
+        } else {
+            d.to_string()
+        }
     }
     pub fn set_sftp_dock(&mut self, v: String) {
         self.cache.sftp_dock = v;
@@ -1274,8 +1306,7 @@ impl ConfigStore {
         let raw = serde_json::to_string_pretty(&disk)?;
         // Write to a sibling temp file then rename — cheap atomicity.
         let tmp = self.path.with_extension("json.tmp");
-        fs::write(&tmp, &raw)
-            .with_context(|| format!("failed to write {}", tmp.display()))?;
+        fs::write(&tmp, &raw).with_context(|| format!("failed to write {}", tmp.display()))?;
         // Restrict to owner-only before publishing (#34): sessions.json holds
         // (encrypted) credentials, so it shouldn't be world-readable. Set 0600
         // on the temp file so the permission is already in place at rename.
@@ -1302,7 +1333,11 @@ impl ConfigStore {
             .map_err(|e| anyhow::anyhow!("export encrypt error: {e}"))?;
         let mut blob = nonce.to_vec();
         blob.extend_from_slice(&ciphertext);
-        Ok(format!("{}{}", Self::EXPORT_PREFIX, URL_SAFE_NO_PAD.encode(&blob)))
+        Ok(format!(
+            "{}{}",
+            Self::EXPORT_PREFIX,
+            URL_SAFE_NO_PAD.encode(&blob)
+        ))
     }
 
     /// Decrypt a value produced by [`Self::encrypt_export`]; `None` if it isn't one.
@@ -1347,8 +1382,8 @@ impl ConfigStore {
     pub fn import_from(&mut self, path: &Path) -> Result<(usize, usize)> {
         let raw = fs::read_to_string(path)
             .with_context(|| format!("failed to read {}", path.display()))?;
-        let file: ExportFile = serde_json::from_str(&raw)
-            .context("not a valid probe-shell export file")?;
+        let file: ExportFile =
+            serde_json::from_str(&raw).context("not a valid probe-shell export file")?;
 
         let mut added = 0usize;
         let mut skipped = 0usize;
@@ -1392,12 +1427,12 @@ mod tests {
     }
 
     #[test]
-    fn wallpaper_defaults_to_tech_but_keeps_explicit_choice() {
+    fn wallpaper_defaults_to_mecha_but_keeps_explicit_choice() {
         // Fresh install (no file).
-        assert_eq!(fresh_config().wallpaper, "builtin:tech");
+        assert_eq!(fresh_config().wallpaper, "builtin:dark-mecha");
         // User upgrading from before the feature: JSON without the key.
         let cfg: ConfigFile = serde_json::from_str("{}").unwrap();
-        assert_eq!(cfg.wallpaper, "builtin:tech");
+        assert_eq!(cfg.wallpaper, "builtin:dark-mecha");
         // An explicit "无"/none (stored as "") is preserved, not re-defaulted.
         let cfg: ConfigFile = serde_json::from_str(r#"{"wallpaper":""}"#).unwrap();
         assert_eq!(cfg.wallpaper, "");
@@ -1418,8 +1453,7 @@ mod tests {
             ..Session::new_empty()
         });
 
-        let export_path =
-            std::env::temp_dir().join(format!("ms-exp-{}.json", Uuid::new_v4()));
+        let export_path = std::env::temp_dir().join(format!("ms-exp-{}.json", Uuid::new_v4()));
         assert_eq!(a.export_to(&export_path).unwrap(), 1);
 
         // The file keeps host/user plaintext but the password is obfuscated.

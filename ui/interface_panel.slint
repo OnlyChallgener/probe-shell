@@ -194,9 +194,18 @@ export component InterfacePanel inherits Rectangle {
 
     property <string> ifd-page: "font";
     property <bool> wp-is-custom:
-        root.current-wallpaper != "" && root.current-wallpaper != "builtin:light"
-        && root.current-wallpaper != "builtin:dark" && root.current-wallpaper != "builtin:tech"
-        && root.current-wallpaper != "builtin:aurora";
+        root.current-wallpaper != ""
+        && root.current-wallpaper != "builtin:light"
+        && root.current-wallpaper != "builtin:dark"
+        && root.current-wallpaper != "builtin:tech"
+        && root.current-wallpaper != "builtin:aurora"
+        && root.current-wallpaper != "builtin:miku"
+        && root.current-wallpaper != "builtin:dark-mecha"
+        && root.current-wallpaper != "builtin:dark-city"
+        && root.current-wallpaper != "builtin:dark-network"
+        && root.current-wallpaper != "builtin:light-crystal"
+        && root.current-wallpaper != "builtin:light-network"
+        && root.current-wallpaper != "builtin:light-lab";
 
     callback set-term-font(string);
     callback set-term-font-size(int);
@@ -354,13 +363,82 @@ export component InterfacePanel inherits Rectangle {
                 SectionHeader { text: root.lang-en ? "WALLPAPER" : "壁纸"; height: 24px; }
                 Text {
                     text: root.lang-en
-                        ? "Pick a wallpaper — the interface tints itself to match (accent, panels, light/dark)."
-                        : "选一张壁纸,界面会沉浸式地适配它的颜色(强调色、面板、深浅)。";
-                    color: Theme.text-muted; font-size: 11px * Theme.panel-font; wrap: word-wrap;
+                        ? "Six built-in wallpapers are tuned for terminal readability. Light themes use misty blue-grey rather than bright white."
+                        : "六张内置壁纸均针对终端文字可读性调整；日间主题采用雾蓝灰，不使用刺眼纯白。";
+                    color: Theme.text-muted;
+                    font-size: 11px * Theme.panel-font;
+                    wrap: word-wrap;
                 }
-                Rectangle { height: 12px; }
+                Rectangle { height: 10px; }
 
-                // Built-in choices: None / Light / Dark / Fantasy 3048.
+                SectionHeader { text: root.lang-en ? "DARK" : "深色模式"; height: 20px; }
+                HorizontalLayout {
+                    spacing: 11px;
+                    alignment: start;
+                    VerticalLayout {
+                        spacing: 5px;
+                        WallpaperSwatch {
+                            selected: root.current-wallpaper == "builtin:dark-mecha" || root.current-wallpaper == "builtin:dark";
+                            clicked => { root.set-wallpaper("builtin:dark-mecha"); }
+                            Image { width: 100%; height: 100%; source: @image-url("../assets/wallpapers/dark-mecha.jpg"); image-fit: cover; }
+                        }
+                        Text { text: root.lang-en ? "Mecha Core" : "机甲核心"; font-size: 11px * Theme.panel-font; color: Theme.text-secondary; horizontal-alignment: center; }
+                    }
+                    VerticalLayout {
+                        spacing: 5px;
+                        WallpaperSwatch {
+                            selected: root.current-wallpaper == "builtin:dark-city";
+                            clicked => { root.set-wallpaper("builtin:dark-city"); }
+                            Image { width: 100%; height: 100%; source: @image-url("../assets/wallpapers/dark-city.jpg"); image-fit: cover; }
+                        }
+                        Text { text: root.lang-en ? "Cyber City" : "赛博城市"; font-size: 11px * Theme.panel-font; color: Theme.text-secondary; horizontal-alignment: center; }
+                    }
+                    VerticalLayout {
+                        spacing: 5px;
+                        WallpaperSwatch {
+                            selected: root.current-wallpaper == "builtin:dark-network" || root.current-wallpaper == "builtin:tech";
+                            clicked => { root.set-wallpaper("builtin:dark-network"); }
+                            Image { width: 100%; height: 100%; source: @image-url("../assets/wallpapers/dark-network.jpg"); image-fit: cover; }
+                        }
+                        Text { text: root.lang-en ? "Network Space" : "网络星空"; font-size: 11px * Theme.panel-font; color: Theme.text-secondary; horizontal-alignment: center; }
+                    }
+                }
+
+                Rectangle { height: 10px; }
+                SectionHeader { text: root.lang-en ? "LIGHT" : "日间模式"; height: 20px; }
+                HorizontalLayout {
+                    spacing: 11px;
+                    alignment: start;
+                    VerticalLayout {
+                        spacing: 5px;
+                        WallpaperSwatch {
+                            selected: root.current-wallpaper == "builtin:light-crystal" || root.current-wallpaper == "builtin:light";
+                            clicked => { root.set-wallpaper("builtin:light-crystal"); }
+                            Image { width: 100%; height: 100%; source: @image-url("../assets/wallpapers/light-crystal.jpg"); image-fit: cover; }
+                        }
+                        Text { text: root.lang-en ? "Crystal Future" : "冰晶未来"; font-size: 11px * Theme.panel-font; color: Theme.text-secondary; horizontal-alignment: center; }
+                    }
+                    VerticalLayout {
+                        spacing: 5px;
+                        WallpaperSwatch {
+                            selected: root.current-wallpaper == "builtin:light-network";
+                            clicked => { root.set-wallpaper("builtin:light-network"); }
+                            Image { width: 100%; height: 100%; source: @image-url("../assets/wallpapers/light-network.jpg"); image-fit: cover; }
+                        }
+                        Text { text: root.lang-en ? "Network Atlas" : "网络星图"; font-size: 11px * Theme.panel-font; color: Theme.text-secondary; horizontal-alignment: center; }
+                    }
+                    VerticalLayout {
+                        spacing: 5px;
+                        WallpaperSwatch {
+                            selected: root.current-wallpaper == "builtin:light-lab";
+                            clicked => { root.set-wallpaper("builtin:light-lab"); }
+                            Image { width: 100%; height: 100%; source: @image-url("../assets/wallpapers/light-lab.jpg"); image-fit: cover; }
+                        }
+                        Text { text: root.lang-en ? "Future Lab" : "未来实验室"; font-size: 11px * Theme.panel-font; color: Theme.text-secondary; horizontal-alignment: center; }
+                    }
+                }
+
+                Rectangle { height: 10px; }
                 HorizontalLayout {
                     spacing: 11px;
                     alignment: start;
@@ -370,182 +448,41 @@ export component InterfacePanel inherits Rectangle {
                             width: 100px;
                             selected: root.current-wallpaper == "";
                             clicked => { root.set-wallpaper(""); }
-                            Rectangle {
-                                width: 100%; height: 100%;
-                                background: Theme.window-base;
-                                Text {
-                                    text: "\u{E14C}"; // clear / none
-                                    font-family: "Material Icons"; color: Theme.text-muted;
-                                    font-size: 22px * Theme.panel-font;
-                                    width: 100%; height: 100%;
-                                    horizontal-alignment: center; vertical-alignment: center;
-                                }
-                            }
+                            Rectangle { width: 100%; height: 100%; background: Theme.window-base; }
+                            Text { text: "\u{E14C}"; font-family: "Material Icons"; font-size: 26px * Theme.panel-font; color: Theme.text-muted; horizontal-alignment: center; vertical-alignment: center; }
                         }
-                        Text { text: root.lang-en ? "None" : "无"; font-size: 11px * Theme.panel-font;
-                               color: Theme.text-secondary; horizontal-alignment: center; }
+                        Text { text: root.lang-en ? "None" : "无"; font-size: 11px * Theme.panel-font; color: Theme.text-secondary; horizontal-alignment: center; }
                     }
                     VerticalLayout {
                         spacing: 5px;
                         WallpaperSwatch {
-                            width: 100px;
-                            selected: root.current-wallpaper == "builtin:light";
-                            clicked => { root.set-wallpaper("builtin:light"); }
-                            Rectangle {
-                                width: 100%; height: 100%;
-                                background: @linear-gradient(135deg, #eff3fb 0%, #d5e1f2 100%);
-                                Rectangle {
-                                    x: parent.width * 0.66; y: -parent.height * 0.2;
-                                    width: 56px; height: 56px; border-radius: 28px;
-                                    background: #4a90e2; opacity: 0.30;
-                                }
-                            }
-                        }
-                        Text { text: root.lang-en ? "Probe Light" : "探针·浅"; font-size: 11px * Theme.panel-font;
-                               color: Theme.text-secondary; horizontal-alignment: center; }
-                    }
-                    VerticalLayout {
-                        spacing: 5px;
-                        WallpaperSwatch {
-                            width: 100px;
-                            selected: root.current-wallpaper == "builtin:dark";
-                            clicked => { root.set-wallpaper("builtin:dark"); }
-                            Rectangle {
-                                width: 100%; height: 100%;
-                                background: @linear-gradient(135deg, #10131a 0%, #1b2233 100%);
-                                Rectangle {
-                                    x: parent.width * 0.66; y: -parent.height * 0.2;
-                                    width: 56px; height: 56px; border-radius: 28px;
-                                    background: #4a6ce0; opacity: 0.40;
-                                }
-                            }
-                        }
-                        Text { text: root.lang-en ? "Probe Dark" : "探针·暗"; font-size: 11px * Theme.panel-font;
-                               color: Theme.text-secondary; horizontal-alignment: center; }
-                    }
-                    VerticalLayout {
-                        spacing: 5px;
-                        WallpaperSwatch {
-                            width: 100px;
-                            selected: root.current-wallpaper == "builtin:tech";
-                            clicked => { root.set-wallpaper("builtin:tech"); }
-                            Rectangle {
-                                width: 100%; height: 100%;
-                                background: @linear-gradient(180deg, #05060f 0%, #0b1430 55%, #1a0a2e 100%);
-                                clip: true;
-                                // glowing planet
-                                Rectangle {
-                                    x: parent.width * 0.5 - 16px; y: parent.height * 0.22;
-                                    width: 32px; height: 32px; border-radius: 16px;
-                                    background: @radial-gradient(circle, #ff5ea8 0%, #ff5ea800 70%);
-                                }
-                                // neon horizon line
-                                Rectangle {
-                                    y: parent.height * 0.58; width: parent.width; height: 2px;
-                                    background: #19e6ff; opacity: 0.85;
-                                }
-                            }
-                        }
-                        Text { text: root.lang-en ? "Fantasy 3048" : "幻想3048"; font-size: 11px * Theme.panel-font;
-                               color: Theme.text-secondary; horizontal-alignment: center; }
-                    }
-                    VerticalLayout {
-                        spacing: 5px;
-                        WallpaperSwatch {
-                            width: 100px;
-                            selected: root.current-wallpaper == "builtin:aurora";
-                            clicked => { root.set-wallpaper("builtin:aurora"); }
-                            Image {
-                                width: 100%; height: 100%;
-                                source: @image-url("../assets/aurora.jpg");
-                                image-fit: cover;
-                            }
-                        }
-                        Text { text: root.lang-en ? "Aurora" : "极光"; font-size: 11px * Theme.panel-font;
-                               color: Theme.text-secondary; horizontal-alignment: center; }
-                    }
-                }
-
-                Rectangle { height: 16px; }
-                SectionHeader { text: root.lang-en ? "CUSTOM" : "自定义"; height: 22px; }
-                HorizontalLayout {
-                    spacing: 14px;
-                    alignment: start;
-                    WallpaperSwatch {
-                        selected: root.wp-is-custom;
-                        clicked => { root.pick-wallpaper-file(); }
-                        // Show the real image when a custom one is active, else a
-                        // "choose a file" placeholder.
-                        if root.wp-is-custom : Image {
-                            width: 100%; height: 100%;
-                            source: Theme.wallpaper;
-                            image-fit: cover;
-                        }
-                        if !root.wp-is-custom : Rectangle {
-                            width: 100%; height: 100%;
-                            background: Theme.bg-elevated;
-                            Text {
-                                text: "\u{E2C6}"; // folder-open
-                                font-family: "Material Icons"; color: Theme.text-secondary;
-                                font-size: 22px * Theme.panel-font;
-                                width: 100%; height: 100%;
-                                horizontal-alignment: center; vertical-alignment: center;
-                            }
-                        }
-                    }
-                    VerticalLayout {
-                        alignment: center;
-                        spacing: 6px;
-                        Rectangle {
-                            width: 130px; height: 30px;
-                            border-radius: 6px;
-                            background: pick-ta.has-hover ? Theme.accent-hover : Theme.accent;
-                            pick-ta := TouchArea {
-                                mouse-cursor: pointer;
-                                clicked => { root.pick-wallpaper-file(); }
-                            }
-                            Text {
-                                text: root.lang-en ? "Choose file…" : "选择文件…";
-                                color: white; font-size: 12px * Theme.panel-font;
-                                width: 100%; height: 100%;
-                                horizontal-alignment: center; vertical-alignment: center;
-                            }
-                        }
-                        if root.wp-is-custom : Text {
-                            text: root.custom-wallpaper-name;
-                            color: Theme.text-muted; font-size: 11px * Theme.panel-font;
-                            width: 150px; overflow: elide;
-                        }
-                    }
-                }
-
-                Rectangle { height: 16px; }
-                SectionHeader { text: root.lang-en ? "OVERLAY" : "遮罩"; height: 22px; }
-                SettingRow {
-                    label: root.lang-en ? "Wallpaper transparency" : "壁纸遮罩透明度";
-                    desc: root.lang-en
-                        ? "How much the wallpaper shows through panels and the terminal (no effect without a wallpaper)."
-                        : "壁纸透过面板 / 终端背景的程度,越往右越透;没设壁纸时不生效。";
-                    show-divider: false;
-                    HorizontalLayout {
-                        spacing: 8px;
-                        Slider {
                             width: 150px;
-                            minimum: 0;
-                            // Up to 70% transparency (overlay floor 0.30) so the
-                            // 0.38 default (62%) and more see-through panels fit.
-                            maximum: 70;
-                            value: (1.0 - root.wallpaper-overlay) * 100;
-                            changed(v) => { root.wallpaper-overlay = 1.0 - v / 100; }
-                            released(v) => { root.persist-wallpaper-overlay(1.0 - v / 100); }
+                            selected: root.wp-is-custom;
+                            clicked => { root.pick-wallpaper-file(); }
+                            Rectangle { width: 100%; height: 100%; background: Theme.bg-elevated; }
+                            Text { text: "\u{E2C7}"; font-family: "Material Icons"; font-size: 25px * Theme.panel-font; color: Theme.accent; horizontal-alignment: center; vertical-alignment: center; }
                         }
                         Text {
-                            text: "\{round((1.0 - root.wallpaper-overlay) * 100)}%";
+                            text: root.custom-wallpaper-name != "" ? root.custom-wallpaper-name : (root.lang-en ? "Custom image" : "自定义图片");
+                            font-size: 11px * Theme.panel-font;
                             color: Theme.text-secondary;
-                            font-size: 12px * Theme.panel-font;
-                            vertical-alignment: center;
-                            width: 34px;
+                            horizontal-alignment: center;
                         }
+                    }
+                }
+
+                Rectangle { height: 8px; }
+                SettingRow {
+                    label: root.lang-en ? "Panel opacity" : "面板透明度";
+                    desc: root.lang-en ? "Higher values improve text contrast on detailed images." : "壁纸细节较多时，提高数值可增强文字对比度。";
+                    show-divider: false;
+                    Stepper {
+                        value: round(root.wallpaper-overlay * 100);
+                        minimum: 40;
+                        maximum: 100;
+                        step: 5;
+                        unit: "%";
+                        changed(v) => { root.persist-wallpaper-overlay(v / 100); }
                     }
                 }
             }

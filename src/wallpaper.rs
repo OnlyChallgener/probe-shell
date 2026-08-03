@@ -47,9 +47,13 @@ pub fn load(id: &str) -> Option<Wallpaper> {
         return None;
     }
     let buf = match id {
-        "builtin:light" => render_builtin(false),
-        "builtin:dark" => render_builtin(true),
-        "builtin:tech" => render_tech(),
+        // Legacy ids are preserved so existing configs never break.
+        "builtin:light" | "builtin:light-crystal" => decode_bundled("light-crystal.jpg")?,
+        "builtin:dark" | "builtin:dark-mecha" => decode_bundled("dark-mecha.jpg")?,
+        "builtin:tech" | "builtin:dark-network" => decode_bundled("dark-network.jpg")?,
+        "builtin:dark-city" => decode_bundled("dark-city.jpg")?,
+        "builtin:light-network" => decode_bundled("light-network.jpg")?,
+        "builtin:light-lab" => decode_bundled("light-lab.jpg")?,
         "builtin:aurora" | "builtin:miku" => decode_aurora()?,
         path => decode_custom(path)?,
     };
@@ -62,7 +66,20 @@ pub fn load(id: &str) -> Option<Wallpaper> {
 
 /// True if `id` names one of the procedurally-drawn built-ins.
 pub fn is_builtin(id: &str) -> bool {
-    id == "builtin:light" || id == "builtin:dark" || id == "builtin:tech" || id == "builtin:aurora" || id == "builtin:miku"
+    matches!(
+        id,
+        "builtin:light"
+            | "builtin:dark"
+            | "builtin:tech"
+            | "builtin:aurora"
+            | "builtin:miku"
+            | "builtin:dark-mecha"
+            | "builtin:dark-city"
+            | "builtin:dark-network"
+            | "builtin:light-crystal"
+            | "builtin:light-network"
+            | "builtin:light-lab"
+    )
 }
 
 // ── Built-in wallpapers ───────────────────────────────────────────────────────
@@ -206,12 +223,28 @@ fn grid_line(t: f32, halfwidth: f32) -> f32 {
 
 /// Cheap deterministic per-pixel hash in [0, 1) for scattering stars.
 fn hash2(x: u32, y: u32) -> f32 {
-    let mut h = x.wrapping_mul(374761393).wrapping_add(y.wrapping_mul(668265263));
+    let mut h = x
+        .wrapping_mul(374761393)
+        .wrapping_add(y.wrapping_mul(668265263));
     h = (h ^ (h >> 13)).wrapping_mul(1274126177);
     ((h ^ (h >> 16)) & 0x00ff_ffff) as f32 / 16777216.0
 }
 
 // ── Custom wallpapers ─────────────────────────────────────────────────────────
+
+/// Decode one of Probe Shell's bundled wallpaper assets.
+fn decode_bundled(name: &str) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
+    let bytes: &[u8] = match name {
+        "dark-mecha.jpg" => include_bytes!("../assets/wallpapers/dark-mecha.jpg"),
+        "dark-city.jpg" => include_bytes!("../assets/wallpapers/dark-city.jpg"),
+        "dark-network.jpg" => include_bytes!("../assets/wallpapers/dark-network.jpg"),
+        "light-crystal.jpg" => include_bytes!("../assets/wallpapers/light-crystal.jpg"),
+        "light-network.jpg" => include_bytes!("../assets/wallpapers/light-network.jpg"),
+        "light-lab.jpg" => include_bytes!("../assets/wallpapers/light-lab.jpg"),
+        _ => return None,
+    };
+    Some(to_buffer(image::load_from_memory(bytes).ok()?.to_rgba8()))
+}
 
 fn decode_custom(path: &str) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
     Some(to_buffer(image::open(path).ok()?.to_rgba8()))
@@ -291,7 +324,11 @@ fn rgb_to_hsl(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
         return (0.0, 0.0, l); // achromatic
     }
     let d = max - min;
-    let s = if l > 0.5 { d / (2.0 - max - min) } else { d / (max + min) };
+    let s = if l > 0.5 {
+        d / (2.0 - max - min)
+    } else {
+        d / (max + min)
+    };
     let h = if max == r {
         (g - b) / d + if g < b { 6.0 } else { 0.0 }
     } else if max == g {
@@ -307,7 +344,11 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (u8, u8, u8) {
         let v = (l * 255.0).round() as u8;
         return (v, v, v);
     }
-    let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+    let q = if l < 0.5 {
+        l * (1.0 + s)
+    } else {
+        l + s - l * s
+    };
     let p = 2.0 * l - q;
     let r = hue_to_rgb(p, q, h + 1.0 / 3.0);
     let g = hue_to_rgb(p, q, h);
