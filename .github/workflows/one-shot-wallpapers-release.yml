@@ -52,10 +52,79 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          unzip -o assets/wallpapers/probe-wallpapers.zip -d assets/wallpapers
-          rm assets/wallpapers/probe-wallpapers.zip
-          test -f assets/wallpapers/dark-mecha.jpg
-          test -f assets/wallpapers/light-lab.jpg
+          python - <<'PY'
+          from pathlib import Path
+          import binascii
+          import struct
+          import zlib
+
+          archive = Path("assets/wallpapers/probe-wallpapers.zip")
+          output = archive.parent
+          expected = {
+              "dark-mecha.jpg",
+              "dark-city.jpg",
+              "dark-network.jpg",
+              "light-crystal.jpg",
+              "light-network.jpg",
+              "light-lab.jpg",
+          }
+          data = archive.read_bytes()
+          pos = 0
+          extracted = set()
+
+          # The uploaded archive has damaged central-directory metadata, but its
+          # local file records are intact. Recover only the six expected JPEGs.
+          while pos + 30 <= len(data) and data[pos:pos + 4] == b"PK\x03\x04":
+              (
+                  _version,
+                  flags,
+                  method,
+                  _mtime,
+                  _mdate,
+                  crc32,
+                  compressed_size,
+                  uncompressed_size,
+                  name_size,
+                  extra_size,
+              ) = struct.unpack_from("<5H3I2H", data, pos + 4)
+              if flags & 0x08:
+                  raise SystemExit("Unsupported ZIP data descriptor in wallpaper archive")
+
+              name_start = pos + 30
+              name_end = name_start + name_size
+              data_start = name_end + extra_size
+              data_end = data_start + compressed_size
+              if data_end > len(data):
+                  raise SystemExit("Truncated wallpaper entry")
+
+              encoding = "utf-8" if flags & 0x0800 else "cp437"
+              name = data[name_start:name_end].decode(encoding)
+              basename = Path(name).name
+              payload = data[data_start:data_end]
+
+              if method == 0:
+                  decoded = payload
+              elif method == 8:
+                  decoded = zlib.decompress(payload, -15)
+              else:
+                  raise SystemExit(f"Unsupported ZIP compression method: {method}")
+
+              if basename not in expected:
+                  raise SystemExit(f"Unexpected wallpaper entry: {name}")
+              if len(decoded) != uncompressed_size:
+                  raise SystemExit(f"Size mismatch for {basename}")
+              if binascii.crc32(decoded) & 0xFFFFFFFF != crc32:
+                  raise SystemExit(f"CRC mismatch for {basename}")
+
+              (output / basename).write_bytes(decoded)
+              extracted.add(basename)
+              pos = data_end
+
+          missing = expected - extracted
+          if missing:
+              raise SystemExit(f"Missing wallpaper assets: {sorted(missing)}")
+          archive.unlink()
+          PY
 
       - name: Patch wallpaper integration and version
         id: patch
@@ -83,6 +152,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm .github/workflows/one-shot-wallpapers-release.yml scripts/prepare_v070.py
+          git rm -f --ignore-unmatch ONE_SHOT_FAILURE.md
           git add Cargo.toml Cargo.lock src/config.rs src/wallpaper.rs ui/interface_panel.slint \
             .github/workflows/release.yml assets/wallpapers
           git commit -m "feat: add wallpaper collection and multi-platform release"
@@ -119,5 +189,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add ONE_SHOT_FAILURE.md
-          git commit -m "ci: record v0.7.0 one-shot failure"
+          git commit -m "ci: record v0.7.0 one-shot failure" || true
           git push origin HEAD:fix/sftp-local-terminal
