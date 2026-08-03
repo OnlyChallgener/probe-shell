@@ -1,0 +1,46 @@
+name: One-shot verify SSH browser race fix
+
+on:
+  push:
+    branches:
+      - fix/sftp-local-terminal
+
+permissions:
+  contents: write
+
+concurrency:
+  group: one-shot-verify-ssh-browser-race-fix
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out fix branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/sftp-local-terminal
+          fetch-depth: 0
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Cache Cargo build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check project
+        run: cargo check --locked
+
+      - name: Remove one-shot workflow after successful verification
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/one-shot-verify-ssh-browser.yml
+          git commit -m "Verify transient SSH browser fix"
+          git push origin HEAD:fix/sftp-local-terminal
