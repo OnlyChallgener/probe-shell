@@ -187,6 +187,7 @@ jobs:
           & $candle.FullName -nologo -arch x64 -out dist/probe-shell.wixobj probe-shell.wxs
           & $light -nologo -out "dist/probe-shell-$label-windows-x86_64.msi" dist/probe-shell.wixobj
           Remove-Item dist/probe-shell.wixobj -Force
+          Remove-Item "dist/probe-shell-$label-windows-x86_64.wixpdb" -Force -ErrorAction SilentlyContinue
 
       - name: Package Linux tar.gz and AppImage
         if: matrix.name == 'linux-x86_64'
