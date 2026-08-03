@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   cargo-check:
@@ -52,3 +52,19 @@ jobs:
 
       - name: Test Rust project
         run: cargo test --locked
+
+  clean-v070-release:
+    name: Clean v0.7.0 release assets
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Remove WiX debug file and print final release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release delete-asset v0.7.0 probe-shell-v0.7.0-windows-x86_64.wixpdb \
+            --repo "$GITHUB_REPOSITORY" --yes || true
+          gh release view v0.7.0 --repo "$GITHUB_REPOSITORY" \
+            --json tagName,name,isDraft,isPrerelease,publishedAt,url,assets
