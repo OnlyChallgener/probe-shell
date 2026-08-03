@@ -5,12 +5,18 @@ name: Release
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing tag to build and publish, for example v0.7.0
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.release_tag || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -20,29 +26,58 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       label: ${{ steps.version.outputs.label }}
+      source_ref: ${{ steps.version.outputs.source_ref }}
+      publish_release: ${{ steps.version.outputs.publish_release }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Verify tag and Cargo version
         id: version
         shell: bash
+        env:
+          REQUESTED_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import os
-          import tomllib
-          from pathlib import Path
+          version="$(awk '
+            /^\[package\]$/ { in_package=1; next }
+            /^\[/ && in_package { exit }
+            in_package && /^version[[:space:]]*=/ {
+              line=$0
+              sub(/^[^=]*=[[:space:]]*"/, "", line)
+              sub(/"[[:space:]]*$/, "", line)
+              print line
+              exit
+            }
+          ' Cargo.toml)"
+          test -n "$version"
 
-          version = tomllib.loads(Path("Cargo.toml").read_text(encoding="utf-8"))["package"]["version"]
-          ref_type = os.environ.get("GITHUB_REF_TYPE", "")
-          ref_name = os.environ.get("GITHUB_REF_NAME", "")
-          if ref_type == "tag" and ref_name != f"v{version}":
-              raise SystemExit(f"Tag {ref_name} does not match Cargo version {version}")
-          label = ref_name if ref_type == "tag" else f"dev-{os.environ['GITHUB_RUN_NUMBER']}"
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"version={version}\n")
-              output.write(f"label={label}\n")
-          PY
+          if [[ -n "$REQUESTED_TAG" ]]; then
+            label="$REQUESTED_TAG"
+            source_ref="$REQUESTED_TAG"
+            publish_release=true
+          elif [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            label="$GITHUB_REF_NAME"
+            source_ref="$GITHUB_REF"
+            publish_release=true
+          else
+            label="dev-$GITHUB_RUN_NUMBER"
+            source_ref="$GITHUB_REF"
+            publish_release=false
+          fi
+
+          if [[ "$publish_release" == true && "$label" != "v${version}" ]]; then
+            echo "Tag $label does not match Cargo version $version" >&2
+            exit 1
+          fi
+
+          {
+            echo "version=$version"
+            echo "label=$label"
+            echo "source_ref=$source_ref"
+            echo "publish_release=$publish_release"
+          } >> "$GITHUB_OUTPUT"
 
   build:
     name: ${{ matrix.name }}
@@ -67,6 +102,8 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check.outputs.source_ref }}
 
       - name: Install Linux GUI dependencies
         if: runner.os == 'Linux'
@@ -244,7 +281,7 @@ jobs:
 
   publish:
     name: Publish GitHub Release
-    if: startsWith(github.ref, 'refs/tags/')
+    if: needs.check.outputs.publish_release == 'true'
     needs:
       - check
       - build
@@ -265,6 +302,7 @@ jobs:
       - name: Publish release assets
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.check.outputs.label }}
           files: dist/*
           fail_on_unmatched_files: true
           generate_release_notes: true
