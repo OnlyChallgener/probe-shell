@@ -69,12 +69,19 @@ jobs:
               "light-lab.jpg",
           }
           data = archive.read_bytes()
-          pos = 0
+          cursor = 0
           extracted = set()
+          signature = b"PK\x03\x04"
 
-          # The uploaded archive has damaged central-directory metadata, but its
-          # local file records are intact. Recover only the six expected JPEGs.
-          while pos + 30 <= len(data) and data[pos:pos + 4] == b"PK\x03\x04":
+          # The archive's directory/size metadata is damaged. Recover each
+          # intact local deflate stream and accept only the six expected JPEGs.
+          while True:
+              pos = data.find(signature, cursor)
+              if pos < 0:
+                  break
+              if pos + 30 > len(data):
+                  break
+
               (
                   _version,
                   flags,
@@ -87,38 +94,45 @@ jobs:
                   name_size,
                   extra_size,
               ) = struct.unpack_from("<5H3I2H", data, pos + 4)
-              if flags & 0x08:
-                  raise SystemExit("Unsupported ZIP data descriptor in wallpaper archive")
 
               name_start = pos + 30
               name_end = name_start + name_size
               data_start = name_end + extra_size
-              data_end = data_start + compressed_size
-              if data_end > len(data):
-                  raise SystemExit("Truncated wallpaper entry")
+              if data_start > len(data):
+                  cursor = pos + 4
+                  continue
 
               encoding = "utf-8" if flags & 0x0800 else "cp437"
               name = data[name_start:name_end].decode(encoding)
               basename = Path(name).name
-              payload = data[data_start:data_end]
+              if basename not in expected:
+                  cursor = pos + 4
+                  continue
 
               if method == 0:
-                  decoded = payload
+                  data_end = data_start + compressed_size
+                  if data_end > len(data):
+                      raise SystemExit(f"Truncated stored entry: {basename}")
+                  decoded = data[data_start:data_end]
               elif method == 8:
-                  decoded = zlib.decompress(payload, -15)
+                  decoder = zlib.decompressobj(-15)
+                  decoded = decoder.decompress(data[data_start:])
+                  decoded += decoder.flush()
+                  if not decoder.eof:
+                      raise SystemExit(f"Truncated deflate stream: {basename}")
+                  consumed = len(data[data_start:]) - len(decoder.unused_data)
+                  data_end = data_start + consumed
               else:
                   raise SystemExit(f"Unsupported ZIP compression method: {method}")
 
-              if basename not in expected:
-                  raise SystemExit(f"Unexpected wallpaper entry: {name}")
-              if len(decoded) != uncompressed_size:
+              if uncompressed_size and len(decoded) != uncompressed_size:
                   raise SystemExit(f"Size mismatch for {basename}")
               if binascii.crc32(decoded) & 0xFFFFFFFF != crc32:
                   raise SystemExit(f"CRC mismatch for {basename}")
 
               (output / basename).write_bytes(decoded)
               extracted.add(basename)
-              pos = data_end
+              cursor = max(data_end, pos + 4)
 
           missing = expected - extracted
           if missing:
