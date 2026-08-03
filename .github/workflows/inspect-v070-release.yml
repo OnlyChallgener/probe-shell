@@ -1,0 +1,44 @@
+name: Inspect v0.7.0 release
+
+"on":
+  push:
+    branches:
+      - fix/sftp-local-terminal
+    paths:
+      - .github/workflows/inspect-v070-release.yml
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/sftp-local-terminal
+      - name: Capture release workflow and release status
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh run list --workflow release.yml --limit 10 \
+            --json databaseId,displayTitle,event,headBranch,headSha,status,conclusion,createdAt,updatedAt,url \
+            > RELEASE_STATUS.json
+          if ! gh release view v0.7.0 \
+            --json tagName,name,isDraft,isPrerelease,publishedAt,url,assets \
+            > RELEASE_VIEW.json; then
+            printf '%s\n' '{"release":"not-found"}' > RELEASE_VIEW.json
+          fi
+      - name: Save status and remove helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/inspect-v070-release.yml
+          git add RELEASE_STATUS.json RELEASE_VIEW.json
+          git commit -m "ci: record v0.7.0 release status"
+          git push origin HEAD:fix/sftp-local-terminal
