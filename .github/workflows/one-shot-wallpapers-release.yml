@@ -1,0 +1,85 @@
+name: One-shot wallpapers and v0.7.0 release
+
+"on":
+  push:
+    branches:
+      - fix/sftp-local-terminal
+    paths:
+      - .github/workflows/one-shot-wallpapers-release.yml
+      - scripts/prepare_v070.py
+      - assets/wallpapers/probe-wallpapers.zip
+      - .github/workflows/release.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: one-shot-wallpapers-v070
+  cancel-in-progress: false
+
+jobs:
+  prepare-test-tag:
+    name: Patch, verify and tag v0.7.0
+    runs-on: ubuntu-22.04
+    timeout-minutes: 50
+    steps:
+      - name: Checkout fix branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/sftp-local-terminal
+          fetch-depth: 0
+
+      - name: Install Linux build dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config cmake \
+            libfontconfig1-dev libfreetype6-dev \
+            libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
+            libgl1-mesa-dev libegl1-mesa-dev libgtk-3-dev libudev-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Expand bundled wallpaper assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          unzip -o assets/wallpapers/probe-wallpapers.zip -d assets/wallpapers
+          rm assets/wallpapers/probe-wallpapers.zip
+          test -f assets/wallpapers/dark-mecha.jpg
+          test -f assets/wallpapers/light-lab.jpg
+
+      - name: Patch wallpaper integration and version
+        run: python scripts/prepare_v070.py
+
+      - name: Validate formatting and tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          git diff --check
+          cargo check
+          cargo test --locked
+
+      - name: Commit verified files and tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin refs/tags/v0.7.0 >/dev/null 2>&1; then
+            echo "Tag v0.7.0 already exists; refusing to move it." >&2
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/one-shot-wallpapers-release.yml scripts/prepare_v070.py
+          git add Cargo.toml Cargo.lock src/config.rs src/wallpaper.rs ui/interface_panel.slint \
+            .github/workflows/release.yml assets/wallpapers
+          git commit -m "feat: add wallpaper collection and multi-platform release"
+          git push origin HEAD:fix/sftp-local-terminal
+          git tag -a v0.7.0 -m "Probe Shell v0.7.0"
+          git push origin v0.7.0
