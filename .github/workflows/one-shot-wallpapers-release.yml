@@ -71,7 +71,16 @@ jobs:
 
       - name: Apply wallpaper settings and v0.7.0 version
         id: patch
-        run: python scripts/prepare_v070.py
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -q '"builtin:dark-mecha" => decode_bundled' src/wallpaper.rs \
+            && grep -q 'root.set-wallpaper("builtin:dark-mecha")' ui/interface_panel.slint \
+            && grep -q '^version = "0.7.0"' Cargo.toml; then
+            echo "Wallpaper integration is already applied; continuing with verification."
+          else
+            python scripts/prepare_v070.py
+          fi
 
       - name: Verify formatting, compilation and tests
         id: verify
@@ -88,24 +97,29 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if git ls-remote --exit-code --tags origin refs/tags/v0.7.0 >/dev/null 2>&1; then
-            echo "Tag v0.7.0 already exists; refusing to move it." >&2
-            exit 1
-          fi
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git rm -f --ignore-unmatch assets/wallpapers/probe-wallpapers.zip
           git rm -f --ignore-unmatch ONE_SHOT_FAILURE.md
-          git rm .github/workflows/one-shot-wallpapers-release.yml scripts/prepare_v070.py
           git add Cargo.toml Cargo.lock src/config.rs src/wallpaper.rs ui/interface_panel.slint \
             .github/workflows/release.yml assets/wallpapers
-          git commit -m "feat: add wallpaper collection and multi-platform release"
+          git commit -m "feat: add wallpaper collection and multi-platform release" || true
           git push origin HEAD:fix/sftp-local-terminal
 
-          git tag -a v0.7.0 -m "Probe Shell v0.7.0"
-          git push origin v0.7.0
+          if git ls-remote --exit-code --tags origin refs/tags/v0.7.0 >/dev/null 2>&1; then
+            tagged_commit="$(git ls-remote origin 'refs/tags/v0.7.0^{}' | cut -f1)"
+            if [[ -z "$tagged_commit" ]]; then
+              tagged_commit="$(git ls-remote origin refs/tags/v0.7.0 | cut -f1)"
+            fi
+            if [[ "$tagged_commit" != "$(git rev-parse HEAD)" ]]; then
+              echo "Tag v0.7.0 exists on a different commit; refusing to move it." >&2
+              exit 1
+            fi
+          else
+            git tag -a v0.7.0 -m "Probe Shell v0.7.0"
+            git push origin v0.7.0
+          fi
 
       - name: Start the multi-platform release workflow
         id: dispatch
@@ -114,8 +128,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run release.yml --ref v0.7.0
 
-      - name: Record failure stage on branch
-        if: failure()
+      - name: Remove temporary finalization files from branch
+        if: success()
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/one-shot-wallpapers-release.yml scripts/prepare_v070.py
+          git commit -m "chore: remove v0.7.0 finalization helpers"
+          git push origin HEAD:fix/sftp-local-terminal
+
+      - name: Record pre-release failure stage on branch
+        if: failure() && steps.publish.outcome != 'success'
         shell: bash
         env:
           ASSETS: ${{ steps.assets.outcome }}
@@ -124,7 +148,6 @@ jobs:
           PATCH: ${{ steps.patch.outcome }}
           VERIFY: ${{ steps.verify.outcome }}
           PUBLISH: ${{ steps.publish.outcome }}
-          DISPATCH: ${{ steps.dispatch.outcome }}
         run: |
           set -euo pipefail
           git reset --hard HEAD
@@ -140,7 +163,6 @@ jobs:
           - patch: ${PATCH}
           - verify: ${VERIFY}
           - publish: ${PUBLISH}
-          - release dispatch: ${DISPATCH}
           EOF
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
