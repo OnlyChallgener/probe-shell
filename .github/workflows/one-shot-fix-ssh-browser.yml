@@ -1,0 +1,241 @@
+name: One-shot SSH browser race fix
+
+on:
+  push:
+    branches:
+      - fix/sftp-local-terminal
+
+permissions:
+  contents: write
+
+concurrency:
+  group: one-shot-ssh-browser-race-fix
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out fix branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/sftp-local-terminal
+          fetch-depth: 0
+
+      - name: Patch transient exec-channel handling
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("src/sftp.rs")
+          source = path.read_text(encoding="utf-8")
+
+          old_exec = r'''/// SSH-browser exec wrapper. A few embedded SSH servers (especially router
+          /// builds) temporarily reject opening a new exec channel while the previous
+          /// command is being torn down. Retrying once after a tiny delay avoids turning
+          /// a folder click into a dead panel. If the server consistently refuses exec,
+          /// the user still gets a clear status message instead of an app crash.
+          async fn exec_capture_browser(
+              handle: &client::Handle<SftpClientHandler>,
+              cmd: &str,
+          ) -> Result<(u32, Vec<u8>, Vec<u8>)> {
+              match tokio::time::timeout(SSH_BROWSER_EXEC_TIMEOUT, exec_capture(handle, cmd)).await {
+                  Ok(Ok(r)) => Ok(r),
+                  Ok(Err(e)) => {
+                      let text = format!("{e:#}").to_lowercase();
+                      if text.contains("open exec channel")
+                          || text.contains("administratively prohibited")
+                          || text.contains("channel open")
+                      {
+                          tokio::time::sleep(Duration::from_millis(260)).await;
+                          match tokio::time::timeout(SSH_BROWSER_EXEC_TIMEOUT, exec_capture(handle, cmd)).await {
+                              Ok(Ok(r)) => Ok(r),
+                              Ok(Err(e)) => Err(e).with_context(|| "retry after exec channel failure"),
+                              Err(_) => Err(anyhow!(
+                                  "Connection Timeout: exec channel exceeded {}s after retry",
+                                  SSH_BROWSER_EXEC_TIMEOUT.as_secs()
+                              )),
+                          }
+                      } else {
+                          Err(e)
+                      }
+                  }
+                  Err(_) => Err(anyhow!(
+                      "Connection Timeout: exec channel exceeded {}s",
+                      SSH_BROWSER_EXEC_TIMEOUT.as_secs()
+                  )),
+              }
+          }
+          '''
+
+          new_exec = r'''fn is_transient_exec_channel_error(error: &anyhow::Error) -> bool {
+              let text = format!("{error:#}").to_ascii_lowercase();
+              [
+                  "open exec channel",
+                  "channel open failure",
+                  "channel open",
+                  "administratively prohibited",
+                  "connectfailed",
+                  "resource shortage",
+              ]
+              .iter()
+              .any(|needle| text.contains(needle))
+          }
+
+          /// SSH-browser exec wrapper. Embedded SSH servers such as Dropbear can
+          /// briefly reject a new exec channel while another command or upload is
+          /// closing. Retry the channel-open race with a short bounded backoff;
+          /// command failures themselves are never replayed.
+          async fn exec_capture_browser(
+              handle: &client::Handle<SftpClientHandler>,
+              cmd: &str,
+          ) -> Result<(u32, Vec<u8>, Vec<u8>)> {
+              const ATTEMPTS: usize = 4;
+              const BACKOFF_MS: [u64; ATTEMPTS - 1] = [120, 260, 520];
+
+              for attempt in 0..ATTEMPTS {
+                  match tokio::time::timeout(SSH_BROWSER_EXEC_TIMEOUT, exec_capture(handle, cmd)).await {
+                      Ok(Ok(result)) => return Ok(result),
+                      Ok(Err(error))
+                          if is_transient_exec_channel_error(&error) && attempt + 1 < ATTEMPTS =>
+                      {
+                          tracing::debug!(
+                              attempt = attempt + 1,
+                              error = %format!("{error:#}"),
+                              "SSH browser exec channel busy; retrying"
+                          );
+                          tokio::time::sleep(Duration::from_millis(BACKOFF_MS[attempt])).await;
+                      }
+                      Ok(Err(error)) => {
+                          return Err(error).with_context(|| {
+                              format!(
+                                  "SSH exec channel unavailable after {} attempt(s)",
+                                  attempt + 1
+                              )
+                          });
+                      }
+                      Err(_) => {
+                          return Err(anyhow!(
+                              "Connection Timeout: exec channel exceeded {}s",
+                              SSH_BROWSER_EXEC_TIMEOUT.as_secs()
+                          ));
+                      }
+                  }
+              }
+
+              unreachable!("bounded SSH browser retry loop always returns")
+          }
+          '''
+
+          old_emit = r'''async fn emit_shell_dir(
+              handle: &client::Handle<SftpClientHandler>,
+              events: &UnboundedSender<SessionEvent>,
+              path: &str,
+          ) {
+              let _ = events.send(SessionEvent::SftpStatus(format!("{} {}...", t("加载", "Loading"), path)));
+              match shell_list_dir(handle, path).await {
+                  Ok(entries) => {
+                      let _ = events.send(SessionEvent::SftpEntries {
+                          path: path.to_string(),
+                          entries,
+                      });
+                      let _ = events.send(SessionEvent::SftpStatus(format!(
+                          "{} · {}",
+                          path,
+                          t("SSH 文件浏览", "SSH browser")
+                      )));
+                  }
+                  Err(e) => {
+                      let _ = events.send(SessionEvent::SftpError(list_error_msg(path, &e)));
+                  }
+              }
+          }
+          '''
+
+          new_emit = r'''#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+          enum ShellDirUpdateKind {
+              Foreground,
+              Background,
+          }
+
+          async fn emit_shell_dir(
+              handle: &client::Handle<SftpClientHandler>,
+              events: &UnboundedSender<SessionEvent>,
+              path: &str,
+              kind: ShellDirUpdateKind,
+          ) -> bool {
+              if kind == ShellDirUpdateKind::Foreground {
+                  let _ = events.send(SessionEvent::SftpStatus(format!(
+                      "{} {}...",
+                      t("加载", "Loading"),
+                      path
+                  )));
+              }
+              match shell_list_dir(handle, path).await {
+                  Ok(entries) => {
+                      let _ = events.send(SessionEvent::SftpEntries {
+                          path: path.to_string(),
+                          entries,
+                      });
+                      if kind == ShellDirUpdateKind::Foreground {
+                          let _ = events.send(SessionEvent::SftpStatus(format!(
+                              "{} · {}",
+                              path,
+                              t("SSH 文件浏览", "SSH browser")
+                          )));
+                      }
+                      true
+                  }
+                  Err(error) => {
+                      if kind == ShellDirUpdateKind::Foreground {
+                          let _ = events.send(SessionEvent::SftpError(list_error_msg(path, &error)));
+                      } else {
+                          tracing::debug!(
+                              path,
+                              error = %format!("{error:#}"),
+                              "ignored failed background SSH directory refresh"
+                          );
+                      }
+                      false
+                  }
+              }
+          }
+          '''
+
+          if old_exec not in source:
+              raise SystemExit("exec_capture_browser source block not found")
+          if old_emit not in source:
+              raise SystemExit("emit_shell_dir source block not found")
+
+          source = source.replace(old_exec, new_exec, 1)
+          source = source.replace(old_emit, new_emit, 1)
+
+          replacements = {
+              "emit_shell_dir(&handle, &events, &home).await;":
+                  "emit_shell_dir(&handle, &events, &home, ShellDirUpdateKind::Foreground).await;",
+              "emit_shell_dir(&handle, &events, &path).await;":
+                  "emit_shell_dir(&handle, &events, &path, ShellDirUpdateKind::Foreground).await;",
+              "emit_shell_dir(&handle, &events, &refresh).await;":
+                  "emit_shell_dir(&handle, &events, &refresh, ShellDirUpdateKind::Foreground).await;",
+              "emit_shell_dir(&handle, &events, &remote_dir).await;":
+                  "emit_shell_dir(&handle, &events, &remote_dir, ShellDirUpdateKind::Background).await;",
+          }
+          for old, new in replacements.items():
+              if old not in source:
+                  raise SystemExit(f"call site not found: {old}")
+              source = source.replace(old, new)
+
+          path.write_text(source, encoding="utf-8")
+
+      - name: Format source
+        run: cargo fmt --all
+
+      - name: Commit fix and remove one-shot workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/one-shot-fix-ssh-browser.yml
+          git add src/sftp.rs
+          git commit -m "Fix transient SSH browser directory errors"
+          git push origin HEAD:fix/sftp-local-terminal
