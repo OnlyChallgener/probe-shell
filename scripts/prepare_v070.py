@@ -30,6 +30,19 @@ text = text.replace(
     '"builtin:tech".to_string()',
     '"builtin:dark-mecha".to_string()',
 )
+text = text.replace(
+    "fn wallpaper_defaults_to_tech_but_keeps_explicit_choice()",
+    "fn wallpaper_defaults_to_mecha_but_keeps_explicit_choice()",
+)
+text = text.replace(
+    'assert_eq!(fresh_config().wallpaper, "builtin:tech");',
+    'assert_eq!(fresh_config().wallpaper, "builtin:dark-mecha");',
+)
+text = text.replace(
+    'assert_eq!(cfg.wallpaper, "builtin:tech");',
+    'assert_eq!(cfg.wallpaper, "builtin:dark-mecha");',
+    1,
+)
 config.write_text(text, encoding="utf-8")
 
 wallpaper = Path("src/wallpaper.rs")
@@ -243,7 +256,6 @@ wallpaper_page = r'''            // --- Wallpaper page -------------------------
                             font-size: 11px * Theme.panel-font;
                             color: Theme.text-secondary;
                             horizontal-alignment: center;
-                            elide: elide-right;
                         }
                     }
                 }
@@ -266,7 +278,7 @@ wallpaper_page = r'''            // --- Wallpaper page -------------------------
 
 '''
 pattern = r'            // --- Wallpaper page -+\n.*?(?=            // --- SFTP page)'
-text, count = re.subn(pattern, wallpaper_page, text, count=1, flags=re.S)
+text, count = re.subn(pattern, lambda _match: wallpaper_page, text, count=1, flags=re.S)
 if count != 1:
     raise SystemExit("Could not replace wallpaper settings page")
 panel.write_text(text, encoding="utf-8")
