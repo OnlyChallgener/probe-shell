@@ -15,7 +15,7 @@ permissions:
 
 concurrency:
   group: one-shot-wallpapers-v070
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   prepare-test-tag:
@@ -30,6 +30,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install Linux build dependencies
+        id: deps
         shell: bash
         run: |
           sudo apt-get update
@@ -41,11 +42,13 @@ jobs:
             libgl1-mesa-dev libegl1-mesa-dev libgtk-3-dev libudev-dev
 
       - name: Install Rust
+        id: rust
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
 
       - name: Expand bundled wallpaper assets
+        id: assets
         shell: bash
         run: |
           set -euo pipefail
@@ -55,18 +58,21 @@ jobs:
           test -f assets/wallpapers/light-lab.jpg
 
       - name: Patch wallpaper integration and version
+        id: patch
         run: python scripts/prepare_v070.py
 
       - name: Validate formatting and tests
+        id: verify
         shell: bash
         run: |
           set -euo pipefail
-          cargo fmt --all -- --check
+          cargo fmt --all
           git diff --check
           cargo check
           cargo test --locked
 
       - name: Commit verified files and tag
+        id: publish
         shell: bash
         run: |
           set -euo pipefail
@@ -83,3 +89,35 @@ jobs:
           git push origin HEAD:fix/sftp-local-terminal
           git tag -a v0.7.0 -m "Probe Shell v0.7.0"
           git push origin v0.7.0
+
+      - name: Record failure stage on branch
+        if: failure()
+        shell: bash
+        env:
+          DEPS: ${{ steps.deps.outcome }}
+          RUST: ${{ steps.rust.outcome }}
+          ASSETS: ${{ steps.assets.outcome }}
+          PATCH: ${{ steps.patch.outcome }}
+          VERIFY: ${{ steps.verify.outcome }}
+          PUBLISH: ${{ steps.publish.outcome }}
+        run: |
+          set -euo pipefail
+          git reset --hard HEAD
+          git clean -fd
+          cat > ONE_SHOT_FAILURE.md <<EOF
+          # v0.7.0 one-shot failure
+
+          Run: ${GITHUB_RUN_ID}
+
+          - dependencies: ${DEPS}
+          - rust: ${RUST}
+          - assets: ${ASSETS}
+          - patch: ${PATCH}
+          - verify: ${VERIFY}
+          - publish: ${PUBLISH}
+          EOF
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ONE_SHOT_FAILURE.md
+          git commit -m "ci: record v0.7.0 one-shot failure"
+          git push origin HEAD:fix/sftp-local-terminal
