@@ -52,93 +52,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-          import binascii
-          import struct
-          import zlib
-
-          archive = Path("assets/wallpapers/probe-wallpapers.zip")
-          output = archive.parent
-          expected = {
-              "dark-mecha.jpg",
-              "dark-city.jpg",
-              "dark-network.jpg",
-              "light-crystal.jpg",
-              "light-network.jpg",
-              "light-lab.jpg",
-          }
-          data = archive.read_bytes()
-          cursor = 0
-          extracted = set()
-          signature = b"PK\x03\x04"
-
-          # The archive's directory/size metadata is damaged. Recover each
-          # intact local deflate stream and accept only the six expected JPEGs.
-          while True:
-              pos = data.find(signature, cursor)
-              if pos < 0:
-                  break
-              if pos + 30 > len(data):
-                  break
-
-              (
-                  _version,
-                  flags,
-                  method,
-                  _mtime,
-                  _mdate,
-                  crc32,
-                  compressed_size,
-                  uncompressed_size,
-                  name_size,
-                  extra_size,
-              ) = struct.unpack_from("<5H3I2H", data, pos + 4)
-
-              name_start = pos + 30
-              name_end = name_start + name_size
-              data_start = name_end + extra_size
-              if data_start > len(data):
-                  cursor = pos + 4
-                  continue
-
-              encoding = "utf-8" if flags & 0x0800 else "cp437"
-              name = data[name_start:name_end].decode(encoding)
-              basename = Path(name).name
-              if basename not in expected:
-                  cursor = pos + 4
-                  continue
-
-              if method == 0:
-                  data_end = data_start + compressed_size
-                  if data_end > len(data):
-                      raise SystemExit(f"Truncated stored entry: {basename}")
-                  decoded = data[data_start:data_end]
-              elif method == 8:
-                  decoder = zlib.decompressobj(-15)
-                  decoded = decoder.decompress(data[data_start:])
-                  decoded += decoder.flush()
-                  if not decoder.eof:
-                      raise SystemExit(f"Truncated deflate stream: {basename}")
-                  consumed = len(data[data_start:]) - len(decoder.unused_data)
-                  data_end = data_start + consumed
-              else:
-                  raise SystemExit(f"Unsupported ZIP compression method: {method}")
-
-              if uncompressed_size and len(decoded) != uncompressed_size:
-                  raise SystemExit(f"Size mismatch for {basename}")
-              if binascii.crc32(decoded) & 0xFFFFFFFF != crc32:
-                  raise SystemExit(f"CRC mismatch for {basename}")
-
-              (output / basename).write_bytes(decoded)
-              extracted.add(basename)
-              cursor = max(data_end, pos + 4)
-
-          missing = expected - extracted
-          if missing:
-              raise SystemExit(f"Missing wallpaper assets: {sorted(missing)}")
-          archive.unlink()
-          PY
+          archive="assets/wallpapers/probe-wallpapers.zip"
+          exact_archive="${RUNNER_TEMP}/probe-wallpapers.zip"
+          git cat-file blob "HEAD:${archive}" > "${exact_archive}"
+          unzip -t "${exact_archive}"
+          unzip -o "${exact_archive}" -d assets/wallpapers
+          rm "${archive}"
+          test -f assets/wallpapers/dark-mecha.jpg
+          test -f assets/wallpapers/dark-city.jpg
+          test -f assets/wallpapers/dark-network.jpg
+          test -f assets/wallpapers/light-crystal.jpg
+          test -f assets/wallpapers/light-network.jpg
+          test -f assets/wallpapers/light-lab.jpg
 
       - name: Patch wallpaper integration and version
         id: patch
