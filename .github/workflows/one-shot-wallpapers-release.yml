@@ -84,14 +84,20 @@ jobs:
           else
             python - <<'PY'
           from pathlib import Path
+
           path = Path("scripts/prepare_v070.py")
           text = path.read_text(encoding="utf-8")
           old = "text, count = re.subn(pattern, wallpaper_page, text, count=1, flags=re.S)"
           new = "text, count = re.subn(pattern, lambda _match: wallpaper_page, text, count=1, flags=re.S)"
           if old in text:
-              path.write_text(text.replace(old, new, 1), encoding="utf-8")
+              text = text.replace(old, new, 1)
           elif new not in text:
               raise SystemExit("Could not patch prepare_v070.py replacement callback")
+
+          # Slint 1.16 Text has no `elide` property. Keep the custom file label
+          # otherwise unchanged and let its parent layout constrain it.
+          text = text.replace("                            elide: elide-right;\n", "", 1)
+          path.write_text(text, encoding="utf-8")
           PY
             python scripts/prepare_v070.py
           fi
