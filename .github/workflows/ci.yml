@@ -11,7 +11,6 @@ on:
 
 permissions:
   contents: read
-  actions: read
 
 jobs:
   cargo-check:
@@ -53,22 +52,3 @@ jobs:
 
       - name: Test Rust project
         run: cargo test --locked
-
-  inspect-v070-release:
-    name: Inspect v0.7.0 release
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: Print release workflow and release status
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          echo '=== RELEASE WORKFLOW RUNS ==='
-          gh run list --workflow release.yml --limit 10 \
-            --json databaseId,displayTitle,event,headBranch,headSha,status,conclusion,createdAt,updatedAt,url
-          echo '=== V0.7.0 RELEASE ==='
-          gh release view v0.7.0 \
-            --json tagName,name,isDraft,isPrerelease,publishedAt,url,assets \
-            || true
