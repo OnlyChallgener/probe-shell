@@ -1,10 +1,10 @@
-# v0.7.0 one-shot failure
+# v0.7.0 finalization failure
 
-Run: 30813283016
+Run: 30818987550
 
+- assets: success
 - dependencies: success
 - rust: success
-- assets: failure
-- patch: skipped
+- patch: failure
 - verify: skipped
 - publish: skipped
