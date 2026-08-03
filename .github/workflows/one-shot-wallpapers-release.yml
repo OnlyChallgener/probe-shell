@@ -106,11 +106,14 @@ jobs:
         id: verify
         shell: bash
         run: |
-          set -euo pipefail
-          cargo fmt --all
-          git diff --check
-          cargo check
-          cargo test --locked
+          set -o pipefail
+          {
+            set -euxo pipefail
+            cargo fmt --all
+            git diff --check
+            cargo check
+            cargo test --locked
+          } 2>&1 | tee /tmp/v070-verify.log
 
       - name: Commit verified integration and create tag
         id: publish
@@ -170,6 +173,7 @@ jobs:
           PUBLISH: ${{ steps.publish.outcome }}
         run: |
           set -euo pipefail
+          verify_detail="$(tail -n 120 /tmp/v070-verify.log 2>/dev/null || true)"
           git reset --hard HEAD
           git clean -fd
           cat > ONE_SHOT_FAILURE.md <<EOF
@@ -183,6 +187,10 @@ jobs:
           - patch: ${PATCH}
           - verify: ${VERIFY}
           - publish: ${PUBLISH}
+
+          ## Verification log tail
+
+          ${verify_detail}
           EOF
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
