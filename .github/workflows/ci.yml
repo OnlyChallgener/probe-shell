@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 jobs:
   cargo-check:
@@ -52,3 +53,29 @@ jobs:
 
       - name: Test Rust project
         run: cargo test --locked
+
+  dispatch-v070-release:
+    name: Dispatch corrected v0.7.0 release
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Start release workflow and print run ID
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          before="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow release.yml --limit 1 --json databaseId --jq '.[0].databaseId // 0')"
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref fix/sftp-local-terminal -f release_tag=v0.7.0
+          run_id=""
+          for _ in $(seq 1 30); do
+            candidate="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow release.yml --event workflow_dispatch --branch fix/sftp-local-terminal --limit 1 --json databaseId --jq '.[0].databaseId // 0')"
+            if [[ "$candidate" != "0" && "$candidate" != "$before" ]]; then
+              run_id="$candidate"
+              break
+            fi
+            sleep 2
+          done
+          test -n "$run_id"
+          echo "RELEASE_RUN_ID=$run_id"
+          gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --json status,conclusion,url,headBranch,headSha
