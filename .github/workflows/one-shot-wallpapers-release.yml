@@ -74,7 +74,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if grep -q '"builtin:dark-mecha" => decode_bundled' src/wallpaper.rs \
+          if grep -q 'builtin:dark-mecha' src/wallpaper.rs \
+            && grep -q 'decode_bundled("dark-mecha.jpg")' src/wallpaper.rs \
             && grep -q 'root.set-wallpaper("builtin:dark-mecha")' ui/interface_panel.slint \
             && grep -q '^version = "0.7.0"' Cargo.toml; then
             echo "Wallpaper integration is already applied; continuing with verification."
