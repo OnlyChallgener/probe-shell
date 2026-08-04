@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/finalize-v072.yml
       - scripts/prepare_v072.py
+      - scripts/optimize_v072.py
   pull_request:
     branches:
       - release/v0.7.1-squash
@@ -35,61 +36,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y pkg-config libudev-dev libfontconfig1-dev python3-pil
 
-      - name: Apply source fixes
-        run: python3 scripts/prepare_v072.py
-
-      - name: Optimize the four uploaded wallpapers
-        shell: bash
+      - name: Apply source and asset fixes
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          from PIL import Image, ImageOps
-          import json
-
-          names = [
-              "dark-neon-city",
-              "dark-cyber-warrior",
-              "light-future-city",
-              "light-crystal-guardian",
-          ]
-          report = []
-          for name in names:
-              src = Path("assets/wallpapers") / f"{name}.png"
-              dst = Path("assets/wallpapers") / f"{name}.jpg"
-              before = src.stat().st_size
-              with Image.open(src) as im:
-                  im = ImageOps.exif_transpose(im)
-                  original = im.size
-                  im.thumbnail((1920, 1080), Image.Resampling.LANCZOS)
-                  if im.mode in ("RGBA", "LA"):
-                      bg = Image.new("RGB", im.size, (18, 22, 30))
-                      bg.paste(im, mask=im.getchannel("A"))
-                      im = bg
-                  else:
-                      im = im.convert("RGB")
-                  im.save(
-                      dst,
-                      format="JPEG",
-                      quality=89,
-                      subsampling=1,
-                      optimize=True,
-                      progressive=True,
-                  )
-                  final_size = im.size
-              after = dst.stat().st_size
-              report.append({
-                  "name": name,
-                  "original_dimensions": original,
-                  "final_dimensions": final_size,
-                  "png_bytes": before,
-                  "jpeg_bytes": after,
-                  "saved_bytes": before - after,
-              })
-              src.unlink()
-          print(json.dumps(report, ensure_ascii=False, indent=2))
-          print("total saved bytes:", sum(x["saved_bytes"] for x in report))
-          PY
+          python3 scripts/prepare_v072.py
+          python3 scripts/optimize_v072.py
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
