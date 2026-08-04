@@ -7,7 +7,7 @@
 // of the global UI scale; only the font-preview reflects the real terminal size.
 
 import { Theme } from "theme.slint";
-import { ComboBox, Slider } from "std-widgets.slint";
+import { ComboBox, ScrollView, Slider } from "std-widgets.slint";
 
 // One left-nav row (icon + label).
 component NavItem inherits Rectangle {
@@ -353,7 +353,11 @@ export component InterfacePanel inherits Rectangle {
             }
 
             // --- Wallpaper page ----------------------------------------
-            if root.ifd-page == "wallpaper" : VerticalLayout {
+            if root.ifd-page == "wallpaper" : ScrollView {
+      horizontal-scrollbar-policy: always-off;
+      vertical-scrollbar-policy: as-needed;
+      mouse-drag-pan-enabled: true;
+      VerticalLayout {
                 padding-left: 20px;
                 padding-right: 20px;
                 padding-top: 14px;
@@ -482,7 +486,10 @@ export component InterfacePanel inherits Rectangle {
                         maximum: 100;
                         step: 5;
                         unit: "%";
-                        changed(v) => { root.persist-wallpaper-overlay(v / 100); }
+                        changed(v) => {
+                  root.wallpaper-overlay = v / 100;
+                  root.persist-wallpaper-overlay(root.wallpaper-overlay);
+              }
                     }
                 }
             }
