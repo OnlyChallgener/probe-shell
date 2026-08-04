@@ -55,7 +55,7 @@ jobs:
 
   repair-wallpaper-settings:
     name: Repair wallpaper settings UI
-    if: github.event_name == 'push' && github.ref == 'refs/heads/fix/sftp-local-terminal'
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout repair branch
