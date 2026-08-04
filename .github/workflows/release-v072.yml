@@ -1,0 +1,90 @@
+name: Tag and package v0.7.2
+
+on:
+  push:
+    branches:
+      - fix/wallpaper-v072
+    paths:
+      - .github/workflows/release-v072.yml
+      - V072_RELEASE_TRIGGER.txt
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: tag-and-package-v072
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout automation branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/wallpaper-v072
+          fetch-depth: 0
+
+      - name: Verify clean release commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_sha="139c3d7edeea9db76dec87cd362187dabecb2bc7"
+          version="$(git show "${release_sha}:Cargo.toml" | awk '/^version = / {gsub(/\"/, "", $3); print $3; exit}')"
+          test "$version" = "0.7.2"
+          git diff --quiet 0dbd8d31fd5ae9b6a683f9199867a800c7040425 "$release_sha" -- .github/workflows/ci.yml .github/workflows/release.yml
+
+      - name: Create v0.7.2 tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_sha="139c3d7edeea9db76dec87cd362187dabecb2bc7"
+          git fetch --tags origin
+          if git rev-parse -q --verify refs/tags/v0.7.2 >/dev/null; then
+            echo "v0.7.2 already exists"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a v0.7.2 "$release_sha" -m "Probe Shell v0.7.2"
+            git push origin v0.7.2
+          fi
+
+      - name: Find release workflow
+        id: release_run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release_sha="139c3d7edeea9db76dec87cd362187dabecb2bc7"
+          run_id=""
+          for attempt in $(seq 1 30); do
+            run_id="$(gh run list --workflow release.yml --limit 30 --json databaseId,headSha,event --jq '.[] | select(.headSha == "'"$release_sha"'" and .event == "push") | .databaseId' | head -n 1)"
+            if [ -n "$run_id" ]; then
+              break
+            fi
+            sleep 5
+          done
+          test -n "$run_id"
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "RELEASE_RUN_ID=$run_id"
+          gh run view "$run_id" --json url,status,conclusion,headSha,event
+
+      - name: Wait for all platform packages
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh run watch "${{ steps.release_run.outputs.run_id }}" --exit-status
+
+      - name: Report published assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release view v0.7.2 --json url,assets --jq '{url: .url, assets: [.assets[] | {name: .name, size: .size, digest: .digest}]}'
