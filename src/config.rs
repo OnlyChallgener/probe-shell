@@ -272,7 +272,7 @@ fn default_wallpaper() -> String {
     // *existing* config that predates the field stays on tech — `migrate_defaults`
     // keeps those users on the sci-fi tech wallpaper. Brand-new installs get
     // the same Probe Shell default from `fresh_config`.
-    "builtin:dark-mecha".to_string()
+    "builtin:tech".to_string()
 }
 
 /// Bump when `migrate_defaults` gains a new one-time default-layout change.
@@ -284,7 +284,7 @@ pub const DEFAULTS_REV: u32 = 2;
 /// and marks the migration done so it is not re-applied.
 fn fresh_config() -> ConfigFile {
     ConfigFile {
-        wallpaper: "builtin:dark-mecha".to_string(),
+        wallpaper: "builtin:tech".to_string(),
         welcome_as_sidebar: true,
         sidebar_dock: "right".to_string(),
         wallpaper_overlay: 0.48,
@@ -1427,12 +1427,12 @@ mod tests {
     }
 
     #[test]
-    fn wallpaper_defaults_to_mecha_but_keeps_explicit_choice() {
+    fn wallpaper_defaults_to_fantasy_3048_but_keeps_explicit_choice() {
         // Fresh install (no file).
-        assert_eq!(fresh_config().wallpaper, "builtin:dark-mecha");
+        assert_eq!(fresh_config().wallpaper, "builtin:tech");
         // User upgrading from before the feature: JSON without the key.
         let cfg: ConfigFile = serde_json::from_str("{}").unwrap();
-        assert_eq!(cfg.wallpaper, "builtin:dark-mecha");
+        assert_eq!(cfg.wallpaper, "builtin:tech");
         // An explicit "无"/none (stored as "") is preserved, not re-defaulted.
         let cfg: ConfigFile = serde_json::from_str(r#"{"wallpaper":""}"#).unwrap();
         assert_eq!(cfg.wallpaper, "");

@@ -1,6 +1,10 @@
+## v0.7.1
 
+    - 保留四张指定新壁纸，并恢复幻想3048、极光和 Miku。
+    - 恢复实时透明度滑杆和壁纸页滚动。
+    - 修复设置窗口越界、快捷目录弹窗、根目录导航、目录树权限误设、传输记录清空、悬浮提示和关于页地址。
 
-## v0.6.9-probe1
+    ## v0.6.9-probe1
 
 - Refined SFTP file-panel state rules: the address bar only represents the right-side current directory; search focus no longer automatically forces global-search mode.
 - Quick directory bar now defaults to only Root; custom quick folders are added/removed from the settings card, with up to five custom entries.

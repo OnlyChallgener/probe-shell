@@ -147,7 +147,7 @@ component IconBtn inherits Rectangle {
     ta := TouchArea {
         mouse-cursor: pointer;
         changed has-hover => { if (!self.has-hover) { root.tooltip-ready = false; root.hide-tooltip(); } }
-        clicked => { root.clicked(); }
+        clicked => { root.tooltip-ready = false; root.hide-tooltip(); root.clicked(); }
     }
     changed tooltip => { root.tooltip-ready = false; root.hide-tooltip(); }
     tooltip-delay := Timer {
@@ -411,8 +411,10 @@ export component AppWindow inherits Window {
     // window so it can't leave the parent); init centered.
     // Centred, snapped to whole logical pixels: a half-pixel origin makes the
     // card's text render on subpixel offsets and look blurry (#v0.5).
-    property <length> ifd-x: round((root.width - 720px * Theme.panel-font) / 2 / 1px) * 1px;
-    property <length> ifd-y: round((root.height - 480px * Theme.panel-font) / 2 / 1px) * 1px;
+    property <length> ifd-w: min(720px * Theme.panel-font, root.width - 32px);
+    property <length> ifd-h: min(480px * Theme.panel-font, root.height - 32px);
+    property <length> ifd-x: round((root.width - root.ifd-w) / 2 / 1px) * 1px;
+    property <length> ifd-y: round((root.height - root.ifd-h) / 2 / 1px) * 1px;
     property <bool> ifd-dragging;
     property <length> ifd-base-x;
     property <length> ifd-base-y;
@@ -3049,7 +3051,7 @@ export component AppWindow inherits Window {
                             HorizontalLayout {
                                 padding-left: 4px; padding-right: 4px;
                                 Text {
-                                    text: "github.com/OnlyChallenger/probe-shell";
+                                    text: "github.com/OnlyChallgener/probe-shell";
                                     color: Theme.accent;
                                     font-size: Theme.fs-sm;
                                     vertical-alignment: center;
@@ -3396,8 +3398,8 @@ export component AppWindow inherits Window {
             x: root.ifd-x;
             y: root.ifd-y;
             // Bigger base, and scales with the settings font size (#v0.5).
-            width: 720px * Theme.panel-font;
-            height: 480px * Theme.panel-font;
+            width: root.ifd-w;
+            height: root.ifd-h;
             // 20% less transparent than the welcome/resource panels so the dense
             // grey settings labels stay readable at a low overlay (user request).
             background: Theme.bg-panel-strong;
@@ -3435,10 +3437,10 @@ export component AppWindow inherits Window {
                             if (root.ifd-dragging) {
                                 root.ifd-x = clamp(
                                     round((root.ifd-base-x + (self.absolute-position.x + self.mouse-x - root.ifd-grab-x)) / 1px) * 1px,
-                                    0px, max(0px, root.width - 720px * Theme.panel-font));
+                                    0px, max(0px, root.width - root.ifd-w));
                                 root.ifd-y = clamp(
                                     round((root.ifd-base-y + (self.absolute-position.y + self.mouse-y - root.ifd-grab-y)) / 1px) * 1px,
-                                    0px, max(0px, root.height - 480px * Theme.panel-font));
+                                    0px, max(0px, root.height - root.ifd-h));
                             }
                         }
                     }

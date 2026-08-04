@@ -429,8 +429,8 @@ export component SftpPanel inherits Rectangle {
     property <string> tree-menu-target;
     property <string> toolbar-tip: "";
     property <bool> toolbar-tip-ready: false;
-    property <length> qa-popup-width: clamp(root.width - 48px, 500px, 560px);
-    property <length> qa-popup-height: 330px;
+    property <length> qa-popup-width: clamp(root.width - 24px, 320px, 560px);
+    property <length> qa-popup-height: clamp(root.height - 24px, 200px, 330px);
     property <length> qa-popup-offset-x: 0px;
     property <length> qa-popup-offset-y: 0px;
     property <bool> qa-popup-dragging: false;
@@ -810,8 +810,10 @@ export component SftpPanel inherits Rectangle {
                                         pointer-event(ev) => {
                                             if (ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left) {
                                                 root.qa-popup-dragging = true;
-                                                root.qa-popup-drag-start-x = self.mouse-x;
-                                                root.qa-popup-drag-start-y = self.mouse-y;
+                                        root.qa-popup-drag-start-x = self.absolute-position.x + self.mouse-x;
+                                        root.qa-popup-drag-start-y = self.absolute-position.y + self.mouse-y;
+                                        root.qa-popup-drag-base-x = root.qa-popup-offset-x;
+                                        root.qa-popup-drag-base-y = root.qa-popup-offset-y;
                                             }
                                             if (ev.kind == PointerEventKind.up || ev.kind == PointerEventKind.cancel) {
                                                 root.qa-popup-dragging = false;
@@ -819,9 +821,15 @@ export component SftpPanel inherits Rectangle {
                                         }
                                         moved => {
                                             if (root.qa-popup-dragging) {
-                                                root.qa-popup-offset-x = root.qa-popup-offset-x + self.mouse-x - root.qa-popup-drag-start-x;
-                                                root.qa-popup-offset-y = root.qa-popup-offset-y + self.mouse-y - root.qa-popup-drag-start-y;
-                                            }
+                                        root.qa-popup-offset-x = clamp(
+                                            root.qa-popup-drag-base-x + self.absolute-position.x + self.mouse-x - root.qa-popup-drag-start-x,
+                                            -(root.width - root.qa-popup-width) / 2 + 8px,
+                                            (root.width - root.qa-popup-width) / 2 - 8px);
+                                        root.qa-popup-offset-y = clamp(
+                                            root.qa-popup-drag-base-y + self.absolute-position.y + self.mouse-y - root.qa-popup-drag-start-y,
+                                            -(root.height - root.qa-popup-height) / 2 + 8px,
+                                            (root.height - root.qa-popup-height) / 2 - 8px);
+                                    }
                                         }
                                     }
                                     Text { x: 0px; width: parent.width - 62px; height: parent.height; text: root.qa-edit-index >= 0 ? @tr("编辑快捷目录") : @tr("管理快捷目录"); color: Theme.text-primary; font-size: Theme.fs-xs; font-weight: 600; vertical-alignment: center; }
@@ -896,9 +904,8 @@ export component SftpPanel inherits Rectangle {
                                                     item-index: -1;
                                                     label: @tr("根目录");
                                                     path: "/";
-                                                    can-edit: false;
-                                                    can-delete: true;
-                                                    remove(i) => { root.qa-show-root = false; root.toast(@tr("已删除快捷目录")); }
+                                                    can-edit: false;                                                    can-delete: false;
+                                              remove(i) => { }
                                                     edit(i) => { }
                                                 }
                                                 Rectangle { horizontal-stretch: 1; }
@@ -943,7 +950,7 @@ export component SftpPanel inherits Rectangle {
                                 background: node-ta.has-hover ? Theme.bg-hover : (node.path == root.current-path ? #4a90e23c : (node.path == root.tree-active-path || (root.tree-scope == "/" && node.path == "/") ? #4a90e228 : (mod(i, 2) == 0 ? transparent : #ffffff08)));
                                 node-ta := TouchArea {
                                     width: parent.width; height: parent.height; mouse-cursor: pointer; changed has-hover => { root.toolbar-tip = self.has-hover ? node.path : ""; }
-                                    clicked => { if (node.path == "/") { root.tree-active-path = "/"; } else if (!root.search-mode) { root.tree-active-path = node.path; if (root.tree-scope == "/") { root.clear-tree-scope(); } root.navigate(node.path); } }
+                                    clicked => { if (!root.search-mode) { root.tree-active-path = node.path; if (root.tree-scope == "/") { root.clear-tree-scope(); } root.navigate(node.path); } }
                                     double-clicked => { if (node.path == "/") { root.tree-active-path = "/"; if (root.tree-scope == "/" || root.search-mode || root.search-running) { if (root.search-running) { root.cancel-search(); } file-search.text = ""; root.search-changed(""); root.clear-tree-scope(); root.search-mode = false; root.navigate(root.search-restore-path != "" ? root.search-restore-path : root.current-path); root.search-restore-path = ""; } else { root.set-tree-scope("/"); file-search.focus(); } } else if (!root.search-mode) { root.tree-expand(node.path); } }
                                     pointer-event(ev) => { if (ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right) { root.tree-menu-target = node.path; root.tree-menu-x = self.absolute-position.x + self.mouse-x - tree-area.absolute-position.x; root.tree-menu-y = self.absolute-position.y + self.mouse-y - tree-area.absolute-position.y; tree-menu.show(); } }
                                 }
@@ -960,8 +967,7 @@ export component SftpPanel inherits Rectangle {
                                 SftpMenuItem { label: @tr("加入/移出搜索范围"); clicked => { root.toggle-tree-scope(root.tree-menu-target); } }
                                 SftpMenuItem { label: @tr("在此搜索"); clicked => { root.tree-active-path = root.tree-menu-target; root.set-tree-scope(root.tree-menu-target); file-search.focus(); root.toast(@tr("已设置搜索范围")); } }
                                 SftpMenuItem { label: @tr("复制路径"); clicked => { root.copy-path(root.tree-menu-target); } }
-                                SftpMenuItem { label: @tr("权限"); enabled: root.tree-menu-target != ""; clicked => { root.chmod-request(root.tree-menu-target, root.tree-menu-target, 493); } }
-                                Rectangle { height: 1px; background: Theme.border-subtle; }
+                            Rectangle { height: 1px; background: Theme.border-subtle; }
                                 SftpMenuItem { label: @tr("刷新此目录"); clicked => { root.toast(@tr("正在刷新此目录...")); root.refresh(root.tree-menu-target); } }
                                 SftpMenuItem { label: @tr("删除文件夹"); tint: #d86c6c; enabled: root.tree-menu-target != "/"; clicked => { root.delete(root.tree-menu-target); } }
                             }
