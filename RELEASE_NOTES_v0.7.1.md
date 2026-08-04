@@ -6,3 +6,4 @@
 - Windows, Linux, and macOS packages are produced by the unified Release workflow after validation passes.
 - Release scope is frozen to the requested wallpapers and interaction fixes only.
 - All four requested PNG wallpaper assets, Aurora, and Miku are present in the release branch.
+- Source finalization is ready for the PR validation run.
