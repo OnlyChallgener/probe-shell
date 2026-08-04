@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   cargo-check:
@@ -53,30 +54,40 @@ jobs:
       - name: Test Rust project
         run: cargo test --locked
 
-  create-v071-tag:
-    name: Create v0.7.1 tag
+  track-v071-release:
+    name: Track v0.7.1 release
     if: github.event_name == 'pull_request' && github.head_ref == 'fix/sftp-local-terminal' && github.actor != 'github-actions[bot]'
     runs-on: ubuntu-22.04
     steps:
-      - name: Checkout repository history
+      - name: Checkout branch
         uses: actions/checkout@v4
         with:
           ref: fix/sftp-local-terminal
-          fetch-depth: 0
 
-      - name: Tag clean release commit
+      - name: Find or start release workflow
+        id: release
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           release_sha="0dbd8d31fd5ae9b6a683f9199867a800c7040425"
-          version="$(git show "${release_sha}:Cargo.toml" | awk '/^version = / {gsub(/\"/, "", $3); print $3; exit}')"
-          test "$version" = "0.7.1"
-          git fetch --tags origin
-          if git rev-parse -q --verify refs/tags/v0.7.1 >/dev/null; then
-            echo "v0.7.1 already exists"
-            exit 0
+          run_id="$(gh run list --workflow release.yml --limit 30 --json databaseId,headSha,createdAt --jq '.[] | select(.headSha == "'"$release_sha"'") | .databaseId' | head -n 1)"
+          if [ -z "$run_id" ]; then
+            gh workflow run release.yml --ref fix/sftp-local-terminal -f release_tag=v0.7.1
+            sleep 12
+            run_id="$(gh run list --workflow release.yml --event workflow_dispatch --limit 10 --json databaseId,createdAt --jq '.[0].databaseId')"
           fi
+          test -n "$run_id"
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          gh run view "$run_id" --json databaseId,url,status,conclusion,event,headSha,createdAt,updatedAt > RELEASE_RUN_V071.json
+
+      - name: Save release run ID
+        shell: bash
+        run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a v0.7.1 "$release_sha" -m "Probe Shell v0.7.1"
-          git push origin v0.7.1
+          git add RELEASE_RUN_V071.json
+          git commit -m "release: record v0.7.1 workflow run ${{ steps.release.outputs.run_id }}"
+          git push origin HEAD:fix/sftp-local-terminal
