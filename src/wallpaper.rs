@@ -47,14 +47,21 @@ pub fn load(id: &str) -> Option<Wallpaper> {
         return None;
     }
     let buf = match id {
-        // Legacy ids are preserved so existing configs never break.
-        "builtin:light" | "builtin:light-crystal" => decode_bundled("light-crystal.jpg")?,
-        "builtin:dark" | "builtin:dark-mecha" => decode_bundled("dark-mecha.jpg")?,
-        "builtin:tech" | "builtin:dark-network" => decode_bundled("dark-network.jpg")?,
-        "builtin:dark-city" => decode_bundled("dark-city.jpg")?,
-        "builtin:light-network" => decode_bundled("light-network.jpg")?,
-        "builtin:light-lab" => decode_bundled("light-lab.jpg")?,
-        "builtin:aurora" | "builtin:miku" => decode_aurora()?,
+        "builtin:tech" => render_tech(),
+        "builtin:aurora" => decode_aurora()?,
+        "builtin:miku" => decode_miku()?,
+        "builtin:dark-neon-city" => decode_bundled("dark-neon-city.png")?,
+        "builtin:dark-cyber-warrior" => decode_bundled("dark-cyber-warrior.png")?,
+        "builtin:light-future-city" => decode_bundled("light-future-city.png")?,
+        "builtin:light-crystal-guardian" => decode_bundled("light-crystal-guardian.png")?,
+        "builtin:dark" | "builtin:dark-city" | "builtin:dark-network" => {
+            decode_bundled("dark-neon-city.png")?
+        }
+        "builtin:dark-mecha" => decode_bundled("dark-cyber-warrior.png")?,
+        "builtin:light" | "builtin:light-network" | "builtin:light-lab" => {
+            decode_bundled("light-future-city.png")?
+        }
+        "builtin:light-crystal" => decode_bundled("light-crystal-guardian.png")?,
         path => decode_custom(path)?,
     };
     let palette = derive_palette(&buf);
@@ -68,11 +75,15 @@ pub fn load(id: &str) -> Option<Wallpaper> {
 pub fn is_builtin(id: &str) -> bool {
     matches!(
         id,
-        "builtin:light"
-            | "builtin:dark"
-            | "builtin:tech"
+        "builtin:tech"
             | "builtin:aurora"
             | "builtin:miku"
+            | "builtin:dark-neon-city"
+            | "builtin:dark-cyber-warrior"
+            | "builtin:light-future-city"
+            | "builtin:light-crystal-guardian"
+            | "builtin:light"
+            | "builtin:dark"
             | "builtin:dark-mecha"
             | "builtin:dark-city"
             | "builtin:dark-network"
@@ -235,12 +246,12 @@ fn hash2(x: u32, y: u32) -> f32 {
 /// Decode one of Probe Shell's bundled wallpaper assets.
 fn decode_bundled(name: &str) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
     let bytes: &[u8] = match name {
-        "dark-mecha.jpg" => include_bytes!("../assets/wallpapers/dark-mecha.jpg"),
-        "dark-city.jpg" => include_bytes!("../assets/wallpapers/dark-city.jpg"),
-        "dark-network.jpg" => include_bytes!("../assets/wallpapers/dark-network.jpg"),
-        "light-crystal.jpg" => include_bytes!("../assets/wallpapers/light-crystal.jpg"),
-        "light-network.jpg" => include_bytes!("../assets/wallpapers/light-network.jpg"),
-        "light-lab.jpg" => include_bytes!("../assets/wallpapers/light-lab.jpg"),
+        "dark-neon-city.png" => include_bytes!("../assets/wallpapers/dark-neon-city.png"),
+        "dark-cyber-warrior.png" => include_bytes!("../assets/wallpapers/dark-cyber-warrior.png"),
+        "light-future-city.png" => include_bytes!("../assets/wallpapers/light-future-city.png"),
+        "light-crystal-guardian.png" => {
+            include_bytes!("../assets/wallpapers/light-crystal-guardian.png")
+        }
         _ => return None,
     };
     Some(to_buffer(image::load_from_memory(bytes).ok()?.to_rgba8()))
@@ -250,11 +261,15 @@ fn decode_custom(path: &str) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
     Some(to_buffer(image::open(path).ok()?.to_rgba8()))
 }
 
-/// Bundled Probe Shell aurora wallpaper. It is a generated, original sci-fi
-/// glass background used as an optional built-in wallpaper. `builtin:miku` is
-/// accepted as a legacy alias so old configs do not break.
+/// Bundled Probe Shell aurora wallpaper.
 fn decode_aurora() -> Option<SharedPixelBuffer<Rgba8Pixel>> {
     const BYTES: &[u8] = include_bytes!("../assets/aurora.jpg");
+    Some(to_buffer(image::load_from_memory(BYTES).ok()?.to_rgba8()))
+}
+
+/// Bundled Miku wallpaper, kept separate from Aurora.
+fn decode_miku() -> Option<SharedPixelBuffer<Rgba8Pixel>> {
+    const BYTES: &[u8] = include_bytes!("../assets/miku.jpg");
     Some(to_buffer(image::load_from_memory(BYTES).ok()?.to_rgba8()))
 }
 

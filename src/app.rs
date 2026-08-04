@@ -90,17 +90,16 @@ use i_slint_backend_winit::WinitWindowAccessor;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use tokio::runtime::Runtime;
 
+use crate::app_state::{LocalSnap, SftpHandles, SftpLastCwd, TabStatus, TabStatuses};
 use crate::config::{AuthMethod, ConfigStore, Secret, Session, SessionKind, SftpQuickDir};
 use crate::i18n::t;
 use crate::local::spawn_local_session;
 use crate::sftp::spawn_sftp;
 use crate::ssh::{
-    format_mtime, format_size, spawn_session, ProcInfo, RemoteEntry, SessionCommand,
-    SessionEvent, SessionHandle, SftpSearchState,
+    format_mtime, format_size, spawn_session, ProcInfo, RemoteEntry, SessionCommand, SessionEvent,
+    SessionHandle, SftpSearchState,
 };
 use crate::system::{format_bytes_per_sec, format_mem, SystemSampler, SystemSnapshot};
-use crate::app_state::{LocalSnap, SftpHandles, SftpLastCwd, TabStatus, TabStatuses};
-
 
 // Slint generates types into this scope.
 slint::include_modules!();
@@ -335,11 +334,17 @@ const NET_HISTORY_LEN: usize = 60;
 fn set_window_icon(window: &AppWindow) {
     use i_slint_backend_winit::winit::window::Icon;
     const ICON_PNG: &[u8] = include_bytes!("../assets/icon@512.png");
-    let Ok(img) = image::load_from_memory(ICON_PNG) else { return };
+    let Ok(img) = image::load_from_memory(ICON_PNG) else {
+        return;
+    };
     let rgba = img.into_rgba8();
     let (w, h) = rgba.dimensions();
-    let Ok(icon) = Icon::from_rgba(rgba.into_raw(), w, h) else { return };
-    window.window().with_winit_window(|ww| ww.set_window_icon(Some(icon)));
+    let Ok(icon) = Icon::from_rgba(rgba.into_raw(), w, h) else {
+        return;
+    };
+    window
+        .window()
+        .with_winit_window(|ww| ww.set_window_icon(Some(icon)));
 }
 
 /// On Windows 11, give the frameless window the native rounded corners (#166) and
@@ -434,7 +439,9 @@ fn setup_macos_platform() {
                 tracing::warn!("winit backend already set; immersive macOS titlebar disabled");
             }
         }
-        Err(e) => tracing::warn!("winit backend build failed ({e}); immersive macOS titlebar disabled"),
+        Err(e) => {
+            tracing::warn!("winit backend build failed ({e}); immersive macOS titlebar disabled")
+        }
     }
 }
 
@@ -443,11 +450,8 @@ pub fn run() -> Result<()> {
     #[cfg(target_os = "macos")]
     setup_macos_platform();
 
-
     // --- Runtime + store -------------------------------------------------
-    let runtime = Arc::new(
-        Runtime::new().context("failed to start tokio runtime")?,
-    );
+    let runtime = Arc::new(Runtime::new().context("failed to start tokio runtime")?);
     let store = Rc::new(RefCell::new(
         ConfigStore::load().context("failed to load config")?,
     ));
@@ -568,8 +572,7 @@ pub fn run() -> Result<()> {
         let win_weak = window.as_weak();
         let proc_weak = proc_win.as_weak();
         window.on_open_processes(move || {
-            let (Some(main), Some(pw)) = (win_weak.upgrade(), proc_weak.upgrade())
-            else {
+            let (Some(main), Some(pw)) = (win_weak.upgrade(), proc_weak.upgrade()) else {
                 return;
             };
             pw.set_host(main.get_connection_state());
@@ -578,7 +581,6 @@ pub fn run() -> Result<()> {
             pw.window().with_winit_window(|ww| ww.focus_window());
         });
     }
-
 
     // Apply the saved UI language.  The Rust-side flag drives `i18n::t(...)`;
     // `apply_to_slint` selects the bundled `.po` for the static `@tr(...)` text
@@ -629,7 +631,9 @@ pub fn run() -> Result<()> {
     // window is never fully blank even when the system font DB is unreadable.
     window.set_ui_font_family(resolve_ui_font_family());
     // Populate the Interface font picker with installed monospace families.
-    window.set_term_fonts(ModelRc::from(Rc::new(VecModel::from(system_monospace_fonts()))));
+    window.set_term_fonts(ModelRc::from(Rc::new(VecModel::from(
+        system_monospace_fonts(),
+    ))));
 
     // Command bar (#55): seed quick commands + history from the config. Groups
     // start collapsed by default (#55).
@@ -702,12 +706,14 @@ pub fn run() -> Result<()> {
         // builds saved 1440×900 (or even a maximized physical size), which made the
         // right status panel run off-screen on Windows high-DPI displays.
         let (ww, wh) = s.window_size();
-        let (mut ww, mut wh) = if ww > 0.0 && wh > 0.0 { (ww, wh) } else { (1180.0, 720.0) };
+        let (mut ww, mut wh) = if ww > 0.0 && wh > 0.0 {
+            (ww, wh)
+        } else {
+            (1180.0, 720.0)
+        };
         ww = ww.clamp(960.0, 1180.0);
         wh = wh.clamp(620.0, 720.0);
-        window
-            .window()
-            .set_size(slint::LogicalSize::new(ww, wh));
+        window.window().set_size(slint::LogicalSize::new(ww, wh));
     }
     {
         let store = store.clone();
@@ -1291,7 +1297,9 @@ pub fn run() -> Result<()> {
     if store.borrow().update_check_enabled() {
         let weak = window.as_weak();
         std::thread::spawn(move || {
-            let Some(tag) = crate::app_update::fetch_latest_tag() else { return };
+            let Some(tag) = crate::app_update::fetch_latest_tag() else {
+                return;
+            };
             if !crate::app_update::is_newer_than_current(&tag) {
                 return;
             }
@@ -1307,7 +1315,13 @@ pub fn run() -> Result<()> {
     window.set_transfers(ModelRc::from(transfers_model.clone()));
     {
         let tm = transfers_model.clone();
-        window.on_clear_transfers(move || tm.set_vec(Vec::<TransferInfo>::new()));
+        window.on_clear_transfers(move || {
+            let active: Vec<TransferInfo> = (0..tm.row_count())
+                .filter_map(|i| tm.row_data(i))
+                .filter(|row| row.state == 0 || row.state == 3)
+                .collect();
+            tm.set_vec(active);
+        });
     }
     {
         // Cancel a transfer by id. The id is a UUID unique across sessions, so we
@@ -1327,23 +1341,53 @@ pub fn run() -> Result<()> {
     {
         let libs: Vec<SharedString> = [
             t("Slint — 图形界面框架 (GUI)", "Slint — GUI framework"),
-            t("russh / russh-keys — SSH 协议实现", "russh / russh-keys — SSH protocol"),
-            t("russh-sftp — SFTP 文件传输", "russh-sftp — SFTP file transfer"),
+            t(
+                "russh / russh-keys — SSH 协议实现",
+                "russh / russh-keys — SSH protocol",
+            ),
+            t(
+                "russh-sftp — SFTP 文件传输",
+                "russh-sftp — SFTP file transfer",
+            ),
             t("ssh-key — SSH 密钥解析", "ssh-key — SSH key parsing"),
             t("tokio — 异步运行时", "tokio — async runtime"),
-            t("vt100 — 终端 (VT100/xterm) 解析", "vt100 — terminal (VT100/xterm) parser"),
-            t("sysinfo — 本机资源采集", "sysinfo — local resource sampling"),
-            t("serde / serde_json — 配置序列化", "serde / serde_json — config serialization"),
+            t(
+                "vt100 — 终端 (VT100/xterm) 解析",
+                "vt100 — terminal (VT100/xterm) parser",
+            ),
+            t(
+                "sysinfo — 本机资源采集",
+                "sysinfo — local resource sampling",
+            ),
+            t(
+                "serde / serde_json — 配置序列化",
+                "serde / serde_json — config serialization",
+            ),
             t("arboard — 系统剪贴板", "arboard — system clipboard"),
             t("rfd — 原生文件对话框", "rfd — native file dialogs"),
-            t("directories — 配置目录定位", "directories — config dir lookup"),
+            t(
+                "directories — 配置目录定位",
+                "directories — config dir lookup",
+            ),
             t("chrono — 日期时间处理", "chrono — date/time handling"),
             t("uuid — 唯一标识符", "uuid — unique identifiers"),
-            t("anyhow / thiserror — 错误处理", "anyhow / thiserror — error handling"),
-            t("tracing / tracing-subscriber — 日志", "tracing / tracing-subscriber — logging"),
-            t("futures / async-trait — 异步辅助", "futures / async-trait — async helpers"),
+            t(
+                "anyhow / thiserror — 错误处理",
+                "anyhow / thiserror — error handling",
+            ),
+            t(
+                "tracing / tracing-subscriber — 日志",
+                "tracing / tracing-subscriber — logging",
+            ),
+            t(
+                "futures / async-trait — 异步辅助",
+                "futures / async-trait — async helpers",
+            ),
             t("rand — 随机数", "rand — randomness"),
-            t("winresource — Windows 图标/资源嵌入", "winresource — Windows icon/resource embedding"),
+            t(
+                "winresource — Windows 图标/资源嵌入",
+                "winresource — Windows icon/resource embedding",
+            ),
         ]
         .iter()
         .map(|s| (*s).into())
@@ -1364,7 +1408,12 @@ pub fn run() -> Result<()> {
         sftp_handles.clone(),
         sftp_last_cwd.clone(),
     );
-    wire_sftp_callbacks(&window, store.clone(), sftp_handles.clone(), sftp_last_cwd.clone());
+    wire_sftp_callbacks(
+        &window,
+        store.clone(),
+        sftp_handles.clone(),
+        sftp_last_cwd.clone(),
+    );
     wire_key_input(
         &window,
         handles.clone(),
@@ -1432,10 +1481,7 @@ pub fn run() -> Result<()> {
             };
             // Append the raw local throughput to the bottom-graph ring buffer
             // (normalisation happens at display time so the graph auto-scales).
-            push_ring(
-                &mut tick_net.lock().unwrap(),
-                snap.net_bytes_per_sec as f32,
-            );
+            push_ring(&mut tick_net.lock().unwrap(), snap.net_bytes_per_sec as f32);
             // Stash the local sample; the sidebar shows it on the welcome tab
             // and in the bottom network graph.
             *tick_local.lock().unwrap() = snap.clone();
@@ -1677,12 +1723,18 @@ fn center_window(win: &AppWindow) {
     }
     #[link(name = "user32")]
     extern "system" {
-        fn SystemParametersInfoW(action: u32, uiparam: u32, pvparam: *mut Rect, winini: u32) -> i32;
+        fn SystemParametersInfoW(action: u32, uiparam: u32, pvparam: *mut Rect, winini: u32)
+            -> i32;
     }
     const SPI_GETWORKAREA: u32 = 0x0030;
 
     let size = win.window().size(); // physical pixels
-    let mut wa = Rect { left: 0, top: 0, right: 0, bottom: 0 };
+    let mut wa = Rect {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
     let ok = unsafe { SystemParametersInfoW(SPI_GETWORKAREA, 0, &mut wa, 0) };
     if ok == 0 {
         return;
@@ -1743,10 +1795,7 @@ fn handle_file_drop(win: &AppWindow, sftp_handles: &SftpHandles, path: String) {
     let w = win.window();
     let scale = w.scale_factor().max(0.01);
     let size = w.size(); // physical
-    let Some(inner) = w
-        .with_winit_window(|ww| ww.inner_position().ok())
-        .flatten()
-    else {
+    let Some(inner) = w.with_winit_window(|ww| ww.inner_position().ok()).flatten() else {
         return;
     };
     let Some((cx, cy)) = cursor_pos() else {
@@ -1764,10 +1813,7 @@ fn handle_file_drop(win: &AppWindow, sftp_handles: &SftpHandles, path: String) {
     let zone_left = 381.0_f32;
     let zone_top = h_logical - h_sftp + 51.0;
     let zone_bottom = h_logical - 18.0;
-    if client_x < zone_left
-        || client_x > w_logical
-        || client_y < zone_top
-        || client_y > zone_bottom
+    if client_x < zone_left || client_x > w_logical || client_y < zone_top || client_y > zone_bottom
     {
         return; // dropped outside the file list — ignore
     }
@@ -1780,7 +1826,11 @@ fn handle_file_drop(win: &AppWindow, sftp_handles: &SftpHandles, path: String) {
     // every other online session — each into *its own* current SFTP dir. This
     // matches the upload button's behaviour (drag-and-drop is a separate path).
     let sync = win.get_sync_input() && win.get_sync_upload_enabled();
-    let other_dirs = if sync { terminal_sftp_paths(win) } else { HashMap::new() };
+    let other_dirs = if sync {
+        terminal_sftp_paths(win)
+    } else {
+        HashMap::new()
+    };
     if let Ok(handles) = sftp_handles.lock() {
         if let Some(h) = handles.get(&active) {
             h.upload(path.clone(), dir);
@@ -1828,7 +1878,11 @@ fn parse_batch_import(text: &str) -> Vec<Session> {
             .and_then(|p| p.parse::<u16>().ok())
             .filter(|&p| p > 0)
             .unwrap_or(22);
-        let user = parts.get(2).copied().filter(|s| !s.is_empty()).unwrap_or("root");
+        let user = parts
+            .get(2)
+            .copied()
+            .filter(|s| !s.is_empty())
+            .unwrap_or("root");
         let password = parts.get(3).copied().unwrap_or("");
         let name = parts
             .get(4)
@@ -1872,7 +1926,10 @@ fn session_groups_model(store: &ConfigStore) -> ModelRc<SharedString> {
     named.sort_by_key(|g| g.to_lowercase());
     named.dedup();
     ModelRc::from(Rc::new(VecModel::from(
-        named.into_iter().map(SharedString::from).collect::<Vec<_>>(),
+        named
+            .into_iter()
+            .map(SharedString::from)
+            .collect::<Vec<_>>(),
     )))
 }
 
@@ -1936,7 +1993,11 @@ fn sync_sessions_to_model_filtered(
     if has_default {
         display_groups.push("default".to_string());
     }
-    if query.is_empty() || builtin_local_sessions().iter().any(|s| session_matches_query(s, query)) {
+    if query.is_empty()
+        || builtin_local_sessions()
+            .iter()
+            .any(|s| session_matches_query(s, query))
+    {
         display_groups.insert(0, "system".to_string());
     }
     display_groups.extend(named);
@@ -1966,7 +2027,10 @@ fn sync_sessions_to_model_filtered(
     for group in &display_groups {
         let builtins = builtin_local_sessions();
         let mut gs: Vec<&Session> = if group == "system" {
-            builtins.iter().filter(|s| session_matches_query(s, query)).collect()
+            builtins
+                .iter()
+                .filter(|s| session_matches_query(s, query))
+                .collect()
         } else if group == "default" {
             sessions
                 .iter()
@@ -2041,16 +2105,22 @@ fn apply_sftp_search_batch(
     entries: &[RemoteEntry],
 ) {
     for i in 0..terminals.row_count() {
-        let Some(mut row) = terminals.row_data(i) else { continue };
+        let Some(mut row) = terminals.row_data(i) else {
+            continue;
+        };
         if row.id.as_str() != tab_id
             || !row.sftp_search_running
             || row.sftp_search_id.as_str() != search_id
             || row.sftp_search.as_str() != query
             || row.sftp_search_root.as_str() != root
-        { continue; }
+        {
+            continue;
+        }
         let mut all = collect_sftp_entries(&row.sftp_all_entries);
-        let mut seen: std::collections::HashSet<String> =
-            all.iter().map(|entry| entry.full_path.to_string()).collect();
+        let mut seen: std::collections::HashSet<String> = all
+            .iter()
+            .map(|entry| entry.full_path.to_string())
+            .collect();
         for entry in entries {
             if seen.insert(entry.full_path.clone()) {
                 all.push(remote_entry_to_sftp_entry(entry));
@@ -2070,9 +2140,16 @@ fn apply_sftp_search_batch(
 /// copied, moved or deleted through ConfigStore.
 fn builtin_local_sessions() -> Vec<Session> {
     #[cfg(windows)]
-    { vec![builtin_local_session("system:powershell", "PowerShell", "powershell"), builtin_local_session("system:cmd", "CMD", "cmd")] }
+    {
+        vec![
+            builtin_local_session("system:powershell", "PowerShell", "powershell"),
+            builtin_local_session("system:cmd", "CMD", "cmd"),
+        ]
+    }
     #[cfg(not(windows))]
-    { vec![builtin_local_session("system:shell", "Shell", "shell")] }
+    {
+        vec![builtin_local_session("system:shell", "Shell", "shell")]
+    }
 }
 
 fn builtin_local_session(id: &str, name: &str, host: &str) -> Session {
@@ -2080,7 +2157,9 @@ fn builtin_local_session(id: &str, name: &str, host: &str) -> Session {
     session.id = id.into();
     session.name = name.into();
     session.host = host.into();
-    session.user = std::env::var("USERNAME").or_else(|_| std::env::var("USER")).unwrap_or_default();
+    session.user = std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_default();
     session.group = "system".into();
     session.kind = SessionKind::Local;
     session
@@ -2088,7 +2167,9 @@ fn builtin_local_session(id: &str, name: &str, host: &str) -> Session {
 
 fn apply_sftp_quick_dirs_to_window(win: &AppWindow, dirs: &[SftpQuickDir]) {
     let get = |idx: usize, field: &str| -> SharedString {
-        let Some(dir) = dirs.get(idx) else { return "".into(); };
+        let Some(dir) = dirs.get(idx) else {
+            return "".into();
+        };
         match field {
             "label" => {
                 if dir.label.trim().is_empty() {
@@ -2198,7 +2279,9 @@ fn wire_session_callbacks(
             let mut added = 0usize;
             if hosts.is_empty() {
                 if let Some(w) = weak.upgrade() {
-                    w.set_ssh_import_hint(t("未找到 ~/.ssh/config", "no ~/.ssh/config found").into());
+                    w.set_ssh_import_hint(
+                        t("未找到 ~/.ssh/config", "no ~/.ssh/config found").into(),
+                    );
                 }
                 return;
             }
@@ -2207,9 +2290,10 @@ fn wire_session_callbacks(
                 for h in hosts {
                     // Skip if a session already has this alias, or the same
                     // host + user pair.
-                    let dup = s.sessions().iter().any(|x| {
-                        x.name == h.alias || (x.host == h.hostname && x.user == h.user)
-                    });
+                    let dup = s
+                        .sessions()
+                        .iter()
+                        .any(|x| x.name == h.alias || (x.host == h.hostname && x.user == h.user));
                     if dup {
                         continue;
                     }
@@ -2222,7 +2306,11 @@ fn wire_session_callbacks(
                         name: h.alias,
                         host: h.hostname,
                         port: h.port,
-                        user: if h.user.is_empty() { "root".into() } else { h.user },
+                        user: if h.user.is_empty() {
+                            "root".into()
+                        } else {
+                            h.user
+                        },
                         auth,
                         private_key_path: h.identity_file,
                         ..Session::new_empty()
@@ -2282,9 +2370,10 @@ fn wire_session_callbacks(
                 let mut s = store.borrow_mut();
                 for sess in parsed {
                     // Skip a host/user/port we already have.
-                    let dup = s.sessions().iter().any(|x| {
-                        x.host == sess.host && x.user == sess.user && x.port == sess.port
-                    });
+                    let dup = s
+                        .sessions()
+                        .iter()
+                        .any(|x| x.host == sess.host && x.user == sess.user && x.port == sess.port);
                     if dup {
                         continue;
                     }
@@ -2348,7 +2437,9 @@ fn wire_session_callbacks(
         window.on_edit_session(move |id: SharedString| {
             let id = id.to_string();
             let store = store.borrow();
-            let Some(session) = store.get(&id) else { return; };
+            let Some(session) = store.get(&id) else {
+                return;
+            };
             *ef_edit.borrow_mut() = session.forwards.clone();
             if let Some(w) = weak.upgrade() {
                 w.set_session_groups(session_groups_model(&store));
@@ -2636,7 +2727,8 @@ fn wire_session_callbacks(
     {
         let weak = window.as_weak();
         window.on_session_dialog_pick_key(move || {
-            let mut dialog = rfd::FileDialog::new().set_title(t("选择私钥文件", "Choose private key file"));
+            let mut dialog =
+                rfd::FileDialog::new().set_title(t("选择私钥文件", "Choose private key file"));
             // Start in ~/.ssh if it exists.
             if let Some(home) = directories::UserDirs::new().map(|u| u.home_dir().join(".ssh")) {
                 if home.is_dir() {
@@ -2738,62 +2830,62 @@ fn wire_session_callbacks(
             };
 
             if !force_new {
-            // If this saved session is already open, switch to its existing tab
-            // instead of spawning duplicate pages forever. This makes the left
-            // quick-connect list behave like a navigator: click once to open,
-            // click again to jump back to the running session.
-            let existing_tab = {
-                let statuses = tab_statuses.lock().unwrap();
-                statuses
-                    .iter()
-                    .find(|(tab, st)| {
-                        st.session_id == id
-                            && (0..tabs_model.row_count()).any(|i| {
-                                tabs_model
-                                    .row_data(i)
-                                    .map(|r| r.id.as_str() == tab.as_str())
-                                    .unwrap_or(false)
-                            })
-                    })
-                    .map(|(tab, _)| tab.clone())
-            };
-            if let Some(existing_tab) = existing_tab {
-                if let Some(w) = weak.upgrade() {
-                    // IMPORTANT: do not keep `layout.borrow()` alive across the
-                    // later `borrow_mut()`.  In v0.6.1 this was written as
-                    // `if let Some(pane_id) = layout.borrow().leaf_of_tab(...) { ... }`;
-                    // Rust extends that temporary borrow to the whole `if` body,
-                    // so the following `layout.borrow_mut()` panicked with
-                    // "RefCell already borrowed" when the user clicked an already
-                    // opened failed/disconnected session or pressed Enter after a
-                    // failed reconnect.  Compute the pane id in its own scope.
-                    let pane_id = {
-                        let lay = layout.borrow();
-                        lay.leaf_of_tab(&existing_tab)
-                    };
-                    if let Some(pane_id) = pane_id {
-                        {
-                            let mut lay = layout.borrow_mut();
-                            lay.focused = pane_id;
-                            if let Some(leaf) = lay.leaf_mut(pane_id) {
-                                leaf.active = existing_tab.clone();
+                // If this saved session is already open, switch to its existing tab
+                // instead of spawning duplicate pages forever. This makes the left
+                // quick-connect list behave like a navigator: click once to open,
+                // click again to jump back to the running session.
+                let existing_tab = {
+                    let statuses = tab_statuses.lock().unwrap();
+                    statuses
+                        .iter()
+                        .find(|(tab, st)| {
+                            st.session_id == id
+                                && (0..tabs_model.row_count()).any(|i| {
+                                    tabs_model
+                                        .row_data(i)
+                                        .map(|r| r.id.as_str() == tab.as_str())
+                                        .unwrap_or(false)
+                                })
+                        })
+                        .map(|(tab, _)| tab.clone())
+                };
+                if let Some(existing_tab) = existing_tab {
+                    if let Some(w) = weak.upgrade() {
+                        // IMPORTANT: do not keep `layout.borrow()` alive across the
+                        // later `borrow_mut()`.  In v0.6.1 this was written as
+                        // `if let Some(pane_id) = layout.borrow().leaf_of_tab(...) { ... }`;
+                        // Rust extends that temporary borrow to the whole `if` body,
+                        // so the following `layout.borrow_mut()` panicked with
+                        // "RefCell already borrowed" when the user clicked an already
+                        // opened failed/disconnected session or pressed Enter after a
+                        // failed reconnect.  Compute the pane id in its own scope.
+                        let pane_id = {
+                            let lay = layout.borrow();
+                            lay.leaf_of_tab(&existing_tab)
+                        };
+                        if let Some(pane_id) = pane_id {
+                            {
+                                let mut lay = layout.borrow_mut();
+                                lay.focused = pane_id;
+                                if let Some(leaf) = lay.leaf_mut(pane_id) {
+                                    leaf.active = existing_tab.clone();
+                                }
                             }
+                            let lay_snapshot = layout.borrow();
+                            refresh_panes(
+                                &w,
+                                &lay_snapshot,
+                                content_size.get(),
+                                &tabs_model,
+                                &panes_model,
+                                &splitters_model,
+                            );
+                            drop(lay_snapshot);
+                            w.set_active_tab_id(existing_tab.into());
                         }
-                        let lay_snapshot = layout.borrow();
-                        refresh_panes(
-                            &w,
-                            &lay_snapshot,
-                            content_size.get(),
-                            &tabs_model,
-                            &panes_model,
-                            &splitters_model,
-                        );
-                        drop(lay_snapshot);
-                        w.set_active_tab_id(existing_tab.into());
                     }
+                    return;
                 }
-                return;
-            }
             }
 
             // Debounce only real tab creation, not normal navigation to an existing
@@ -2808,7 +2900,9 @@ fn wire_session_callbacks(
                     format!("open:{}", id)
                 };
                 let mut debounce = connect_debounce.borrow_mut();
-                debounce.retain(|_, last| now.duration_since(*last) < std::time::Duration::from_secs(3));
+                debounce.retain(|_, last| {
+                    now.duration_since(*last) < std::time::Duration::from_secs(3)
+                });
                 if debounce
                     .get(&debounce_key)
                     .map(|last| now.duration_since(*last) < std::time::Duration::from_millis(650))
@@ -2823,10 +2917,7 @@ fn wire_session_callbacks(
             let tab_id = format!("term-{}", uuid::Uuid::new_v4());
             let same_session_tabs = {
                 let statuses = tab_statuses.lock().unwrap();
-                statuses
-                    .values()
-                    .filter(|st| st.session_id == id)
-                    .count()
+                statuses.values().filter(|st| st.session_id == id).count()
             };
             let tab_title = if same_session_tabs == 0 {
                 session.name.clone()
@@ -2893,25 +2984,25 @@ fn wire_session_callbacks(
                 selection: ModelRc::from(std::rc::Rc::new(VecModel::<TermMatch>::default())),
                 sftp_path: "/".into(),
                 sftp_back_path: "".into(),
-                sftp_entries: ModelRc::from(
-                    std::rc::Rc::new(VecModel::<SftpEntry>::default()),
-                ),
-                sftp_all_entries: ModelRc::from(
-                    std::rc::Rc::new(VecModel::<SftpEntry>::default()),
-                ),
+                sftp_entries: ModelRc::from(std::rc::Rc::new(VecModel::<SftpEntry>::default())),
+                sftp_all_entries: ModelRc::from(std::rc::Rc::new(VecModel::<SftpEntry>::default())),
                 sftp_status: if has_sftp {
                     t("SFTP 连接中...", "SFTP connecting...").into()
                 } else {
-                    t("此会话类型不支持 SFTP", "SFTP not available for this session").into()
+                    t(
+                        "此会话类型不支持 SFTP",
+                        "SFTP not available for this session",
+                    )
+                    .into()
                 },
                 sftp_loading: has_sftp,
                 sftp_search_running: false,
                 sftp_search: "".into(),
                 sftp_search_id: "".into(),
                 sftp_search_root: "".into(),
-                sftp_tree_nodes: ModelRc::from(
-                    std::rc::Rc::new(VecModel::<SftpTreeNode>::default()),
-                ),
+                sftp_tree_nodes: ModelRc::from(std::rc::Rc::new(
+                    VecModel::<SftpTreeNode>::default(),
+                )),
                 sftp_tree_scope: "".into(),
                 sftp_selected_count: 0,
                 sftp_collapsed: !has_sftp || sftp_collapsed_default,
@@ -3209,11 +3300,13 @@ fn start_session_in_tab(tab_id: &str, session: Session, ctx: &ConnectCtx) {
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(win) = weak_evt.upgrade() {
                         for evt in ui_batch {
-                            if let Err(_) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                apply_session_event_to_window(
-                                    &win, &tid, evt, &bufs_evt, &st_evt, &lc_evt, &nh_evt,
-                                );
-                            })) {
+                            if let Err(_) =
+                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                    apply_session_event_to_window(
+                                        &win, &tid, evt, &bufs_evt, &st_evt, &lc_evt, &nh_evt,
+                                    );
+                                }))
+                            {
                                 tracing::error!(tab_id = %tid, "ignored panic while applying session event");
                             }
                         }
@@ -3245,11 +3338,13 @@ fn start_session_in_tab(tab_id: &str, session: Session, ctx: &ConnectCtx) {
                         let nh_s = net_sftp.clone();
                         let _ = slint::invoke_from_event_loop(move || {
                             if let Some(win) = weak_s.upgrade() {
-                                if let Err(_) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                    apply_session_event_to_window(
-                                        &win, &tid, sftp_evt, &bufs_s, &st_s, &lc_s, &nh_s,
-                                    );
-                                })) {
+                                if let Err(_) =
+                                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                        apply_session_event_to_window(
+                                            &win, &tid, sftp_evt, &bufs_s, &st_s, &lc_s, &nh_s,
+                                        );
+                                    }))
+                                {
                                     tracing::error!(tab_id = %tid, "ignored panic while applying file-browser event");
                                 }
                             }
@@ -3459,7 +3554,11 @@ fn quick_cmd_model(
                     name: c.name.clone().into(),
                     command: c.command.clone().into(),
                     group: group.clone().into(),
-                    group_header: if i == 0 { group.clone().into() } else { "".into() },
+                    group_header: if i == 0 {
+                        group.clone().into()
+                    } else {
+                        "".into()
+                    },
                     collapsed: is_collapsed,
                     orig_index: *orig_idx as i32,
                     send_enter: c.send_enter,
@@ -3501,13 +3600,19 @@ fn forward_model(forwards: &[crate::config::PortForward]) -> ModelRc<PortFwd> {
 fn collect_sftp_selected(terminals: &VecModel<TerminalState>, tab_id: &str) -> Vec<String> {
     let mut paths = Vec::new();
     for ti in 0..terminals.row_count() {
-        let Some(row) = terminals.row_data(ti) else { continue };
+        let Some(row) = terminals.row_data(ti) else {
+            continue;
+        };
         if row.id.as_str() != tab_id {
             continue;
         }
         // Prefer the unfiltered model so a local search filter does not make a
         // checked item disappear from batch operations.
-        if let Some(em) = row.sftp_all_entries.as_any().downcast_ref::<VecModel<SftpEntry>>() {
+        if let Some(em) = row
+            .sftp_all_entries
+            .as_any()
+            .downcast_ref::<VecModel<SftpEntry>>()
+        {
             for ei in 0..em.row_count() {
                 if let Some(e) = em.row_data(ei) {
                     if e.selected {
@@ -3517,7 +3622,11 @@ fn collect_sftp_selected(terminals: &VecModel<TerminalState>, tab_id: &str) -> V
             }
         }
         if paths.is_empty() {
-            if let Some(em) = row.sftp_entries.as_any().downcast_ref::<VecModel<SftpEntry>>() {
+            if let Some(em) = row
+                .sftp_entries
+                .as_any()
+                .downcast_ref::<VecModel<SftpEntry>>()
+            {
                 for ei in 0..em.row_count() {
                     if let Some(e) = em.row_data(ei) {
                         if e.selected {
@@ -3535,7 +3644,9 @@ fn collect_sftp_selected(terminals: &VecModel<TerminalState>, tab_id: &str) -> V
 /// Uncheck every SFTP entry for a tab and reset its selected-count (#100).
 fn clear_sftp_selection(terminals: &VecModel<TerminalState>, tab_id: &str) {
     for ti in 0..terminals.row_count() {
-        let Some(row) = terminals.row_data(ti) else { continue };
+        let Some(row) = terminals.row_data(ti) else {
+            continue;
+        };
         if row.id.as_str() != tab_id {
             continue;
         }
@@ -3714,7 +3825,9 @@ fn apply_terminal_resize(
 fn rebuild_tab_display(win: &AppWindow, bufs: &TermBuffers, tab_id: &str) {
     let data = {
         let mut map = bufs.lock().unwrap();
-        let Some(buf) = map.get_mut(tab_id) else { return };
+        let Some(buf) = map.get_mut(tab_id) else {
+            return;
+        };
         let cols = buf.parser.screen().size().1;
         let b = buf.render(); // also refreshes buf.displayed_text
         let matches = compute_find_matches(&buf.displayed_text, &buf.find_query);
@@ -3917,9 +4030,7 @@ fn refresh_sidebar(
             win.set_cpu_percent(st.cpu);
             win.set_mem_percent(pct(st.mem_used_kib, st.mem_total_kib));
             win.set_swap_percent(pct(st.swap_used_kib, st.swap_total_kib));
-            win.set_mem_detail(
-                format_mem(st.mem_used_kib / 1024, st.mem_total_kib / 1024).into(),
-            );
+            win.set_mem_detail(format_mem(st.mem_used_kib / 1024, st.mem_total_kib / 1024).into());
             win.set_swap_detail(
                 format_mem(st.swap_used_kib / 1024, st.swap_total_kib / 1024).into(),
             );
@@ -3929,8 +4040,7 @@ fn refresh_sidebar(
             win.set_net_top_history(normalized_model(&st.net_hist));
             win.set_net_show_selector(!st.net.is_empty());
             win.set_net_selected(name.into());
-            let ifaces: Vec<SharedString> =
-                st.net.iter().map(|e| e.0.clone().into()).collect();
+            let ifaces: Vec<SharedString> = st.net.iter().map(|e| e.0.clone().into()).collect();
             win.set_net_ifaces(ModelRc::from(Rc::new(VecModel::from(ifaces))));
             win.set_disks(disk_model(&st.disks));
             win.set_proc_available(true);
@@ -4016,7 +4126,9 @@ fn apply_session_event_to_window(
         let panes = win.get_panes();
         if let Some(pm) = panes.as_any().downcast_ref::<VecModel<PaneInfo>>() {
             for pi in 0..pm.row_count() {
-                let Some(pane) = pm.row_data(pi) else { continue };
+                let Some(pane) = pm.row_data(pi) else {
+                    continue;
+                };
                 let Some(tm) = pane.tabs.as_any().downcast_ref::<VecModel<TabInfo>>() else {
                     continue;
                 };
@@ -4138,8 +4250,13 @@ fn apply_session_event_to_window(
             update_tab(&|t| t.connected = false);
             let status_reason = reason_with_hint.lines().next().unwrap_or(reason.as_str());
             update_terminal(&|t| {
-                t.status = format!("{} — {status_reason}", crate::i18n::t("已断开", "Disconnected")).into();
-                t.sftp_status = crate::i18n::t("文件连接已断开", "File connection disconnected").into();
+                t.status = format!(
+                    "{} — {status_reason}",
+                    crate::i18n::t("已断开", "Disconnected")
+                )
+                .into();
+                t.sftp_status =
+                    crate::i18n::t("文件连接已断开", "File connection disconnected").into();
                 t.sftp_loading = false;
                 t.sftp_search_running = false;
                 t.sftp_search_id = "".into();
@@ -4194,10 +4311,8 @@ fn apply_session_event_to_window(
             });
         }
         SessionEvent::SftpEntries { path, entries } => {
-            let base_entries: Vec<SftpEntry> = entries
-                .iter()
-                .map(remote_entry_to_sftp_entry)
-                .collect();
+            let base_entries: Vec<SftpEntry> =
+                entries.iter().map(remote_entry_to_sftp_entry).collect();
             let q = current_sftp_search(terminals, tab_id);
             update_terminal(&|t| {
                 if !t.sftp_search_root.is_empty() {
@@ -4211,7 +4326,8 @@ fn apply_session_event_to_window(
                     return;
                 }
                 let mut slint_entries = base_entries.clone();
-                let selected_count = mark_sftp_entries_for_scope(&mut slint_entries, t.sftp_tree_scope.as_str());
+                let selected_count =
+                    mark_sftp_entries_for_scope(&mut slint_entries, t.sftp_tree_scope.as_str());
                 let all_model = sftp_entries_model(slint_entries.clone());
                 let model = sftp_entries_model(filter_sftp_entries(&slint_entries, &q));
                 if !t.sftp_search_running {
@@ -4248,22 +4364,22 @@ fn apply_session_event_to_window(
                     return;
                 }
                 let mut current = collect_sftp_entries(&t.sftp_all_entries);
-                let selected_count = mark_sftp_entries_for_scope(&mut current, t.sftp_tree_scope.as_str());
+                let selected_count =
+                    mark_sftp_entries_for_scope(&mut current, t.sftp_tree_scope.as_str());
                 t.sftp_all_entries = sftp_entries_model(current.clone());
                 t.sftp_entries = sftp_entries_model(current);
                 t.sftp_loading = false;
                 t.sftp_selected_count = selected_count;
-                t.sftp_search_running = matches!(
-                    state,
-                    SftpSearchState::Started | SftpSearchState::Progress
-                );
+                t.sftp_search_running =
+                    matches!(state, SftpSearchState::Started | SftpSearchState::Progress);
                 let shown_found = if state == SftpSearchState::Cancelled && found == 0 {
                     t.sftp_entries.row_count()
                 } else {
                     found
                 };
                 t.sftp_status =
-                    sftp_search_status_text(state, &root, &query, shown_found, scanned, elapsed_ms).into();
+                    sftp_search_status_text(state, &root, &query, shown_found, scanned, elapsed_ms)
+                        .into();
             });
         }
         SessionEvent::SftpStatus(msg) => {
@@ -4347,7 +4463,13 @@ fn apply_session_event_to_window(
         } => {
             let detail = match state {
                 // On error, show the actual message when we have one.
-                2 => if msg.is_empty() { t("失败", "Failed").to_string() } else { msg },
+                2 => {
+                    if msg.is_empty() {
+                        t("失败", "Failed").to_string()
+                    } else {
+                        msg
+                    }
+                }
                 1 => t("已完成", "Done").to_string(),
                 // Remote-side prep (e.g. tar packing) before bytes start flowing (#100).
                 3 => t("文件准备中", "Preparing...").to_string(),
@@ -4414,7 +4536,15 @@ fn apply_session_event_to_window(
             need_password,
             responder,
         } => {
-            enqueue_cred_prompt(win, session_id, host, user, need_user, need_password, responder);
+            enqueue_cred_prompt(
+                win,
+                session_id,
+                host,
+                user,
+                need_user,
+                need_password,
+                responder,
+            );
         }
         SessionEvent::MfaPrompt {
             session_id,
@@ -4583,7 +4713,8 @@ fn resolve_front_hostkey(win: &AppWindow, accept: bool) {
             // only fails the current attempt; the next connect prompts again.
             if accept {
                 HOSTKEY_DECIDED.with(|d| {
-                    d.borrow_mut().insert(format!("{}:{}", p.host, p.port), true);
+                    d.borrow_mut()
+                        .insert(format!("{}:{}", p.host, p.port), true);
                 });
             }
             for r in &p.responders {
@@ -5172,7 +5303,11 @@ fn wire_tab_callbacks(
         window.on_pane_new_tab(move |pane_id: i32| {
             // In welcome-as-sidebar mode there is no welcome tab — the session list
             // lives in the left panel, so "+" has nothing to open.
-            if weak.upgrade().map(|w| w.get_welcome_as_sidebar()).unwrap_or(false) {
+            if weak
+                .upgrade()
+                .map(|w| w.get_welcome_as_sidebar())
+                .unwrap_or(false)
+            {
                 return;
             }
             {
@@ -5300,13 +5435,13 @@ fn wire_tab_callbacks(
                 }
                 if let Some(w) = weak.upgrade() {
                     refresh_panes(
-                    &w,
-                    &layout.borrow(),
-                    content_size.get(),
-                    &tabs_model,
-                    &panes_model,
-                    &splitters_model,
-                );
+                        &w,
+                        &layout.borrow(),
+                        content_size.get(),
+                        &tabs_model,
+                        &panes_model,
+                        &splitters_model,
+                    );
                 }
             },
         );
@@ -5401,20 +5536,41 @@ fn wire_sftp_callbacks(
         window.on_sftp_quick_dir_changed(
             move |index: i32, label: SharedString, group: SharedString, path: SharedString| {
                 let idx = index.clamp(0, 4) as usize;
+                let deleting = path.as_str().is_empty();
+                let trimmed_path = path.as_str().trim();
+                if !deleting && trimmed_path.is_empty() {
+                    if let Some(w) = weak.upgrade() {
+                        apply_sftp_quick_dirs_to_window(&w, store.borrow().sftp_quick_dirs());
+                    }
+                    return;
+                }
+                let normalized_path = if deleting {
+                    String::new()
+                } else {
+                    normalize_remote_path_for_scope(trimmed_path)
+                };
                 {
                     let mut s = store.borrow_mut();
                     let mut dirs = s.sftp_quick_dirs().to_vec();
                     while dirs.len() <= idx {
                         dirs.push(SftpQuickDir::default());
                     }
-                    dirs[idx] = SftpQuickDir {
-                        label: label.to_string(),
-                        group: group.to_string(),
-                        path: path.to_string(),
-                    };
-                    s.set_sftp_quick_dirs(dirs);
-                    if let Err(err) = s.save() {
-                        tracing::warn!("failed to save SFTP quick dirs: {err:#}");
+                    let duplicate = !normalized_path.is_empty()
+                        && dirs.iter().enumerate().any(|(i, dir)| {
+                            i != idx
+                                && !dir.path.trim().is_empty()
+                                && normalize_remote_path_for_scope(&dir.path) == normalized_path
+                        });
+                    if !duplicate {
+                        dirs[idx] = SftpQuickDir {
+                            label: label.as_str().trim().to_string(),
+                            group: group.as_str().trim().to_string(),
+                            path: normalized_path,
+                        };
+                        s.set_sftp_quick_dirs(dirs);
+                        if let Err(err) = s.save() {
+                            tracing::warn!("failed to save SFTP quick dirs: {err:#}");
+                        }
                     }
                 }
                 if let Some(w) = weak.upgrade() {
@@ -5454,12 +5610,20 @@ fn wire_sftp_callbacks(
             };
             if let Some(w) = weak.upgrade() {
                 let terminals_rc = w.get_terminals();
-                if let Some(terminals) = terminals_rc.as_any().downcast_ref::<VecModel<TerminalState>>() {
+                if let Some(terminals) = terminals_rc
+                    .as_any()
+                    .downcast_ref::<VecModel<TerminalState>>()
+                {
                     for i in 0..terminals.row_count() {
                         if let Some(mut row) = terminals.row_data(i) {
                             if row.id.as_str() == tab_id {
-                                let current = current_path.clone().unwrap_or_else(|| row.sftp_path.to_string());
-                                if !current.is_empty() && normalize_remote_path_for_scope(&current) != normalize_remote_path_for_scope(&resolved) {
+                                let current = current_path
+                                    .clone()
+                                    .unwrap_or_else(|| row.sftp_path.to_string());
+                                if !current.is_empty()
+                                    && normalize_remote_path_for_scope(&current)
+                                        != normalize_remote_path_for_scope(&resolved)
+                                {
                                     row.sftp_back_path = current.into();
                                     row.sftp_search_running = false;
                                     row.sftp_search_id = "".into();
@@ -5501,7 +5665,10 @@ fn wire_sftp_callbacks(
             let mut current = String::new();
             if let Some(w) = weak.upgrade() {
                 let terminals_rc = w.get_terminals();
-                if let Some(terminals) = terminals_rc.as_any().downcast_ref::<VecModel<TerminalState>>() {
+                if let Some(terminals) = terminals_rc
+                    .as_any()
+                    .downcast_ref::<VecModel<TerminalState>>()
+                {
                     for i in 0..terminals.row_count() {
                         if let Some(mut row) = terminals.row_data(i) {
                             if row.id.as_str() == tab_id {
@@ -5523,7 +5690,10 @@ fn wire_sftp_callbacks(
                     }
                 }
             }
-            if target.is_empty() || normalize_remote_path_for_scope(&target) == normalize_remote_path_for_scope(&current) {
+            if target.is_empty()
+                || normalize_remote_path_for_scope(&target)
+                    == normalize_remote_path_for_scope(&current)
+            {
                 return;
             }
             sftp_last_cwd.lock().unwrap().remove(&tab_id);
@@ -5544,35 +5714,40 @@ fn wire_sftp_callbacks(
         let sftp_handles = sftp_handles.clone();
         let sftp_last_cwd = sftp_last_cwd.clone();
         let weak = window.as_weak();
-        window.on_sftp_locate_result(move |tab_id: SharedString, path: SharedString, is_dir: bool| {
-            let tab_id = tab_id.to_string();
-            let target = if is_dir {
-                path.to_string()
-            } else {
-                parent_path(path.as_str())
-            };
-            if let Some(w) = weak.upgrade() {
-                let terminals_rc = w.get_terminals();
-                if let Some(terminals) = terminals_rc.as_any().downcast_ref::<VecModel<TerminalState>>() {
-                    for i in 0..terminals.row_count() {
-                        if let Some(mut row) = terminals.row_data(i) {
-                            if row.id.as_str() == tab_id {
-                                row.sftp_path = normalize_remote_path_for_scope(&target).into();
-                                row.sftp_loading = true;
-                                terminals.set_row_data(i, row);
-                                break;
+        window.on_sftp_locate_result(
+            move |tab_id: SharedString, path: SharedString, is_dir: bool| {
+                let tab_id = tab_id.to_string();
+                let target = if is_dir {
+                    path.to_string()
+                } else {
+                    parent_path(path.as_str())
+                };
+                if let Some(w) = weak.upgrade() {
+                    let terminals_rc = w.get_terminals();
+                    if let Some(terminals) = terminals_rc
+                        .as_any()
+                        .downcast_ref::<VecModel<TerminalState>>()
+                    {
+                        for i in 0..terminals.row_count() {
+                            if let Some(mut row) = terminals.row_data(i) {
+                                if row.id.as_str() == tab_id {
+                                    row.sftp_path = normalize_remote_path_for_scope(&target).into();
+                                    row.sftp_loading = true;
+                                    terminals.set_row_data(i, row);
+                                    break;
+                                }
                             }
                         }
                     }
                 }
-            }
-            sftp_last_cwd.lock().unwrap().remove(&tab_id);
-            if let Ok(handles) = sftp_handles.lock() {
-                if let Some(h) = handles.get(&tab_id) {
-                    h.list_dir(target);
+                sftp_last_cwd.lock().unwrap().remove(&tab_id);
+                if let Ok(handles) = sftp_handles.lock() {
+                    if let Some(h) = handles.get(&tab_id) {
+                        h.list_dir(target);
+                    }
                 }
-            }
-        });
+            },
+        );
     }
 
     // Download a remote file.  If a download folder is preset in settings, save
@@ -5760,7 +5935,10 @@ fn wire_sftp_callbacks(
             let query = query.to_string();
             if let Some(w) = weak.upgrade() {
                 let terminals_rc = w.get_terminals();
-                let Some(terminals) = terminals_rc.as_any().downcast_ref::<VecModel<TerminalState>>() else {
+                let Some(terminals) = terminals_rc
+                    .as_any()
+                    .downcast_ref::<VecModel<TerminalState>>()
+                else {
                     return;
                 };
                 for i in 0..terminals.row_count() {
@@ -5770,9 +5948,11 @@ fn wire_sftp_callbacks(
                             row.sftp_search = query.clone().into();
                             row.sftp_search_id = "".into();
                             row.sftp_search_root = "".into();
-                            let selected_count = mark_sftp_entries_for_scope(&mut all, row.sftp_tree_scope.as_str());
+                            let selected_count =
+                                mark_sftp_entries_for_scope(&mut all, row.sftp_tree_scope.as_str());
                             row.sftp_all_entries = sftp_entries_model(all.clone());
-                            row.sftp_entries = sftp_entries_model(filter_sftp_entries(&all, &query));
+                            row.sftp_entries =
+                                sftp_entries_model(filter_sftp_entries(&all, &query));
                             row.sftp_selected_count = selected_count;
                             terminals.set_row_data(i, row);
                             break;
@@ -5789,48 +5969,55 @@ fn wire_sftp_callbacks(
     {
         let sftp_handles = sftp_handles.clone();
         let weak = window.as_weak();
-        window.on_sftp_search_folder(move |tab_id: SharedString, root_dir: SharedString, query: SharedString| {
-            let tab_id = tab_id.to_string();
-            let root_dir = root_dir.to_string();
-            let query = query.to_string();
-            let search_id = uuid::Uuid::new_v4().to_string();
-            // Mark the active search immediately. The worker runs recursively in
-            // the background, so status/results can arrive after the user presses
-            // X or Stop. app.rs will only accept search batches matching this
-            // still-active query; late old results are discarded.
-            if let Some(w) = weak.upgrade() {
-                let terminals = w.get_terminals();
-                if let Some(tm) = terminals.as_any().downcast_ref::<VecModel<TerminalState>>() {
-                    for ti in 0..tm.row_count() {
-                        if let Some(mut row) = tm.row_data(ti) {
-                            if row.id.as_str() == tab_id.as_str() {
-                                row.sftp_search = query.clone().into();
-                                row.sftp_search_id = search_id.clone().into();
-                                row.sftp_search_root = root_dir.clone().into();
-                                row.sftp_search_running = true;
-                                row.sftp_loading = true;
-                                row.sftp_all_entries = sftp_entries_model(Vec::new());
-                                row.sftp_entries = sftp_entries_model(Vec::new());
-                                row.sftp_selected_count = 0;
-                                row.sftp_status = format!(
-                                    "{}: {}{}",
-                                    crate::i18n::t("搜索中", "Searching"),
-                                    sftp_scope_status(&root_dir),
-                                    if query.trim().is_empty() { String::new() } else { format!("  ·  {}", query) }
-                                ).into();
-                                tm.set_row_data(ti, row);
-                                break;
+        window.on_sftp_search_folder(
+            move |tab_id: SharedString, root_dir: SharedString, query: SharedString| {
+                let tab_id = tab_id.to_string();
+                let root_dir = root_dir.to_string();
+                let query = query.to_string();
+                let search_id = uuid::Uuid::new_v4().to_string();
+                // Mark the active search immediately. The worker runs recursively in
+                // the background, so status/results can arrive after the user presses
+                // X or Stop. app.rs will only accept search batches matching this
+                // still-active query; late old results are discarded.
+                if let Some(w) = weak.upgrade() {
+                    let terminals = w.get_terminals();
+                    if let Some(tm) = terminals.as_any().downcast_ref::<VecModel<TerminalState>>() {
+                        for ti in 0..tm.row_count() {
+                            if let Some(mut row) = tm.row_data(ti) {
+                                if row.id.as_str() == tab_id.as_str() {
+                                    row.sftp_search = query.clone().into();
+                                    row.sftp_search_id = search_id.clone().into();
+                                    row.sftp_search_root = root_dir.clone().into();
+                                    row.sftp_search_running = true;
+                                    row.sftp_loading = true;
+                                    row.sftp_all_entries = sftp_entries_model(Vec::new());
+                                    row.sftp_entries = sftp_entries_model(Vec::new());
+                                    row.sftp_selected_count = 0;
+                                    row.sftp_status = format!(
+                                        "{}: {}{}",
+                                        crate::i18n::t("搜索中", "Searching"),
+                                        sftp_scope_status(&root_dir),
+                                        if query.trim().is_empty() {
+                                            String::new()
+                                        } else {
+                                            format!("  ·  {}", query)
+                                        }
+                                    )
+                                    .into();
+                                    tm.set_row_data(ti, row);
+                                    break;
+                                }
                             }
                         }
                     }
                 }
-            }
-            if let Ok(handles) = sftp_handles.lock() {
-                if let Some(h) = handles.get(&tab_id) {
-                    h.search(search_id, root_dir, query);
+                if let Ok(handles) = sftp_handles.lock() {
+                    if let Some(h) = handles.get(&tab_id) {
+                        h.search(search_id, root_dir, query);
+                    }
                 }
-            }
-        });
+            },
+        );
     }
 
     // Stop a recursive file search without closing the SSH/SFTP worker.
@@ -5851,7 +6038,8 @@ fn wire_sftp_callbacks(
                                     "{}: {}",
                                     crate::i18n::t("搜索已停止", "Search stopped"),
                                     row.sftp_entries.row_count()
-                                ).into();
+                                )
+                                .into();
                                 tm.set_row_data(ti, row);
                                 break;
                             }
@@ -5893,7 +6081,9 @@ fn wire_sftp_callbacks(
                 return;
             };
             for ti in 0..tm.row_count() {
-                let Some(mut row) = tm.row_data(ti) else { continue };
+                let Some(mut row) = tm.row_data(ti) else {
+                    continue;
+                };
                 if row.id.as_str() != tab_id.as_str() {
                     continue;
                 }
@@ -5934,11 +6124,17 @@ fn wire_sftp_callbacks(
         window.on_sftp_set_tree_scope(move |tab_id: SharedString, path: SharedString| {
             let Some(w) = weak.upgrade() else { return };
             let terminals = w.get_terminals();
-            let Some(tm) = terminals.as_any().downcast_ref::<VecModel<TerminalState>>() else { return };
+            let Some(tm) = terminals.as_any().downcast_ref::<VecModel<TerminalState>>() else {
+                return;
+            };
             let next_scope = normalize_remote_path_for_scope(path.as_str());
             for ti in 0..tm.row_count() {
-                let Some(mut row) = tm.row_data(ti) else { continue };
-                if row.id.as_str() != tab_id.as_str() { continue; }
+                let Some(mut row) = tm.row_data(ti) else {
+                    continue;
+                };
+                if row.id.as_str() != tab_id.as_str() {
+                    continue;
+                }
                 apply_sftp_tree_scope_to_row(&mut row, &next_scope);
                 tm.set_row_data(ti, row);
                 break;
@@ -5952,10 +6148,16 @@ fn wire_sftp_callbacks(
         window.on_sftp_clear_tree_scope(move |tab_id: SharedString| {
             let Some(w) = weak.upgrade() else { return };
             let terminals = w.get_terminals();
-            let Some(tm) = terminals.as_any().downcast_ref::<VecModel<TerminalState>>() else { return };
+            let Some(tm) = terminals.as_any().downcast_ref::<VecModel<TerminalState>>() else {
+                return;
+            };
             for ti in 0..tm.row_count() {
-                let Some(mut row) = tm.row_data(ti) else { continue };
-                if row.id.as_str() != tab_id.as_str() { continue; }
+                let Some(mut row) = tm.row_data(ti) else {
+                    continue;
+                };
+                if row.id.as_str() != tab_id.as_str() {
+                    continue;
+                }
                 apply_sftp_tree_scope_to_row(&mut row, "");
                 tm.set_row_data(ti, row);
                 break;
@@ -5991,7 +6193,11 @@ fn wire_sftp_callbacks(
                 if row.id.as_str() != tab_id.as_str() {
                     continue;
                 }
-                if let Some(em) = row.sftp_entries.as_any().downcast_ref::<VecModel<SftpEntry>>() {
+                if let Some(em) = row
+                    .sftp_entries
+                    .as_any()
+                    .downcast_ref::<VecModel<SftpEntry>>()
+                {
                     let i = idx as usize;
                     let mut changed_path = String::new();
                     let mut changed_value = false;
@@ -6002,7 +6208,11 @@ fn wire_sftp_callbacks(
                         em.set_row_data(i, e);
                     }
                     if !changed_path.is_empty() {
-                        if let Some(allm) = row.sftp_all_entries.as_any().downcast_ref::<VecModel<SftpEntry>>() {
+                        if let Some(allm) = row
+                            .sftp_all_entries
+                            .as_any()
+                            .downcast_ref::<VecModel<SftpEntry>>()
+                        {
                             for ai in 0..allm.row_count() {
                                 if let Some(mut ae) = allm.row_data(ai) {
                                     if ae.full_path.as_str() == changed_path.as_str() {
@@ -6015,7 +6225,11 @@ fn wire_sftp_callbacks(
                         }
                     }
                     let mut n = 0;
-                    if let Some(allm) = row.sftp_all_entries.as_any().downcast_ref::<VecModel<SftpEntry>>() {
+                    if let Some(allm) = row
+                        .sftp_all_entries
+                        .as_any()
+                        .downcast_ref::<VecModel<SftpEntry>>()
+                    {
                         for ai in 0..allm.row_count() {
                             if allm.row_data(ai).map(|x| x.selected).unwrap_or(false) {
                                 n += 1;
@@ -6090,7 +6304,11 @@ fn wire_sftp_callbacks(
                                 if single {
                                     h.download(paths[0].clone(), dir.clone());
                                 } else {
-                                    h.download_archive(remote_dir.clone(), names.clone(), dir.clone());
+                                    h.download_archive(
+                                        remote_dir.clone(),
+                                        names.clone(),
+                                        dir.clone(),
+                                    );
                                 }
                             }
                         }
@@ -6224,11 +6442,8 @@ fn wire_sftp_callbacks(
                 };
                 match kind.as_str() {
                     "rename" => {
-                        let to = format!(
-                            "{}/{}",
-                            parent_path(&target).trim_end_matches('/'),
-                            value
-                        );
+                        let to =
+                            format!("{}/{}", parent_path(&target).trim_end_matches('/'), value);
                         h.rename(target, to);
                     }
                     "mkdir" => {
@@ -6377,32 +6592,34 @@ fn wire_key_input(
         let handles_rc = handles.clone();
         let store_rc = store.clone();
         let weak = window.as_weak();
-        window.on_run_command(move |tab_id: SharedString, cmd: SharedString, to_all: bool| {
-            let line = cmd.trim_end().to_string();
-            if line.is_empty() {
-                return;
-            }
-            let mut bytes = line.clone().into_bytes();
-            bytes.push(b'\n');
-            {
-                let h = handles_rc.borrow();
-                if to_all {
-                    for handle in h.values() {
-                        handle.send_raw(bytes.clone());
-                    }
-                } else if let Some(handle) = h.get(tab_id.as_str()) {
-                    handle.send_raw(bytes);
+        window.on_run_command(
+            move |tab_id: SharedString, cmd: SharedString, to_all: bool| {
+                let line = cmd.trim_end().to_string();
+                if line.is_empty() {
+                    return;
                 }
-            }
-            {
-                let mut s = store_rc.borrow_mut();
-                s.push_command_history(line);
-                let _ = s.save();
-            }
-            if let Some(w) = weak.upgrade() {
-                w.set_command_history(history_model(&store_rc.borrow()));
-            }
-        });
+                let mut bytes = line.clone().into_bytes();
+                bytes.push(b'\n');
+                {
+                    let h = handles_rc.borrow();
+                    if to_all {
+                        for handle in h.values() {
+                            handle.send_raw(bytes.clone());
+                        }
+                    } else if let Some(handle) = h.get(tab_id.as_str()) {
+                        handle.send_raw(bytes);
+                    }
+                }
+                {
+                    let mut s = store_rc.borrow_mut();
+                    s.push_command_history(line);
+                    let _ = s.save();
+                }
+                if let Some(w) = weak.upgrade() {
+                    w.set_command_history(history_model(&store_rc.borrow()));
+                }
+            },
+        );
     }
     // Copy a history command to the clipboard (#96).
     {
@@ -6475,7 +6692,10 @@ fn wire_key_input(
         let weak = window.as_weak();
         let collapsed = collapsed_quick_groups.clone();
         window.on_add_quick_command(
-            move |name: SharedString, command: SharedString, group: SharedString, send_enter: bool| {
+            move |name: SharedString,
+                  command: SharedString,
+                  group: SharedString,
+                  send_enter: bool| {
                 let name = name.trim().to_string();
                 let command = command.to_string();
                 let group = group.trim().to_string();
@@ -6560,7 +6780,11 @@ fn wire_key_input(
         let weak = window.as_weak();
         let collapsed = collapsed_quick_groups.clone();
         window.on_save_quick_command(
-            move |index: i32, name: SharedString, command: SharedString, group: SharedString, send_enter: bool| {
+            move |index: i32,
+                  name: SharedString,
+                  command: SharedString,
+                  group: SharedString,
+                  send_enter: bool| {
                 let name = name.trim().to_string();
                 let command = command.to_string();
                 let group = group.trim().to_string();
@@ -6619,7 +6843,11 @@ fn wire_key_input(
         let collapsed = collapsed_quick_groups.clone();
         window.on_move_quick_command(move |index: i32, group: SharedString| {
             let target = group.to_string();
-            let target = if target == "default" { String::new() } else { target };
+            let target = if target == "default" {
+                String::new()
+            } else {
+                target
+            };
             {
                 let mut s = store_rc.borrow_mut();
                 let mut v = s.quick_commands().to_vec();
@@ -6690,8 +6918,7 @@ fn wire_key_input(
         let sync_input = sync_input.clone();
         // Shared timestamp: the last time the Shift key alone was pressed
         // (key="", shift=true).  Used by the time-based Backspace filter below.
-        let last_shift_time: Arc<Mutex<Option<std::time::Instant>>> =
-            Arc::new(Mutex::new(None));
+        let last_shift_time: Arc<Mutex<Option<std::time::Instant>>> = Arc::new(Mutex::new(None));
         // Per-tab reconnect debounce: pressing Enter on a failed tab can be
         // repeated by key-repeat/IME.  Coalesce it before touching handles,
         // buffers, SFTP workers or the Slint model.
@@ -7208,12 +7435,9 @@ fn wire_key_input(
             }
             if let Some(win) = weak.upgrade() {
                 set_terminal_row(&win, &tid, |row| {
-                    row.spans =
-                        ModelRc::from(Rc::new(VecModel::<TermSpan>::default()));
-                    row.find_matches =
-                        ModelRc::from(Rc::new(VecModel::<TermMatch>::default()));
-                    row.selection =
-                        ModelRc::from(Rc::new(VecModel::<TermMatch>::default()));
+                    row.spans = ModelRc::from(Rc::new(VecModel::<TermSpan>::default()));
+                    row.find_matches = ModelRc::from(Rc::new(VecModel::<TermMatch>::default()));
+                    row.selection = ModelRc::from(Rc::new(VecModel::<TermMatch>::default()));
                     row.cursor_row = 0;
                     row.cursor_col = 0;
                     row.rows_used = 0;
@@ -7306,7 +7530,11 @@ fn wire_key_input(
                 } else {
                     // alternate-scroll: 3 arrow presses per notch, app-cursor aware.
                     let one: &[u8] = if dir > 0 {
-                        if screen.application_cursor() { b"\x1bOA" } else { b"\x1b[A" }
+                        if screen.application_cursor() {
+                            b"\x1bOA"
+                        } else {
+                            b"\x1b[A"
+                        }
                     } else if screen.application_cursor() {
                         b"\x1bOB"
                     } else {
@@ -7603,14 +7831,21 @@ fn resolve_ui_font_family() -> slint::SharedString {
     // serif Songti), so it leads.
     #[cfg(target_os = "macos")]
     let candidates: &[&str] = &[
-        "Heiti SC", "STHeiti", "Songti SC", "PingFang SC", "Hiragino Sans GB",
+        "Heiti SC",
+        "STHeiti",
+        "Songti SC",
+        "PingFang SC",
+        "Hiragino Sans GB",
     ];
     #[cfg(target_os = "windows")]
     let candidates: &[&str] = &["Microsoft YaHei UI", "Microsoft YaHei", "SimHei", "SimSun"];
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let candidates: &[&str] = &[
-        "Noto Sans CJK SC", "Noto Sans CJK", "Source Han Sans SC",
-        "WenQuanYi Micro Hei", "Droid Sans Fallback",
+        "Noto Sans CJK SC",
+        "Noto Sans CJK",
+        "Source Han Sans SC",
+        "WenQuanYi Micro Hei",
+        "Droid Sans Fallback",
     ];
 
     for name in candidates {
@@ -7621,7 +7856,11 @@ fn resolve_ui_font_family() -> slint::SharedString {
             style: Style::Normal,
         };
         if db.query(&q).is_some() {
-            tracing::debug!(faces = face_count, font = name, "ui-font: using system CJK font");
+            tracing::debug!(
+                faces = face_count,
+                font = name,
+                "ui-font: using system CJK font"
+            );
             return (*name).into();
         }
     }
@@ -7639,8 +7878,10 @@ fn resolve_ui_font_family() -> slint::SharedString {
         tracing::warn!(faces = face_count, available = ?sample,
             "ui-font: no preferred CJK font resolved; listing available families");
     }
-    tracing::warn!(faces = face_count,
-        "ui-font: falling back to embedded 'Meatshell Mono' (system fonts unusable, #129)");
+    tracing::warn!(
+        faces = face_count,
+        "ui-font: falling back to embedded 'Meatshell Mono' (system fonts unusable, #129)"
+    );
     "Meatshell Mono".into()
 }
 
@@ -7677,12 +7918,18 @@ fn split_proxy(url: &str) -> (String, String) {
     let lower = s.to_ascii_lowercase();
     for p in ["http://", "https://"] {
         if lower.starts_with(p) {
-            return ("http".to_string(), s[p.len()..].trim_end_matches('/').to_string());
+            return (
+                "http".to_string(),
+                s[p.len()..].trim_end_matches('/').to_string(),
+            );
         }
     }
     for p in ["socks5h://", "socks5://", "socks://"] {
         if lower.starts_with(p) {
-            return ("socks5".to_string(), s[p.len()..].trim_end_matches('/').to_string());
+            return (
+                "socks5".to_string(),
+                s[p.len()..].trim_end_matches('/').to_string(),
+            );
         }
     }
     ("socks5".to_string(), s.trim_end_matches('/').to_string())
@@ -7708,29 +7955,29 @@ fn key_to_pty_bytes(key: &str, ctrl: bool, alt: bool, app_cursor: bool) -> Vec<u
         "\u{F701}" => Some(if app_cursor { b"\x1bOB" } else { b"\x1b[B" }), // Down
         "\u{F702}" => Some(if app_cursor { b"\x1bOD" } else { b"\x1b[D" }), // Left
         "\u{F703}" => Some(if app_cursor { b"\x1bOC" } else { b"\x1b[C" }), // Right
-        "\u{F729}" => Some(b"\x1b[H"),   // Home
-        "\u{F72B}" => Some(b"\x1b[F"),   // End
-        "\u{F72C}" => Some(b"\x1b[5~"),  // PageUp
-        "\u{F72D}" => Some(b"\x1b[6~"),  // PageDown
+        "\u{F729}" => Some(b"\x1b[H"),                                      // Home
+        "\u{F72B}" => Some(b"\x1b[F"),                                      // End
+        "\u{F72C}" => Some(b"\x1b[5~"),                                     // PageUp
+        "\u{F72D}" => Some(b"\x1b[6~"),                                     // PageDown
         // Forward-Delete. Slint's canonical key code for the Delete key is
         // U+007F (see i-slint-common key_codes: F728 is explicitly *not* used,
         // it collapses to the 0x7f control code). The old F728 mapping never
         // matched on any platform, so Delete fell through to the generic path
         // and behaved like backspace / garbled the char instead of sending the
         // VT "delete forward" sequence (B站 fan report).
-        "\u{007F}" | "\u{F728}" => Some(b"\x1b[3~"),  // Delete (forward)
-        "\u{F704}" => Some(b"\x1bOP"),   // F1
-        "\u{F705}" => Some(b"\x1bOQ"),   // F2
-        "\u{F706}" => Some(b"\x1bOR"),   // F3
-        "\u{F707}" => Some(b"\x1bOS"),   // F4
-        "\u{F708}" => Some(b"\x1b[15~"), // F5
-        "\u{F709}" => Some(b"\x1b[17~"), // F6
-        "\u{F70A}" => Some(b"\x1b[18~"), // F7
-        "\u{F70B}" => Some(b"\x1b[19~"), // F8
-        "\u{F70C}" => Some(b"\x1b[20~"), // F9
-        "\u{F70D}" => Some(b"\x1b[21~"), // F10
-        "\u{F70E}" => Some(b"\x1b[23~"), // F11
-        "\u{F70F}" => Some(b"\x1b[24~"), // F12
+        "\u{007F}" | "\u{F728}" => Some(b"\x1b[3~"), // Delete (forward)
+        "\u{F704}" => Some(b"\x1bOP"),               // F1
+        "\u{F705}" => Some(b"\x1bOQ"),               // F2
+        "\u{F706}" => Some(b"\x1bOR"),               // F3
+        "\u{F707}" => Some(b"\x1bOS"),               // F4
+        "\u{F708}" => Some(b"\x1b[15~"),             // F5
+        "\u{F709}" => Some(b"\x1b[17~"),             // F6
+        "\u{F70A}" => Some(b"\x1b[18~"),             // F7
+        "\u{F70B}" => Some(b"\x1b[19~"),             // F8
+        "\u{F70C}" => Some(b"\x1b[20~"),             // F9
+        "\u{F70D}" => Some(b"\x1b[21~"),             // F10
+        "\u{F70E}" => Some(b"\x1b[23~"),             // F11
+        "\u{F70F}" => Some(b"\x1b[24~"),             // F12
         _ => None,
     };
     if let Some(seq) = special {
@@ -7801,8 +8048,8 @@ fn key_to_pty_bytes(key: &str, ctrl: bool, alt: bool, app_cursor: bool) -> Vec<u
             if key.chars().count() == 1 {
                 let upper = c.to_ascii_uppercase() as u8;
                 let ctrl_char: Option<u8> = match upper {
-                    b'A'..=b'Z' => Some(upper - b'A' + 1),      // Ctrl+A=\x01 … Ctrl+Z=\x1A
-                    b'[' => Some(0x1b),                           // Ctrl+[ = ESC
+                    b'A'..=b'Z' => Some(upper - b'A' + 1), // Ctrl+A=\x01 … Ctrl+Z=\x1A
+                    b'[' => Some(0x1b),                    // Ctrl+[ = ESC
                     b'\\' => Some(0x1c),
                     b']' => Some(0x1d),
                     b'^' => Some(0x1e),
@@ -8276,7 +8523,11 @@ impl TermBuffer {
                     } else {
                         // Not a CSI (could be another ESC, OSC, etc.).  Re-arm on
                         // a fresh ESC, otherwise fall back to normal text.
-                        self.csi_state = if b == 0x1b { CsiState::Esc } else { CsiState::Normal };
+                        self.csi_state = if b == 0x1b {
+                            CsiState::Esc
+                        } else {
+                            CsiState::Normal
+                        };
                     }
                     out.push(b);
                 }
@@ -8303,9 +8554,9 @@ impl TermBuffer {
         // btop configured with `alt-screen = false`).
         // We look for \033[H (cursor-home) and \033[2J / \033[J (erase display)
         // as indicators that the program is doing a full-screen refresh.
-        let has_cursor_home   = bytes.windows(3).any(|w| w == b"\x1b[H");
-        let has_erase_display = bytes.windows(4).any(|w| w == b"\x1b[2J")
-                             || bytes.windows(3).any(|w| w == b"\x1b[J");
+        let has_cursor_home = bytes.windows(3).any(|w| w == b"\x1b[H");
+        let has_erase_display =
+            bytes.windows(4).any(|w| w == b"\x1b[2J") || bytes.windows(3).any(|w| w == b"\x1b[J");
         let is_fullscreen_refresh = has_cursor_home && has_erase_display;
 
         self.parser.process(bytes);
@@ -8382,7 +8633,11 @@ impl TermBuffer {
                 displayed.push(plain.trim_end().to_string());
             }
             self.displayed_text = displayed;
-            let rows_used = if is_alt { rows as i32 } else { last_content + 1 };
+            let rows_used = if is_alt {
+                rows as i32
+            } else {
+                last_content + 1
+            };
             return BuiltScreen {
                 spans,
                 cursor_row: cur_row as i32,
@@ -8466,7 +8721,7 @@ fn contains_cjk(s: &str) -> bool {
             | 0x4E00..=0x9FFF     // CJK unified ideographs
             | 0xF900..=0xFAFF     // CJK compatibility ideographs
             | 0xFF00..=0xFFEF     // fullwidth / halfwidth forms (，！？：；)
-            | 0x20000..=0x2FA1F)  // CJK ext B–F + compat supplement
+            | 0x20000..=0x2FA1F) // CJK ext B–F + compat supplement
     })
 }
 
@@ -8550,11 +8805,19 @@ const ANSI16_LIGHT_BG: [(u8, u8, u8); 16] = [
 fn vt_color_to_slint(color: vt100::Color, bold: bool, is_dark: bool) -> slint::Color {
     let (r, g, b) = match color {
         vt100::Color::Default => {
-            if is_dark { (0xd4, 0xd4, 0xd4) } else { (0x2d, 0x2d, 0x2f) }
+            if is_dark {
+                (0xd4, 0xd4, 0xd4)
+            } else {
+                (0x2d, 0x2d, 0x2f)
+            }
         }
         vt100::Color::Idx(i) => idx_to_rgb(i, bold, is_dark),
         vt100::Color::Rgb(r, g, b) => {
-            if is_dark { (r, g, b) } else { darken_light_fg(r, g, b) }
+            if is_dark {
+                (r, g, b)
+            } else {
+                darken_light_fg(r, g, b)
+            }
         }
     };
     slint::Color::from_rgb_u8(r, g, b)
@@ -8625,7 +8888,11 @@ fn rgb_to_hsl(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
         return (0.0, 0.0, l);
     }
     let d = max - min;
-    let s = if l > 0.5 { d / (2.0 - max - min) } else { d / (max + min) };
+    let s = if l > 0.5 {
+        d / (2.0 - max - min)
+    } else {
+        d / (max + min)
+    };
     let h = if (max - r).abs() < 1e-6 {
         (g - b) / d + if g < b { 6.0 } else { 0.0 }
     } else if (max - g).abs() < 1e-6 {
@@ -8641,14 +8908,28 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (u8, u8, u8) {
         let v = (l * 255.0).round() as u8;
         return (v, v, v);
     }
-    let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+    let q = if l < 0.5 {
+        l * (1.0 + s)
+    } else {
+        l + s - l * s
+    };
     let p = 2.0 * l - q;
     let hue = |mut t: f32| -> f32 {
-        if t < 0.0 { t += 1.0; }
-        if t > 1.0 { t -= 1.0; }
-        if t < 1.0 / 6.0 { return p + (q - p) * 6.0 * t; }
-        if t < 0.5 { return q; }
-        if t < 2.0 / 3.0 { return p + (q - p) * (2.0 / 3.0 - t) * 6.0; }
+        if t < 0.0 {
+            t += 1.0;
+        }
+        if t > 1.0 {
+            t -= 1.0;
+        }
+        if t < 1.0 / 6.0 {
+            return p + (q - p) * 6.0 * t;
+        }
+        if t < 0.5 {
+            return q;
+        }
+        if t < 2.0 / 3.0 {
+            return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
+        }
         p
     };
     (
@@ -8667,7 +8948,11 @@ fn idx_to_rgb(i: u8, bold: bool, is_dark: bool) -> (u8, u8, u8) {
         16..=231 => {
             let n = i - 16;
             let to = |v: u8| -> u8 {
-                if v == 0 { 0 } else { 55 + v * 40 }
+                if v == 0 {
+                    0
+                } else {
+                    55 + v * 40
+                }
             };
             (to(n / 36), to((n % 36) / 6), to(n % 6))
         }
@@ -8710,7 +8995,10 @@ mod key_tests {
     fn bare_alt_is_not_forwarded() {
         // Slint sends Alt-alone as key=0x12 with alt=true. It must produce no
         // bytes — otherwise it becomes ESC+0x12 and clears the input (issue #43).
-        assert_eq!(key_to_pty_bytes("\u{0012}", false, true, false), Vec::<u8>::new());
+        assert_eq!(
+            key_to_pty_bytes("\u{0012}", false, true, false),
+            Vec::<u8>::new()
+        );
     }
 
     #[test]
@@ -8847,7 +9135,13 @@ mod selection_tests {
         // scrolled to the top or sitting at the live bottom — this is the whole
         // point of the fix (a top-to-bottom selection survives auto-scrolling).
         let sel = |off| {
-            let mut b = make_buf(5, 20, &["HIST0", "HIST1", "HIST2"], &["LIVE0", "LIVE1"], off);
+            let mut b = make_buf(
+                5,
+                20,
+                &["HIST0", "HIST1", "HIST2"],
+                &["LIVE0", "LIVE1"],
+                off,
+            );
             b.sel_anchor = Some((0, 0));
             b.sel_focus = Some((4, 19));
             b.extract_selection_text()
@@ -8863,7 +9157,11 @@ mod selection_tests {
         top.sel_anchor = Some((0, 2));
         top.sel_focus = Some((2, 4));
         let rects = top.selection_rects_visible(20);
-        assert_eq!(rects.len(), 3, "rows 0,1,2 (the 3 history lines) highlighted");
+        assert_eq!(
+            rects.len(),
+            3,
+            "rows 0,1,2 (the 3 history lines) highlighted"
+        );
         assert_eq!(rects[0].row, 0);
         assert_eq!(rects[2].row, 2);
 
