@@ -17,7 +17,7 @@ permissions:
   actions: write
 
 concurrency:
-  group: tag-and-package-v072-${{ github.event_name }}
+  group: tag-and-package-v072-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -56,7 +56,7 @@ jobs:
             git push origin v0.7.2
           fi
 
-      - name: Find release workflow
+      - name: Start or find release workflow
         id: release_run
         shell: bash
         env:
@@ -64,14 +64,12 @@ jobs:
         run: |
           set -euo pipefail
           release_sha="139c3d7edeea9db76dec87cd362187dabecb2bc7"
-          run_id=""
-          for attempt in $(seq 1 30); do
-            run_id="$(gh run list --workflow release.yml --limit 30 --json databaseId,headSha,event --jq '.[] | select(.headSha == "'"$release_sha"'" and .event == "push") | .databaseId' | head -n 1)"
-            if [ -n "$run_id" ]; then
-              break
-            fi
-            sleep 5
-          done
+          run_id="$(gh run list --workflow release.yml --limit 30 --json databaseId,headSha,event --jq '.[] | select(.headSha == "'"$release_sha"'") | .databaseId' | head -n 1)"
+          if [ -z "$run_id" ]; then
+            gh workflow run release.yml --ref fix/wallpaper-v072 -f release_tag=v0.7.2
+            sleep 10
+            run_id="$(gh run list --workflow release.yml --event workflow_dispatch --limit 10 --json databaseId --jq '.[0].databaseId')"
+          fi
           test -n "$run_id"
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
           echo "RELEASE_RUN_ID=$run_id"
