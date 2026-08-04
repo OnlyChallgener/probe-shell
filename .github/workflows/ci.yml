@@ -54,10 +54,10 @@ jobs:
         run: cargo test --locked
 
   commit-v071-source:
-    name: Commit v0.7.1 source
+    name: Validate and commit v0.7.1 source
     if: github.event_name == 'pull_request' && github.head_ref == 'fix/sftp-local-terminal' && github.actor != 'github-actions[bot]'
     runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    timeout-minutes: 90
     steps:
       - name: Checkout release branch
         uses: actions/checkout@v4
@@ -79,47 +79,41 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import re
-          import subprocess
+          python3 - <<'BOOT'
+          from pathlib import Path
 
-          workflow = subprocess.check_output(
-              ["git", "show", "dfec94d7b476f3daa2fe0ce913432816971c6bbd:.github/workflows/finalize-v071.yml"],
-              text=True,
-          )
+          workflow = Path('.github/workflows/finalize-v071.yml').read_text(encoding='utf-8')
           marker = "          python3 - <<'PY'\n"
           end_marker = "\n          PY\n"
+          if marker not in workflow or end_marker not in workflow:
+              raise SystemExit('could not locate v0.7.1 source patch')
           body = workflow.split(marker, 1)[1].split(end_marker, 1)[0]
-          source = "\n".join(
-              line[10:] if line.startswith("          ") else line
+          source = '\n'.join(
+              line[10:] if line.startswith('          ') else line
               for line in body.splitlines()
-          ) + "\n"
+          ) + '\n'
+          exec(compile(source, 'finalize-v071.py', 'exec'), {})
+          BOOT
 
-          old_helper = '''def replace_one(text, old, new, label):
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"{label}: expected 1 match, found {count}")
-              return text.replace(old, new, 1)
-'''
-          new_helper = '''def replace_one(text, old, new, label):
-              count = text.count(old)
-              if count == 1:
-                  return text.replace(old, new, 1)
-              parts = re.split(r"(\\s+)", old)
-              pattern = "".join(r"\\s+" if part.isspace() else re.escape(part) for part in parts)
-              text, flexible_count = re.subn(pattern, lambda _m: new, text, count=1, flags=re.S)
-              if flexible_count != 1:
-                  raise SystemExit(f"{label}: exact={count}, flexible={flexible_count}")
-              return text
-'''
-          if old_helper not in source:
-              raise SystemExit("replace_one helper not found")
-          source = source.replace(old_helper, new_helper, 1)
-          exec(compile(source, "finalize-v071.py", "exec"), {})
-          PY
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libudev-dev libfontconfig1-dev
 
-      - name: Format Rust source
-        run: cargo fmt --all || true
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Cache Cargo build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format and validate
+        run: |
+          set -euo pipefail
+          cargo fmt --all
+          cargo check --locked
+          cargo test --locked
 
       - name: Commit intended source changes
         shell: bash
