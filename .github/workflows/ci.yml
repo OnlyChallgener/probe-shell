@@ -55,12 +55,13 @@ jobs:
 
   create-v071-tag:
     name: Create v0.7.1 tag
-    if: github.event_name == 'push' && github.ref == 'refs/heads/fix/sftp-local-terminal' && github.event.head_commit.message == 'ci: create v0.7.1 tag from validated source'
+    if: github.event_name == 'pull_request' && github.head_ref == 'fix/sftp-local-terminal' && github.actor != 'github-actions[bot]'
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout repository history
         uses: actions/checkout@v4
         with:
+          ref: fix/sftp-local-terminal
           fetch-depth: 0
 
       - name: Tag validated source
@@ -68,7 +69,8 @@ jobs:
         run: |
           set -euo pipefail
           validated_sha="3b0035b91faf4d39a86fc3ada7024f0b2edb768d"
-          test "$(git show "${validated_sha}:Cargo.toml" | awk '/^version = / {gsub(/\"/, "", $3); print $3; exit}')" = "0.7.1"
+          version="$(git show "${validated_sha}:Cargo.toml" | awk '/^version = / {gsub(/\"/, "", $3); print $3; exit}')"
+          test "$version" = "0.7.1"
           git fetch --tags origin
           if git rev-parse -q --verify refs/tags/v0.7.1 >/dev/null; then
             echo "v0.7.1 already exists"
