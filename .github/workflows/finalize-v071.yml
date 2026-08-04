@@ -1,0 +1,636 @@
+name: Finalize v0.7.1
+
+on:
+  push:
+    branches:
+      - fix/sftp-local-terminal
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: finalize-v071
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    if: ${{ !contains(github.event.head_commit.message || '', 'release: v0.7.1') }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/sftp-local-terminal
+          fetch-depth: 0
+
+      - name: Verify requested wallpaper assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f assets/wallpapers/dark-neon-city.png
+          test -f assets/wallpapers/dark-cyber-warrior.png
+          test -f assets/wallpapers/light-future-city.png
+          test -f assets/wallpapers/light-crystal-guardian.png
+          test -f assets/aurora.jpg
+          test -f assets/miku.jpg
+
+      - name: Apply wallpaper and interaction fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          def read(path):
+              return Path(path).read_text(encoding="utf-8")
+
+          def write(path, text):
+              Path(path).write_text(text, encoding="utf-8")
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly one match, found {count}")
+              return text.replace(old, new, 1)
+
+          # -----------------------------------------------------------------
+          # Wallpaper loader: exactly the four uploaded images plus the three
+          # original built-ins (Fantasy 3048, Aurora, Miku). Legacy ids remain
+          # readable so existing user configs do not break.
+          # -----------------------------------------------------------------
+          path = "src/wallpaper.rs"
+          text = read(path)
+          text, n = re.subn(
+              r"    let buf = match id \{\n.*?\n    \};\n    let palette",
+              '''    let buf = match id {
+        "builtin:tech" => render_tech(),
+        "builtin:aurora" => decode_aurora()?,
+        "builtin:miku" => decode_miku()?,
+        "builtin:dark-neon-city" => decode_bundled("dark-neon-city.png")?,
+        "builtin:dark-cyber-warrior" => decode_bundled("dark-cyber-warrior.png")?,
+        "builtin:light-future-city" => decode_bundled("light-future-city.png")?,
+        "builtin:light-crystal-guardian" => decode_bundled("light-crystal-guardian.png")?,
+        // Compatibility aliases for configs created by the short-lived v0.7.0 picker.
+        "builtin:dark" | "builtin:dark-city" | "builtin:dark-network" =>
+            decode_bundled("dark-neon-city.png")?,
+        "builtin:dark-mecha" => decode_bundled("dark-cyber-warrior.png")?,
+        "builtin:light" | "builtin:light-network" | "builtin:light-lab" =>
+            decode_bundled("light-future-city.png")?,
+        "builtin:light-crystal" => decode_bundled("light-crystal-guardian.png")?,
+        path => decode_custom(path)?,
+    };
+    let palette''',
+              text,
+              count=1,
+              flags=re.S,
+          )
+          if n != 1:
+              raise SystemExit(f"wallpaper load match: expected 1 replacement, got {n}")
+
+          text, n = re.subn(
+              r"pub fn is_builtin\(id: &str\) -> bool \{.*?\n\}\n\n// ── Built-in wallpapers",
+              '''pub fn is_builtin(id: &str) -> bool {
+    matches!(
+        id,
+        "builtin:tech"
+            | "builtin:aurora"
+            | "builtin:miku"
+            | "builtin:dark-neon-city"
+            | "builtin:dark-cyber-warrior"
+            | "builtin:light-future-city"
+            | "builtin:light-crystal-guardian"
+            | "builtin:light"
+            | "builtin:dark"
+            | "builtin:dark-mecha"
+            | "builtin:dark-city"
+            | "builtin:dark-network"
+            | "builtin:light-crystal"
+            | "builtin:light-network"
+            | "builtin:light-lab"
+    )
+}
+
+// ── Built-in wallpapers''',
+              text,
+              count=1,
+              flags=re.S,
+          )
+          if n != 1:
+              raise SystemExit(f"is_builtin: expected 1 replacement, got {n}")
+
+          text, n = re.subn(
+              r"/// Decode one of Probe Shell's bundled wallpaper assets\.\nfn decode_bundled\(name: &str\) -> Option<SharedPixelBuffer<Rgba8Pixel>> \{.*?\n\}\n\nfn decode_custom",
+              '''/// Decode one of Probe Shell's bundled wallpaper assets.
+fn decode_bundled(name: &str) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
+    let bytes: &[u8] = match name {
+        "dark-neon-city.png" => include_bytes!("../assets/wallpapers/dark-neon-city.png"),
+        "dark-cyber-warrior.png" => include_bytes!("../assets/wallpapers/dark-cyber-warrior.png"),
+        "light-future-city.png" => include_bytes!("../assets/wallpapers/light-future-city.png"),
+        "light-crystal-guardian.png" => include_bytes!("../assets/wallpapers/light-crystal-guardian.png"),
+        _ => return None,
+    };
+    Some(to_buffer(image::load_from_memory(bytes).ok()?.to_rgba8()))
+}
+
+fn decode_custom''',
+              text,
+              count=1,
+              flags=re.S,
+          )
+          if n != 1:
+              raise SystemExit(f"decode_bundled: expected 1 replacement, got {n}")
+
+          old = '''/// Bundled Probe Shell aurora wallpaper. It is a generated, original sci-fi
+/// glass background used as an optional built-in wallpaper. `builtin:miku` is
+/// accepted as a legacy alias so old configs do not break.
+fn decode_aurora() -> Option<SharedPixelBuffer<Rgba8Pixel>> {
+    const BYTES: &[u8] = include_bytes!("../assets/aurora.jpg");
+    Some(to_buffer(image::load_from_memory(BYTES).ok()?.to_rgba8()))
+}
+'''
+          new = '''/// Bundled Probe Shell aurora wallpaper.
+fn decode_aurora() -> Option<SharedPixelBuffer<Rgba8Pixel>> {
+    const BYTES: &[u8] = include_bytes!("../assets/aurora.jpg");
+    Some(to_buffer(image::load_from_memory(BYTES).ok()?.to_rgba8()))
+}
+
+/// Bundled Miku wallpaper. Kept separate from Aurora so both remain selectable.
+fn decode_miku() -> Option<SharedPixelBuffer<Rgba8Pixel>> {
+    const BYTES: &[u8] = include_bytes!("../assets/miku.jpg");
+    Some(to_buffer(image::load_from_memory(BYTES).ok()?.to_rgba8()))
+}
+'''
+          text = replace_once(text, old, new, "decode aurora/miku")
+          write(path, text)
+
+          # Keep the original Fantasy 3048 as the default instead of a removed v0.7.0 image.
+          path = "src/config.rs"
+          text = read(path)
+          count = text.count('"builtin:dark-mecha".to_string()')
+          if count != 2:
+              raise SystemExit(f"default wallpaper ids: expected 2, found {count}")
+          text = text.replace('"builtin:dark-mecha".to_string()', '"builtin:tech".to_string()')
+          text = text.replace('Ships with the "幻想 3048" sci-fi wallpaper on by default', 'Ships with the "幻想 3048" sci-fi wallpaper on by default')
+          write(path, text)
+
+          # -----------------------------------------------------------------
+          # Wallpaper settings: seven intended built-ins, scrolling, and the
+          # original live slider instead of the numeric stepper.
+          # -----------------------------------------------------------------
+          path = "ui/interface_panel.slint"
+          text = read(path)
+          start = text.index('    property <bool> wp-is-custom:')
+          end = text.index('\n\n    callback set-term-font', start)
+          text = text[:start] + '''    property <bool> wp-is-custom:
+        root.current-wallpaper != ""
+        && root.current-wallpaper != "builtin:tech"
+        && root.current-wallpaper != "builtin:aurora"
+        && root.current-wallpaper != "builtin:miku"
+        && root.current-wallpaper != "builtin:dark-neon-city"
+        && root.current-wallpaper != "builtin:dark-cyber-warrior"
+        && root.current-wallpaper != "builtin:light-future-city"
+        && root.current-wallpaper != "builtin:light-crystal-guardian"
+        && root.current-wallpaper != "builtin:light"
+        && root.current-wallpaper != "builtin:dark"
+        && root.current-wallpaper != "builtin:dark-mecha"
+        && root.current-wallpaper != "builtin:dark-city"
+        && root.current-wallpaper != "builtin:dark-network"
+        && root.current-wallpaper != "builtin:light-crystal"
+        && root.current-wallpaper != "builtin:light-network"
+        && root.current-wallpaper != "builtin:light-lab";''' + text[end:]
+
+          start = text.index('            // --- Wallpaper page')
+          end = text.index('            // --- SFTP page', start)
+          wallpaper_block = r'''            // --- Wallpaper page ----------------------------------------
+            if root.ifd-page == "wallpaper" : ScrollView {
+                horizontal-scrollbar-policy: always-off;
+                vertical-scrollbar-policy: as-needed;
+                mouse-drag-pan-enabled: true;
+                VerticalLayout {
+                    padding-left: 20px;
+                    padding-right: 20px;
+                    padding-top: 14px;
+                    padding-bottom: 14px;
+                    spacing: 0;
+                    alignment: start;
+
+                    SectionHeader { text: root.lang-en ? "WALLPAPER" : "壁纸"; height: 24px; }
+                    Text {
+                        text: root.lang-en
+                            ? "Four new wallpapers plus Fantasy 3048, Aurora and Miku."
+                            : "四张新壁纸，并保留幻想3048、极光和 Miku。";
+                        color: Theme.text-muted;
+                        font-size: 11px * Theme.panel-font;
+                        wrap: word-wrap;
+                    }
+                    Rectangle { height: 10px; }
+
+                    SectionHeader { text: root.lang-en ? "DARK" : "深色壁纸"; height: 20px; }
+                    HorizontalLayout {
+                        spacing: 11px;
+                        alignment: start;
+                        VerticalLayout {
+                            spacing: 5px;
+                            WallpaperSwatch {
+                                selected: root.current-wallpaper == "builtin:dark-neon-city"
+                                    || root.current-wallpaper == "builtin:dark"
+                                    || root.current-wallpaper == "builtin:dark-city"
+                                    || root.current-wallpaper == "builtin:dark-network";
+                                clicked => { root.set-wallpaper("builtin:dark-neon-city"); }
+                                Image { width: 100%; height: 100%; source: @image-url("../assets/wallpapers/dark-neon-city.png"); image-fit: cover; }
+                            }
+                            Text { text: root.lang-en ? "Neon City" : "霓虹城市"; font-size: 11px * Theme.panel-font; color: Theme.text-secondary; horizontal-alignment: center; }
+                        }
+                        VerticalLayout {
+                            spacing: 5px;
+                            WallpaperSwatch {
+                                selected: root.current-wallpaper == "builtin:dark-cyber-warrior"
+                                    || root.current-wallpaper == "builtin:dark-mecha";
+                                clicked => { root.set-wallpaper("builtin:dark-cyber-warrior"); }
+                                Image { width: 100%; height: 100%; source: @image-url("../assets/wallpapers/dark-cyber-warrior.png"); image-fit: cover; }
+                            }
+                            Text { text: root.lang-en ? "Cyber Warrior" : "赛博战姬"; font-size: 11px * Theme.panel-font; color: Theme.text-secondary; horizontal-alignment: center; }
+                        }
+                        VerticalLayout {
+                            spacing: 5px;
+                            WallpaperSwatch {
+                                selected: root.current-wallpaper == "builtin:tech";
+                                clicked => { root.set-wallpaper("builtin:tech"); }
+                                Rectangle {
+                                    width: 100%; height: 100%;
+                                    background: @linear-gradient(180deg, #05060f 0%, #0b1430 55%, #1a0a2e 100%);
+                                    clip: true;
+                                    Rectangle {
+                                        x: parent.width * 0.5 - 16px; y: parent.height * 0.22;
+                                        width: 32px; height: 32px; border-radius: 16px;
+                                        background: @radial-gradient(circle, #ff5ea8 0%, #ff5ea800 70%);
+                                    }
+                                    Rectangle { y: parent.height * 0.58; width: parent.width; height: 2px; background: #19e6ff; opacity: 0.85; }
+                                }
+                            }
+                            Text { text: root.lang-en ? "Fantasy 3048" : "幻想3048"; font-size: 11px * Theme.panel-font; color: Theme.text-secondary; horizontal-alignment: center; }
+                        }
+                        VerticalLayout {
+                            spacing: 5px;
+                            WallpaperSwatch {
+                                selected: root.current-wallpaper == "builtin:miku";
+                                clicked => { root.set-wallpaper("builtin:miku"); }
+                                Image { width: 100%; height: 100%; source: @image-url("../assets/miku.jpg"); image-fit: cover; }
+                            }
+                            Text { text: "Miku"; font-size: 11px * Theme.panel-font; color: Theme.text-secondary; horizontal-alignment: center; }
+                        }
+                    }
+
+                    Rectangle { height: 10px; }
+                    SectionHeader { text: root.lang-en ? "LIGHT" : "浅色壁纸"; height: 20px; }
+                    HorizontalLayout {
+                        spacing: 11px;
+                        alignment: start;
+                        VerticalLayout {
+                            spacing: 5px;
+                            WallpaperSwatch {
+                                selected: root.current-wallpaper == "builtin:light-future-city"
+                                    || root.current-wallpaper == "builtin:light"
+                                    || root.current-wallpaper == "builtin:light-network"
+                                    || root.current-wallpaper == "builtin:light-lab";
+                                clicked => { root.set-wallpaper("builtin:light-future-city"); }
+                                Image { width: 100%; height: 100%; source: @image-url("../assets/wallpapers/light-future-city.png"); image-fit: cover; }
+                            }
+                            Text { text: root.lang-en ? "Future City" : "未来之城"; font-size: 11px * Theme.panel-font; color: Theme.text-secondary; horizontal-alignment: center; }
+                        }
+                        VerticalLayout {
+                            spacing: 5px;
+                            WallpaperSwatch {
+                                selected: root.current-wallpaper == "builtin:light-crystal-guardian"
+                                    || root.current-wallpaper == "builtin:light-crystal";
+                                clicked => { root.set-wallpaper("builtin:light-crystal-guardian"); }
+                                Image { width: 100%; height: 100%; source: @image-url("../assets/wallpapers/light-crystal-guardian.png"); image-fit: cover; }
+                            }
+                            Text { text: root.lang-en ? "Crystal Guardian" : "冰晶守望"; font-size: 11px * Theme.panel-font; color: Theme.text-secondary; horizontal-alignment: center; }
+                        }
+                        VerticalLayout {
+                            spacing: 5px;
+                            WallpaperSwatch {
+                                selected: root.current-wallpaper == "builtin:aurora";
+                                clicked => { root.set-wallpaper("builtin:aurora"); }
+                                Image { width: 100%; height: 100%; source: @image-url("../assets/aurora.jpg"); image-fit: cover; }
+                            }
+                            Text { text: root.lang-en ? "Aurora" : "极光"; font-size: 11px * Theme.panel-font; color: Theme.text-secondary; horizontal-alignment: center; }
+                        }
+                    }
+
+                    Rectangle { height: 12px; }
+                    SectionHeader { text: root.lang-en ? "CUSTOM" : "自定义"; height: 20px; }
+                    HorizontalLayout {
+                        spacing: 11px;
+                        alignment: start;
+                        VerticalLayout {
+                            spacing: 5px;
+                            WallpaperSwatch {
+                                width: 100px;
+                                selected: root.current-wallpaper == "";
+                                clicked => { root.set-wallpaper(""); }
+                                Rectangle { width: 100%; height: 100%; background: Theme.window-base; }
+                                Text { text: "\u{E14C}"; font-family: "Material Icons"; font-size: 26px * Theme.panel-font; color: Theme.text-muted; horizontal-alignment: center; vertical-alignment: center; }
+                            }
+                            Text { text: root.lang-en ? "None" : "无"; font-size: 11px * Theme.panel-font; color: Theme.text-secondary; horizontal-alignment: center; }
+                        }
+                        VerticalLayout {
+                            spacing: 5px;
+                            WallpaperSwatch {
+                                width: 150px;
+                                selected: root.wp-is-custom;
+                                clicked => { root.pick-wallpaper-file(); }
+                                Rectangle { width: 100%; height: 100%; background: Theme.bg-elevated; }
+                                Text { text: "\u{E2C7}"; font-family: "Material Icons"; font-size: 25px * Theme.panel-font; color: Theme.accent; horizontal-alignment: center; vertical-alignment: center; }
+                            }
+                            Text {
+                                text: root.custom-wallpaper-name != "" ? root.custom-wallpaper-name : (root.lang-en ? "Custom image" : "自定义图片");
+                                font-size: 11px * Theme.panel-font;
+                                color: Theme.text-secondary;
+                                horizontal-alignment: center;
+                            }
+                        }
+                    }
+
+                    Rectangle { height: 12px; }
+                    SectionHeader { text: root.lang-en ? "OVERLAY" : "遮罩"; height: 20px; }
+                    SettingRow {
+                        label: root.lang-en ? "Wallpaper transparency" : "壁纸遮罩透明度";
+                        desc: root.lang-en
+                            ? "Drag right to show more of the wallpaper through the panels."
+                            : "向右拖动可让壁纸更多地透过面板，拖动时实时生效。";
+                        show-divider: false;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Slider {
+                                width: 170px;
+                                minimum: 0;
+                                maximum: 70;
+                                value: (1.0 - root.wallpaper-overlay) * 100;
+                                changed(v) => { root.wallpaper-overlay = 1.0 - v / 100; }
+                                released(v) => { root.persist-wallpaper-overlay(1.0 - v / 100); }
+                            }
+                            Text {
+                                text: "\{round((1.0 - root.wallpaper-overlay) * 100)}%";
+                                color: Theme.text-secondary;
+                                font-size: 12px * Theme.panel-font;
+                                vertical-alignment: center;
+                                width: 38px;
+                            }
+                        }
+                    }
+                }
+            }
+
+'''
+          text = text[:start] + wallpaper_block + text[end:]
+          write(path, text)
+
+          # -----------------------------------------------------------------
+          # Main UI fixes: settings card cannot exceed the parent window, stale
+          # tooltips close on click, and About shows the correct repository name.
+          # -----------------------------------------------------------------
+          path = "ui/app.slint"
+          text = read(path)
+          text = replace_once(
+              text,
+              '''        changed has-hover => { if (!self.has-hover) { root.tooltip-ready = false; root.hide-tooltip(); } }
+        clicked => { root.clicked(); }''',
+              '''        changed has-hover => { if (!self.has-hover) { root.tooltip-ready = false; root.hide-tooltip(); } }
+        clicked => { root.tooltip-ready = false; root.hide-tooltip(); root.clicked(); }''',
+              "top toolbar tooltip close",
+          )
+          text = replace_once(
+              text,
+              '''    property <length> ifd-x: round((root.width - 720px * Theme.panel-font) / 2 / 1px) * 1px;
+    property <length> ifd-y: round((root.height - 480px * Theme.panel-font) / 2 / 1px) * 1px;''',
+              '''    property <length> ifd-w: min(720px * Theme.panel-font, root.width - 32px);
+    property <length> ifd-h: min(480px * Theme.panel-font, root.height - 32px);
+    property <length> ifd-x: round((root.width - root.ifd-w) / 2 / 1px) * 1px;
+    property <length> ifd-y: round((root.height - root.ifd-h) / 2 / 1px) * 1px;''',
+              "settings dimensions",
+          )
+          text = replace_once(text, '            width: 720px * Theme.panel-font;\n            height: 480px * Theme.panel-font;', '            width: root.ifd-w;\n            height: root.ifd-h;', "settings card size")
+          text = text.replace('max(0px, root.width - 720px * Theme.panel-font)', 'max(0px, root.width - root.ifd-w)')
+          text = text.replace('max(0px, root.height - 480px * Theme.panel-font)', 'max(0px, root.height - root.ifd-h)')
+          text = replace_once(text, 'github.com/OnlyChallenger/probe-shell', 'github.com/OnlyChallgener/probe-shell', "about repository text")
+          write(path, text)
+
+          # -----------------------------------------------------------------
+          # SFTP interaction fixes.
+          # -----------------------------------------------------------------
+          path = "ui/sftp_panel.slint"
+          text = read(path)
+          text = replace_once(text, '    property <length> qa-popup-width: clamp(root.width - 48px, 500px, 560px);\n    property <length> qa-popup-height: 330px;', '    property <length> qa-popup-width: clamp(root.width - 24px, 320px, 560px);\n    property <length> qa-popup-height: clamp(root.height - 24px, 200px, 330px);', "quick directory popup size")
+          text = replace_once(
+              text,
+              '''                                                root.qa-popup-dragging = true;
+                                                root.qa-popup-drag-start-x = self.mouse-x;
+                                                root.qa-popup-drag-start-y = self.mouse-y;''',
+              '''                                                root.qa-popup-dragging = true;
+                                                root.qa-popup-drag-start-x = self.absolute-position.x + self.mouse-x;
+                                                root.qa-popup-drag-start-y = self.absolute-position.y + self.mouse-y;
+                                                root.qa-popup-drag-base-x = root.qa-popup-offset-x;
+                                                root.qa-popup-drag-base-y = root.qa-popup-offset-y;''',
+              "quick directory drag start",
+          )
+          text = replace_once(
+              text,
+              '''                                            if (root.qa-popup-dragging) {
+                                                root.qa-popup-offset-x = root.qa-popup-offset-x + self.mouse-x - root.qa-popup-drag-start-x;
+                                                root.qa-popup-offset-y = root.qa-popup-offset-y + self.mouse-y - root.qa-popup-drag-start-y;
+                                            }''',
+              '''                                            if (root.qa-popup-dragging) {
+                                                root.qa-popup-offset-x = clamp(
+                                                    root.qa-popup-drag-base-x + self.absolute-position.x + self.mouse-x - root.qa-popup-drag-start-x,
+                                                    -(root.width - root.qa-popup-width) / 2 + 8px,
+                                                    (root.width - root.qa-popup-width) / 2 - 8px);
+                                                root.qa-popup-offset-y = clamp(
+                                                    root.qa-popup-drag-base-y + self.absolute-position.y + self.mouse-y - root.qa-popup-drag-start-y,
+                                                    -(root.height - root.qa-popup-height) / 2 + 8px,
+                                                    (root.height - root.qa-popup-height) / 2 - 8px);
+                                            }''',
+              "quick directory drag move",
+          )
+          text = replace_once(
+              text,
+              '''                                                    can-delete: true;
+                                                    remove(i) => { root.qa-show-root = false; root.toast(@tr("已删除快捷目录")); }''',
+              '''                                                    can-delete: false;
+                                                    remove(i) => { }''',
+              "non-persistent root shortcut delete",
+          )
+          old_click = '''                                    clicked => { if (node.path == "/") { root.tree-active-path = "/"; } else if (!root.search-mode) { root.tree-active-path = node.path; if (root.tree-scope == "/") { root.clear-tree-scope(); } root.navigate(node.path); } }'''
+          new_click = '''                                    clicked => { if (!root.search-mode) { root.tree-active-path = node.path; if (root.tree-scope == "/") { root.clear-tree-scope(); } root.navigate(node.path); } }'''
+          text = replace_once(text, old_click, new_click, "root tree navigation")
+          permission_line = '''                                SftpMenuItem { label: @tr("权限"); enabled: root.tree-menu-target != ""; clicked => { root.chmod-request(root.tree-menu-target, root.tree-menu-target, 493); } }
+'''
+          text = replace_once(text, permission_line, '', "unsafe tree chmod default")
+          write(path, text)
+
+          # -----------------------------------------------------------------
+          # Rust callback fixes: clear only finished transfer history; normalize
+          # shortcut paths/labels and reject normalized duplicates.
+          # -----------------------------------------------------------------
+          path = "src/app.rs"
+          text = read(path)
+          text = replace_once(
+              text,
+              '''        let tm = transfers_model.clone();
+        window.on_clear_transfers(move || tm.set_vec(Vec::<TransferInfo>::new()));''',
+              '''        let tm = transfers_model.clone();
+        window.on_clear_transfers(move || {
+            let active: Vec<TransferInfo> = (0..tm.row_count())
+                .filter_map(|i| tm.row_data(i))
+                .filter(|row| row.state == 0 || row.state == 3)
+                .collect();
+            tm.set_vec(active);
+        });''',
+              "clear completed transfers only",
+          )
+          old = '''            move |index: i32, label: SharedString, group: SharedString, path: SharedString| {
+                let idx = index.clamp(0, 4) as usize;
+                {
+                    let mut s = store.borrow_mut();
+                    let mut dirs = s.sftp_quick_dirs().to_vec();
+                    while dirs.len() <= idx {
+                        dirs.push(SftpQuickDir::default());
+                    }
+                    dirs[idx] = SftpQuickDir {
+                        label: label.to_string(),
+                        group: group.to_string(),
+                        path: path.to_string(),
+                    };
+                    s.set_sftp_quick_dirs(dirs);
+                    if let Err(err) = s.save() {
+                        tracing::warn!("failed to save SFTP quick dirs: {err:#}");
+                    }
+                }
+                if let Some(w) = weak.upgrade() {
+                    apply_sftp_quick_dirs_to_window(&w, store.borrow().sftp_quick_dirs());
+                }
+            },'''
+          new = '''            move |index: i32, label: SharedString, group: SharedString, path: SharedString| {
+                let idx = index.clamp(0, 4) as usize;
+                let deleting = path.as_str().is_empty();
+                let trimmed_path = path.as_str().trim();
+                if !deleting && trimmed_path.is_empty() {
+                    if let Some(w) = weak.upgrade() {
+                        apply_sftp_quick_dirs_to_window(&w, store.borrow().sftp_quick_dirs());
+                    }
+                    return;
+                }
+                let normalized_path = if deleting {
+                    String::new()
+                } else {
+                    normalize_remote_path_for_scope(trimmed_path)
+                };
+                {
+                    let mut s = store.borrow_mut();
+                    let mut dirs = s.sftp_quick_dirs().to_vec();
+                    while dirs.len() <= idx {
+                        dirs.push(SftpQuickDir::default());
+                    }
+                    let duplicate = !normalized_path.is_empty()
+                        && dirs.iter().enumerate().any(|(i, dir)| {
+                            i != idx
+                                && !dir.path.trim().is_empty()
+                                && normalize_remote_path_for_scope(&dir.path) == normalized_path
+                        });
+                    if !duplicate {
+                        dirs[idx] = SftpQuickDir {
+                            label: label.as_str().trim().to_string(),
+                            group: group.as_str().trim().to_string(),
+                            path: normalized_path,
+                        };
+                        s.set_sftp_quick_dirs(dirs);
+                        if let Err(err) = s.save() {
+                            tracing::warn!("failed to save SFTP quick dirs: {err:#}");
+                        }
+                    }
+                }
+                if let Some(w) = weak.upgrade() {
+                    apply_sftp_quick_dirs_to_window(&w, store.borrow().sftp_quick_dirs());
+                }
+            },'''
+          text = replace_once(text, old, new, "normalize SFTP quick directories")
+          write(path, text)
+
+          # Version and lockfile.
+          path = "Cargo.toml"
+          text = read(path)
+          text = replace_once(text, 'version = "0.7.0"', 'version = "0.7.1"', "Cargo version")
+          write(path, text)
+
+          path = "Cargo.lock"
+          text = read(path)
+          text, n = re.subn(r'(name = "probe-shell"\nversion = ")0\.7\.0("\n)', r'\g<1>0.7.1\2', text, count=1)
+          if n != 1:
+              raise SystemExit(f"Cargo.lock probe-shell version: expected 1 replacement, got {n}")
+          write(path, text)
+
+          path = "CHANGELOG.md"
+          text = read(path)
+          marker = "## 0.7.1"
+          if marker not in text:
+              entry = '''## 0.7.1\n\n- Keep only the four selected new wallpapers and restore Fantasy 3048, Aurora, and Miku as separate built-ins.\n- Restore the live wallpaper-transparency slider and make the wallpaper page scrollable.\n- Fix settings-window overflow, SFTP shortcut popup dragging/sizing, root navigation, unsafe tree chmod, shortcut normalization, transfer-history clearing, stale tooltips, and the About repository label.\n\n'''
+              if text.startswith("#"):
+                  first_break = text.find("\n\n")
+                  text = text[:first_break + 2] + entry + text[first_break + 2:]
+              else:
+                  text = entry + text
+              write(path, text)
+          PY
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libudev-dev libfontconfig1-dev
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format and validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all
+          cargo check --locked
+          cargo test --locked
+
+      - name: Commit fixes and remove one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm --ignore-unmatch .github/workflows/finalize-v071.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock CHANGELOG.md src/app.rs src/config.rs src/wallpaper.rs ui/app.slint ui/interface_panel.slint ui/sftp_panel.slint
+          git commit -m "release: v0.7.1 wallpaper and interaction fixes"
+          git push origin HEAD:fix/sftp-local-terminal
+
+      - name: Create v0.7.1 tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin refs/tags/v0.7.1 >/dev/null 2>&1; then
+            echo "v0.7.1 already exists" >&2
+            exit 1
+          fi
+          git tag -a v0.7.1 -m "Probe Shell v0.7.1"
+          git push origin v0.7.1
+
+      - name: Start multi-platform release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run release.yml --ref fix/sftp-local-terminal -f release_tag=v0.7.1
