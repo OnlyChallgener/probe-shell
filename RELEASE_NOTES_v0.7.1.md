@@ -5,3 +5,4 @@
 - Fixes settings overflow, SFTP shortcut management, root navigation, unsafe tree chmod defaults, transfer-history clearing, stale tooltips, and the About repository label.
 - Windows, Linux, and macOS packages are produced by the unified Release workflow after validation passes.
 - Release scope is frozen to the requested wallpapers and interaction fixes only.
+- All four requested PNG wallpaper assets, Aurora, and Miku are present in the release branch.
