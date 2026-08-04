@@ -1,0 +1,2 @@
+Validated source commit: 3b0035b91faf4d39a86fc3ada7024f0b2edb768d
+Tag: v0.7.1
