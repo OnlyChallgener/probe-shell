@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   cargo-check:
@@ -52,3 +52,79 @@ jobs:
 
       - name: Test Rust project
         run: cargo test --locked
+
+  repair-wallpaper-settings:
+    name: Repair wallpaper settings UI
+    if: github.event_name == 'push' && github.ref == 'refs/heads/fix/sftp-local-terminal'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repair branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/sftp-local-terminal
+
+      - name: Patch scrolling and opacity state
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("ui/interface_panel.slint")
+          text = path.read_text(encoding="utf-8")
+          original = text
+
+          text = text.replace(
+              'import { ComboBox, Slider } from "std-widgets.slint";',
+              'import { ComboBox, ScrollView, Slider } from "std-widgets.slint";',
+              1,
+          )
+
+          old_start = '            if root.ifd-page == "wallpaper" : VerticalLayout {'
+          new_start = '''            if root.ifd-page == "wallpaper" : ScrollView {
+                horizontal-scrollbar-policy: always-off;
+                vertical-scrollbar-policy: as-needed;
+                mouse-drag-pan-enabled: true;
+                VerticalLayout {'''
+          if old_start in text:
+              text = text.replace(old_start, new_start, 1)
+
+          callback_old = '                        changed(v) => { root.persist-wallpaper-overlay(v / 100); }'
+          callback_new = '''                        changed(v) => {
+                            root.wallpaper-overlay = v / 100;
+                            root.persist-wallpaper-overlay(root.wallpaper-overlay);
+                        }'''
+          if callback_old in text:
+              text = text.replace(callback_old, callback_new, 1)
+
+          wallpaper_start = text.find('            if root.ifd-page == "wallpaper" : ScrollView {')
+          sftp_marker = text.find('            // --- SFTP page', wallpaper_start)
+          if wallpaper_start < 0 or sftp_marker < 0:
+              raise SystemExit('wallpaper or SFTP marker not found')
+          before = text[:sftp_marker]
+          after = text[sftp_marker:]
+          closing = '            }\n\n'
+          if before.endswith(closing) and not before.endswith('                }\n            }\n\n'):
+              before = before[:-len(closing)] + '                }\n            }\n\n'
+          text = before + after
+
+          if text == original:
+              print('Wallpaper settings already repaired')
+          else:
+              path.write_text(text, encoding="utf-8")
+              print('Wallpaper settings repaired')
+          PY
+
+      - name: Commit repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- ui/interface_panel.slint; then
+            echo "No source change needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ui/interface_panel.slint
+          git commit -m "fix: restore wallpaper settings scrolling and opacity"
+          git push origin HEAD:fix/sftp-local-terminal
