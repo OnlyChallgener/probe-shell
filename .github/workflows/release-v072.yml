@@ -7,6 +7,9 @@ on:
     paths:
       - .github/workflows/release-v072.yml
       - V072_RELEASE_TRIGGER.txt
+  pull_request:
+    branches:
+      - release/v0.7.1-squash
   workflow_dispatch:
 
 permissions:
@@ -14,11 +17,12 @@ permissions:
   actions: write
 
 concurrency:
-  group: tag-and-package-v072
+  group: tag-and-package-v072-${{ github.event_name }}
   cancel-in-progress: false
 
 jobs:
   release:
+    if: github.event_name != 'pull_request' || github.head_ref == 'fix/wallpaper-v072'
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     steps:
