@@ -1,8 +1,8 @@
 // Central design tokens for Probe Shell.
 //
-// Direction: practical Windows 11-style surfaces. Dark mode may keep the
-// immersive wallpaper; light mode is intentionally opaque, muted and readable
-// so terminal/SFTP text never turns into a white haze.
+// Direction: practical Windows 11-style surfaces. Both dark and light themes
+// support immersive wallpapers; light mode uses a slightly stronger frost so
+// terminal/SFTP text remains readable without hiding the selected image.
 
 export global Theme {
     // Set by Rust on startup (system detection) and on user toggle.
@@ -26,12 +26,14 @@ export global Theme {
     // it translucent so the image shows through. Returns the plain base colour
     // when no wallpaper is active (so the normal opaque theme is unchanged).
     pure function frost(base: color, alpha: float) -> brush {
-        // Wallpaper immersion is intentionally dark-mode only. In light mode the
-        // old frosted surfaces became a grey/white wash over the sci-fi wallpaper,
-        // making text and SFTP tables hard to read. Keep light mode crisp and
-        // opaque while preserving the immersive wallpaper in dark mode.
-        return root.wallpaper-active && root.dark
-            ? base.mix(root.wp-tint, 1.0 - root.tint-amt).with-alpha(alpha)
+        // Keep the selected wallpaper visible in both themes. Light mode uses a
+        // slightly stronger frost than dark mode for text/table contrast, but it
+        // must not fall back to a fully opaque blue/white surface: that previously
+        // hid Future City, Crystal Guardian and Miku even though they were loaded.
+        return root.wallpaper-active
+            ? base.mix(root.wp-tint, 1.0 - root.tint-amt).with-alpha(
+                root.dark ? alpha : min(1.0, alpha + 0.04)
+              )
             : base;
     }
 
@@ -68,9 +70,9 @@ export global Theme {
     out property <brush> text-secondary: dark ? #b9c7dc : #46576c;
     out property <brush> text-muted:     dark ? #8290a8 : #5f7086;
 
-    out property <brush> accent:         (root.wallpaper-active && root.dark) ? root.wp-accent          : (dark ? #59b8ff : #3178d4);
-    out property <brush> accent-hover:   (root.wallpaper-active && root.dark) ? root.wp-accent.brighter(0.12) : (dark ? #7cc8ff : #4489e1);
-    out property <brush> accent-pressed: (root.wallpaper-active && root.dark) ? root.wp-accent.darker(0.12)   : (dark ? #2f8fd3 : #2264b5);
+    out property <brush> accent:         root.wallpaper-active ? root.wp-accent                 : (dark ? #59b8ff : #3178d4);
+    out property <brush> accent-hover:   root.wallpaper-active ? root.wp-accent.brighter(0.12) : (dark ? #7cc8ff : #4489e1);
+    out property <brush> accent-pressed: root.wallpaper-active ? root.wp-accent.darker(0.12)   : (dark ? #2f8fd3 : #2264b5);
 
     out property <brush> success: dark ? #52d6b8 : #16a34a;
     out property <brush> warning: dark ? #f4c067 : #f59e0b;
@@ -80,7 +82,11 @@ export global Theme {
     // what the shell / remote app outputs via ANSI colour codes. With a
     // wallpaper it frosts (kept neutral, not tinted) so text stays legible.
     property <color> base-term-bg: dark ? #050914 : #edf5ff;
-    out property <brush> term-bg: (root.wallpaper-active && root.dark) ? base-term-bg.with-alpha(max(0.0, root.panel-alpha - 0.14)) : base-term-bg;
+    out property <brush> term-bg: root.wallpaper-active
+        ? base-term-bg.with-alpha(root.dark
+            ? max(0.0, root.panel-alpha - 0.14)
+            : min(1.0, root.panel-alpha + 0.02))
+        : base-term-bg;
     out property <brush> term-fg: dark ? #d4d4d4 : #172033;
 
     // True on macOS (set by Rust). App shortcuts use Cmd (⌘) here instead of
