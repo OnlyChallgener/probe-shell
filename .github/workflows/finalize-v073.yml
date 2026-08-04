@@ -15,10 +15,6 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: finalize-v073-light-wallpapers
-  cancel-in-progress: false
-
 jobs:
   finalize:
     runs-on: ubuntu-22.04
