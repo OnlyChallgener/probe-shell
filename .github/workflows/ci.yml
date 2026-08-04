@@ -64,12 +64,12 @@ jobs:
           ref: fix/sftp-local-terminal
           fetch-depth: 0
 
-      - name: Tag validated source
+      - name: Tag clean release commit
         shell: bash
         run: |
           set -euo pipefail
-          validated_sha="3b0035b91faf4d39a86fc3ada7024f0b2edb768d"
-          version="$(git show "${validated_sha}:Cargo.toml" | awk '/^version = / {gsub(/\"/, "", $3); print $3; exit}')"
+          release_sha="0dbd8d31fd5ae9b6a683f9199867a800c7040425"
+          version="$(git show "${release_sha}:Cargo.toml" | awk '/^version = / {gsub(/\"/, "", $3); print $3; exit}')"
           test "$version" = "0.7.1"
           git fetch --tags origin
           if git rev-parse -q --verify refs/tags/v0.7.1 >/dev/null; then
@@ -78,5 +78,5 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a v0.7.1 "$validated_sha" -m "Probe Shell v0.7.1"
+          git tag -a v0.7.1 "$release_sha" -m "Probe Shell v0.7.1"
           git push origin v0.7.1
