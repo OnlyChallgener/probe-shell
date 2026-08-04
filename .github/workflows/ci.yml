@@ -10,7 +10,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  actions: write
 
 jobs:
   cargo-check:
@@ -52,3 +53,146 @@ jobs:
 
       - name: Test Rust project
         run: cargo test --locked
+
+  finalize-v071:
+    name: Finalize and release v0.7.1
+    if: github.event_name == 'push' && github.ref == 'refs/heads/fix/sftp-local-terminal' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout release branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/sftp-local-terminal
+          fetch-depth: 0
+
+      - name: Verify wallpaper assets
+        run: |
+          set -euo pipefail
+          test -f assets/wallpapers/dark-neon-city.png
+          test -f assets/wallpapers/dark-cyber-warrior.png
+          test -f assets/wallpapers/light-future-city.png
+          test -f assets/wallpapers/light-crystal-guardian.png
+          test -f assets/aurora.jpg
+          test -f assets/miku.jpg
+
+      - name: Run the one-shot source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'BOOT'
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/finalize-v071.yml').read_text(encoding='utf-8')
+          marker = "          python3 - <<'PY'\n"
+          end_marker = "\n          PY\n"
+          if marker not in workflow or end_marker not in workflow:
+              raise SystemExit('could not locate embedded v0.7.1 patch script')
+          body = workflow.split(marker, 1)[1].split(end_marker, 1)[0]
+          lines = []
+          for line in body.splitlines():
+              lines.append(line[10:] if line.startswith('          ') else line)
+          source = '\n'.join(lines) + '\n'
+          exec(compile(source, 'finalize-v071.py', 'exec'), {})
+          BOOT
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libudev-dev libfontconfig1-dev
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format and validate
+        run: |
+          set -euo pipefail
+          cargo fmt --all
+          cargo check --locked
+          cargo test --locked
+
+      - name: Restore normal CI and commit release source
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/finalize-v071.yml
+          cat > .github/workflows/ci.yml <<'EOF'
+          name: CI
+
+          on:
+            push:
+              branches:
+                - '**'
+            pull_request:
+              branches:
+                - '**'
+            workflow_dispatch:
+
+          permissions:
+            contents: read
+
+          jobs:
+            cargo-check:
+              name: Cargo check
+              runs-on: ubuntu-latest
+              steps:
+                - name: Checkout repository
+                  uses: actions/checkout@v4
+
+                - name: Install system dependencies
+                  run: |
+                    sudo apt-get update
+                    sudo apt-get install -y pkg-config libudev-dev libfontconfig1-dev
+
+                - name: Install stable Rust
+                  uses: dtolnay/rust-toolchain@stable
+
+                - name: Cache Cargo build artifacts
+                  uses: Swatinem/rust-cache@v2
+
+                - name: Check Rust project
+                  run: cargo check --locked
+
+            windows-check-test:
+              name: Windows cargo check/test
+              runs-on: windows-latest
+              steps:
+                - name: Checkout repository
+                  uses: actions/checkout@v4
+
+                - name: Install stable Rust
+                  uses: dtolnay/rust-toolchain@stable
+
+                - name: Cache Cargo build artifacts
+                  uses: Swatinem/rust-cache@v2
+
+                - name: Check Rust project
+                  run: cargo check --locked
+
+                - name: Test Rust project
+                  run: cargo test --locked
+          EOF
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/ci.yml Cargo.toml Cargo.lock CHANGELOG.md src/app.rs src/config.rs src/wallpaper.rs ui/app.slint ui/interface_panel.slint ui/sftp_panel.slint
+          git add -u .github/workflows/finalize-v071.yml
+          git commit -m "release: v0.7.1 wallpaper and interaction fixes"
+          git push origin HEAD:fix/sftp-local-terminal
+
+      - name: Create tag and dispatch multi-platform packaging
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin refs/tags/v0.7.1 >/dev/null 2>&1; then
+            echo "v0.7.1 already exists" >&2
+            exit 1
+          fi
+          git tag -a v0.7.1 -m "Probe Shell v0.7.1"
+          git push origin v0.7.1
+          gh workflow run release.yml --ref fix/sftp-local-terminal -f release_tag=v0.7.1
