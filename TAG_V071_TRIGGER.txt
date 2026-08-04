@@ -1,2 +1,2 @@
-Validated source commit: 3b0035b91faf4d39a86fc3ada7024f0b2edb768d
+Clean release commit: 0dbd8d31fd5ae9b6a683f9199867a800c7040425
 Tag: v0.7.1
