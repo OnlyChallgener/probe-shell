@@ -1,0 +1,294 @@
+name: Package v0.7.3
+
+on:
+  push:
+    branches:
+      - fix/light-wallpaper-v073
+    paths:
+      - .github/workflows/package-v073.yml
+      - V073_RELEASE_TRIGGER.txt
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: package-v073
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Verify v0.7.3 source
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      label: ${{ steps.version.outputs.label }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 8b8409b54866304e7b07a1c7ed4db08783a20721
+          fetch-depth: 0
+
+      - name: Verify clean commit and version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "8b8409b54866304e7b07a1c7ed4db08783a20721"
+          version="$(awk '
+            /^\[package\]$/ { in_package=1; next }
+            /^\[/ && in_package { exit }
+            in_package && /^version[[:space:]]*=/ {
+              line=$0
+              sub(/^[^=]*=[[:space:]]*"/, "", line)
+              sub(/"[[:space:]]*$/, "", line)
+              print line
+              exit
+            }
+          ' Cargo.toml)"
+          test "$version" = "0.7.3"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "label=v0.7.3" >> "$GITHUB_OUTPUT"
+
+      - name: Create v0.7.3 tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags origin
+          if git rev-parse -q --verify refs/tags/v0.7.3 >/dev/null; then
+            test "$(git rev-list -n 1 v0.7.3)" = "8b8409b54866304e7b07a1c7ed4db08783a20721"
+            echo "v0.7.3 already points to the clean release commit"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a v0.7.3 8b8409b54866304e7b07a1c7ed4db08783a20721 -m "Probe Shell v0.7.3"
+            git push origin v0.7.3
+          fi
+
+  build:
+    name: ${{ matrix.name }}
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x86_64
+            os: windows-2025
+            target: x86_64-pc-windows-msvc
+          - name: linux-x86_64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - name: macos-aarch64
+            os: macos-15
+            target: aarch64-apple-darwin
+          - name: macos-x86_64
+            os: macos-15-intel
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 8b8409b54866304e7b07a1c7ed4db08783a20721
+
+      - name: Install Linux GUI dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config cmake file wget \
+            libfontconfig1-dev libfreetype6-dev \
+            libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
+            libgl1-mesa-dev libegl1-mesa-dev libgtk-3-dev libudev-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package Windows portable ZIP
+        if: matrix.name == 'windows-x86_64'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $label = '${{ needs.check.outputs.label }}'
+          $stage = "probe-shell-$label-windows-x86_64"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/probe-shell.exe" $stage
+          Copy-Item README.md, README.en.md, CHANGELOG.md $stage -ErrorAction SilentlyContinue
+          Compress-Archive -Path $stage -DestinationPath "dist/$stage-portable.zip" -Force
+
+      - name: Build Windows MSI
+        if: matrix.name == 'windows-x86_64'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $label = '${{ needs.check.outputs.label }}'
+          $version = '${{ needs.check.outputs.version }}'
+          $exe = (Resolve-Path "target/${{ matrix.target }}/release/probe-shell.exe").Path
+          $escapedExe = [System.Security.SecurityElement]::Escape($exe)
+
+          choco install wixtoolset -y --no-progress
+          $candle = Get-ChildItem 'C:\Program Files (x86)' -Filter candle.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $candle) { throw 'candle.exe was not found after installing WiX Toolset' }
+          $light = Join-Path $candle.Directory.FullName 'light.exe'
+          if (-not (Test-Path $light)) { throw 'light.exe was not found after installing WiX Toolset' }
+
+          @"
+          <?xml version="1.0" encoding="UTF-8"?>
+          <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+            <Product Id="*" Name="Probe Shell" Language="1033" Version="$version" Manufacturer="OnlyChallgener" UpgradeCode="BDBCF0D4-8911-49BD-8C74-B1130B7B10A7">
+              <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Platform="x64" />
+              <MajorUpgrade DowngradeErrorMessage="A newer version of Probe Shell is already installed." />
+              <MediaTemplate EmbedCab="yes" />
+              <Feature Id="ProductFeature" Title="Probe Shell" Level="1">
+                <ComponentRef Id="ProbeShellExecutable" />
+              </Feature>
+              <Directory Id="TARGETDIR" Name="SourceDir">
+                <Directory Id="ProgramFiles64Folder">
+                  <Directory Id="INSTALLFOLDER" Name="Probe Shell" />
+                </Directory>
+              </Directory>
+              <DirectoryRef Id="INSTALLFOLDER">
+                <Component Id="ProbeShellExecutable" Guid="*" Win64="yes">
+                  <File Id="ProbeShellExe" Source="$escapedExe" KeyPath="yes" />
+                </Component>
+              </DirectoryRef>
+            </Product>
+          </Wix>
+          "@ | Set-Content -Path probe-shell.wxs -Encoding UTF8
+
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          & $candle.FullName -nologo -arch x64 -out dist/probe-shell.wixobj probe-shell.wxs
+          & $light -nologo -out "dist/probe-shell-$label-windows-x86_64.msi" dist/probe-shell.wixobj
+          Remove-Item dist/probe-shell.wixobj -Force
+          Remove-Item "dist/probe-shell-$label-windows-x86_64.wixpdb" -Force -ErrorAction SilentlyContinue
+
+      - name: Package Linux tar.gz and AppImage
+        if: matrix.name == 'linux-x86_64'
+        shell: bash
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          set -euo pipefail
+          label='${{ needs.check.outputs.label }}'
+          stage="probe-shell-${label}-linux-x86_64"
+          mkdir -p "$stage" dist AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/512x512/apps
+          cp "target/${{ matrix.target }}/release/probe-shell" "$stage/"
+          cp README.md README.en.md CHANGELOG.md "$stage/" 2>/dev/null || true
+          tar -czf "dist/${stage}.tar.gz" "$stage"
+
+          install -m755 "target/${{ matrix.target }}/release/probe-shell" AppDir/usr/bin/probe-shell
+          install -m644 assets/icon@512.png AppDir/usr/share/icons/hicolor/512x512/apps/probe-shell.png
+          cat > AppDir/usr/share/applications/probe-shell.desktop <<'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=Probe Shell
+          Comment=SSH terminal and router-friendly file browser
+          Exec=probe-shell
+          Icon=probe-shell
+          Categories=Network;RemoteAccess;System;
+          Terminal=false
+          EOF
+
+          wget -q -O linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          wget -q -O linuxdeploy-plugin-appimage https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-x86_64.AppImage
+          chmod +x linuxdeploy linuxdeploy-plugin-appimage
+          ./linuxdeploy \
+            --appdir AppDir \
+            --desktop-file AppDir/usr/share/applications/probe-shell.desktop \
+            --icon-file AppDir/usr/share/icons/hicolor/512x512/apps/probe-shell.png \
+            --output appimage
+          appimage="$(find . -maxdepth 1 -name '*.AppImage' -print -quit)"
+          test -n "$appimage"
+          mv "$appimage" "dist/probe-shell-${label}-linux-x86_64.AppImage"
+
+      - name: Package macOS application ZIP
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          label='${{ needs.check.outputs.label }}'
+          version='${{ needs.check.outputs.version }}'
+          app="Probe Shell.app"
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" dist probe-shell.iconset
+          cp "target/${{ matrix.target }}/release/probe-shell" "$app/Contents/MacOS/probe-shell"
+          chmod +x "$app/Contents/MacOS/probe-shell"
+
+          sips -z 16 16 assets/icon@512.png --out probe-shell.iconset/icon_16x16.png >/dev/null
+          sips -z 32 32 assets/icon@512.png --out probe-shell.iconset/icon_16x16@2x.png >/dev/null
+          sips -z 32 32 assets/icon@512.png --out probe-shell.iconset/icon_32x32.png >/dev/null
+          sips -z 64 64 assets/icon@512.png --out probe-shell.iconset/icon_32x32@2x.png >/dev/null
+          sips -z 128 128 assets/icon@512.png --out probe-shell.iconset/icon_128x128.png >/dev/null
+          sips -z 256 256 assets/icon@512.png --out probe-shell.iconset/icon_128x128@2x.png >/dev/null
+          sips -z 256 256 assets/icon@512.png --out probe-shell.iconset/icon_256x256.png >/dev/null
+          sips -z 512 512 assets/icon@512.png --out probe-shell.iconset/icon_256x256@2x.png >/dev/null
+          sips -z 512 512 assets/icon@512.png --out probe-shell.iconset/icon_512x512.png >/dev/null
+          sips -z 1024 1024 assets/icon@512.png --out probe-shell.iconset/icon_512x512@2x.png >/dev/null
+          iconutil -c icns probe-shell.iconset -o "$app/Contents/Resources/probe-shell.icns"
+
+          cat > "$app/Contents/Info.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleName</key><string>Probe Shell</string>
+            <key>CFBundleDisplayName</key><string>Probe Shell</string>
+            <key>CFBundleIdentifier</key><string>dev.onlychallgener.probe-shell</string>
+            <key>CFBundleExecutable</key><string>probe-shell</string>
+            <key>CFBundleIconFile</key><string>probe-shell</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>${version}</string>
+            <key>CFBundleVersion</key><string>${version}</string>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict></plist>
+          EOF
+
+          codesign --force --deep --sign - "$app"
+          codesign --verify --deep --strict "$app"
+          ditto -c -k --keepParent "$app" "dist/probe-shell-${label}-${{ matrix.name }}.app.zip"
+
+      - name: Upload platform artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish v0.7.3 release
+    needs:
+      - check
+      - build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate SHA-256 checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%f\n' | sort | xargs sha256sum > SHA256SUMS.txt
+
+      - name: Publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.7.3
+          files: dist/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true
