@@ -56,7 +56,7 @@ jobs:
 
   finalize-v071:
     name: Finalize and release v0.7.1
-    if: github.event_name == 'push' && github.ref == 'refs/heads/fix/sftp-local-terminal' && !contains(github.event.head_commit.message, 'release: v0.7.1')
+    if: github.event_name == 'pull_request' && github.head_ref == 'fix/sftp-local-terminal'
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     steps:
@@ -120,7 +120,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -f .github/workflows/finalize-v071.yml
+          rm -f .github/workflows/finalize-v071.yml .github/workflows/v071-run.yml
           cat > .github/workflows/ci.yml <<'EOF'
           name: CI
 
@@ -180,7 +180,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .github/workflows/ci.yml Cargo.toml Cargo.lock CHANGELOG.md src/app.rs src/config.rs src/wallpaper.rs ui/app.slint ui/interface_panel.slint ui/sftp_panel.slint
-          git add -u .github/workflows/finalize-v071.yml
+          git add -u .github/workflows/finalize-v071.yml .github/workflows/v071-run.yml
           git commit -m "release: v0.7.1 wallpaper and interaction fixes"
           git push origin HEAD:fix/sftp-local-terminal
 
