@@ -392,7 +392,7 @@ export component InterfacePanel inherits Rectangle {
                             || root.current-wallpaper == "builtin:dark-city"
                             || root.current-wallpaper == "builtin:dark-network";
                         clicked => { root.set-wallpaper("builtin:dark-neon-city"); }
-                        Image { width: 100%; height: 100%; source: @image-url("../assets/wallpapers/dark-neon-city.png"); image-fit: cover; }
+                        Image { width: 100%; height: 100%; source: @image-url("../assets/wallpapers/dark-neon-city.jpg"); image-fit: cover; }
                     }
                     Text { text: root.lang-en ? "Neon City" : "霓虹城市"; font-size: 11px * Theme.panel-font; color: Theme.text-secondary; horizontal-alignment: center; }
                 }
@@ -402,7 +402,7 @@ export component InterfacePanel inherits Rectangle {
                         selected: root.current-wallpaper == "builtin:dark-cyber-warrior"
                             || root.current-wallpaper == "builtin:dark-mecha";
                         clicked => { root.set-wallpaper("builtin:dark-cyber-warrior"); }
-                        Image { width: 100%; height: 100%; source: @image-url("../assets/wallpapers/dark-cyber-warrior.png"); image-fit: cover; }
+                        Image { width: 100%; height: 100%; source: @image-url("../assets/wallpapers/dark-cyber-warrior.jpg"); image-fit: cover; }
                     }
                     Text { text: root.lang-en ? "Cyber Warrior" : "赛博战姬"; font-size: 11px * Theme.panel-font; color: Theme.text-secondary; horizontal-alignment: center; }
                 }
@@ -425,15 +425,6 @@ export component InterfacePanel inherits Rectangle {
                     }
                     Text { text: root.lang-en ? "Fantasy 3048" : "幻想3048"; font-size: 11px * Theme.panel-font; color: Theme.text-secondary; horizontal-alignment: center; }
                 }
-                VerticalLayout {
-                    spacing: 5px;
-                    WallpaperSwatch {
-                        selected: root.current-wallpaper == "builtin:miku";
-                        clicked => { root.set-wallpaper("builtin:miku"); }
-                        Image { width: 100%; height: 100%; source: @image-url("../assets/miku.jpg"); image-fit: cover; }
-                    }
-                    Text { text: "Miku"; font-size: 11px * Theme.panel-font; color: Theme.text-secondary; horizontal-alignment: center; }
-                }
             }
 
             Rectangle { height: 10px; }
@@ -444,12 +435,28 @@ export component InterfacePanel inherits Rectangle {
                 VerticalLayout {
                     spacing: 5px;
                     WallpaperSwatch {
+                        selected: root.current-wallpaper == "builtin:light";
+                        clicked => { root.set-wallpaper("builtin:light"); }
+                        Rectangle {
+                            width: 100%; height: 100%;
+                            background: @linear-gradient(145deg, #f4f8ff 0%, #dbe8f8 58%, #bfd3ed 100%);
+                            Rectangle {
+                                x: parent.width * 0.62; y: -10px;
+                                width: 62px; height: 62px; border-radius: 31px;
+                                background: @radial-gradient(circle, #79b9ff99 0%, #79b9ff00 72%);
+                            }
+                        }
+                    }
+                    Text { text: root.lang-en ? "Blue & White" : "蓝白经典"; font-size: 11px * Theme.panel-font; color: Theme.text-secondary; horizontal-alignment: center; }
+                }
+                VerticalLayout {
+                    spacing: 5px;
+                    WallpaperSwatch {
                         selected: root.current-wallpaper == "builtin:light-future-city"
-                            || root.current-wallpaper == "builtin:light"
                             || root.current-wallpaper == "builtin:light-network"
                             || root.current-wallpaper == "builtin:light-lab";
                         clicked => { root.set-wallpaper("builtin:light-future-city"); }
-                        Image { width: 100%; height: 100%; source: @image-url("../assets/wallpapers/light-future-city.png"); image-fit: cover; }
+                        Image { width: 100%; height: 100%; source: @image-url("../assets/wallpapers/light-future-city.jpg"); image-fit: cover; }
                     }
                     Text { text: root.lang-en ? "Future City" : "未来之城"; font-size: 11px * Theme.panel-font; color: Theme.text-secondary; horizontal-alignment: center; }
                 }
@@ -459,10 +466,17 @@ export component InterfacePanel inherits Rectangle {
                         selected: root.current-wallpaper == "builtin:light-crystal-guardian"
                             || root.current-wallpaper == "builtin:light-crystal";
                         clicked => { root.set-wallpaper("builtin:light-crystal-guardian"); }
-                        Image { width: 100%; height: 100%; source: @image-url("../assets/wallpapers/light-crystal-guardian.png"); image-fit: cover; }
+                        Image { width: 100%; height: 100%; source: @image-url("../assets/wallpapers/light-crystal-guardian.jpg"); image-fit: cover; }
                     }
                     Text { text: root.lang-en ? "Crystal Guardian" : "冰晶守望"; font-size: 11px * Theme.panel-font; color: Theme.text-secondary; horizontal-alignment: center; }
                 }
+            }
+
+            Rectangle { height: 10px; }
+            SectionHeader { text: root.lang-en ? "CLASSIC" : "经典壁纸"; height: 20px; }
+            HorizontalLayout {
+                spacing: 11px;
+                alignment: start;
                 VerticalLayout {
                     spacing: 5px;
                     WallpaperSwatch {
@@ -471,6 +485,15 @@ export component InterfacePanel inherits Rectangle {
                         Image { width: 100%; height: 100%; source: @image-url("../assets/aurora.jpg"); image-fit: cover; }
                     }
                     Text { text: root.lang-en ? "Aurora" : "极光"; font-size: 11px * Theme.panel-font; color: Theme.text-secondary; horizontal-alignment: center; }
+                }
+                VerticalLayout {
+                    spacing: 5px;
+                    WallpaperSwatch {
+                        selected: root.current-wallpaper == "builtin:miku";
+                        clicked => { root.set-wallpaper("builtin:miku"); }
+                        Image { width: 100%; height: 100%; source: @image-url("../assets/miku.jpg"); image-fit: cover; }
+                    }
+                    Text { text: "Miku"; font-size: 11px * Theme.panel-font; color: Theme.text-secondary; horizontal-alignment: center; }
                 }
             }
 

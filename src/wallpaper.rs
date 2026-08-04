@@ -48,20 +48,19 @@ pub fn load(id: &str) -> Option<Wallpaper> {
     }
     let buf = match id {
         "builtin:tech" => render_tech(),
+        "builtin:light" => render_builtin(false),
         "builtin:aurora" => decode_aurora()?,
         "builtin:miku" => decode_miku()?,
-        "builtin:dark-neon-city" => decode_bundled("dark-neon-city.png")?,
-        "builtin:dark-cyber-warrior" => decode_bundled("dark-cyber-warrior.png")?,
-        "builtin:light-future-city" => decode_bundled("light-future-city.png")?,
-        "builtin:light-crystal-guardian" => decode_bundled("light-crystal-guardian.png")?,
+        "builtin:dark-neon-city" => decode_bundled("dark-neon-city.jpg")?,
+        "builtin:dark-cyber-warrior" => decode_bundled("dark-cyber-warrior.jpg")?,
+        "builtin:light-future-city" => decode_bundled("light-future-city.jpg")?,
+        "builtin:light-crystal-guardian" => decode_bundled("light-crystal-guardian.jpg")?,
         "builtin:dark" | "builtin:dark-city" | "builtin:dark-network" => {
-            decode_bundled("dark-neon-city.png")?
+            decode_bundled("dark-neon-city.jpg")?
         }
-        "builtin:dark-mecha" => decode_bundled("dark-cyber-warrior.png")?,
-        "builtin:light" | "builtin:light-network" | "builtin:light-lab" => {
-            decode_bundled("light-future-city.png")?
-        }
-        "builtin:light-crystal" => decode_bundled("light-crystal-guardian.png")?,
+        "builtin:dark-mecha" => decode_bundled("dark-cyber-warrior.jpg")?,
+        "builtin:light-network" | "builtin:light-lab" => decode_bundled("light-future-city.jpg")?,
+        "builtin:light-crystal" => decode_bundled("light-crystal-guardian.jpg")?,
         path => decode_custom(path)?,
     };
     let palette = derive_palette(&buf);
@@ -246,11 +245,11 @@ fn hash2(x: u32, y: u32) -> f32 {
 /// Decode one of Probe Shell's bundled wallpaper assets.
 fn decode_bundled(name: &str) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
     let bytes: &[u8] = match name {
-        "dark-neon-city.png" => include_bytes!("../assets/wallpapers/dark-neon-city.png"),
-        "dark-cyber-warrior.png" => include_bytes!("../assets/wallpapers/dark-cyber-warrior.png"),
-        "light-future-city.png" => include_bytes!("../assets/wallpapers/light-future-city.png"),
-        "light-crystal-guardian.png" => {
-            include_bytes!("../assets/wallpapers/light-crystal-guardian.png")
+        "dark-neon-city.jpg" => include_bytes!("../assets/wallpapers/dark-neon-city.jpg"),
+        "dark-cyber-warrior.jpg" => include_bytes!("../assets/wallpapers/dark-cyber-warrior.jpg"),
+        "light-future-city.jpg" => include_bytes!("../assets/wallpapers/light-future-city.jpg"),
+        "light-crystal-guardian.jpg" => {
+            include_bytes!("../assets/wallpapers/light-crystal-guardian.jpg")
         }
         _ => return None,
     };
