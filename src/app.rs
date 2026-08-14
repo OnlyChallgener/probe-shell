@@ -970,6 +970,9 @@ pub fn run() -> Result<()> {
         let splitters_model = splitters_model.clone();
         let tabs_model = tabs_model.clone();
         window.on_content_resized(move |w: f32, h: f32| {
+            if content_size.get() == (w, h) {
+                return;
+            }
             content_size.set((w, h));
             if let Some(win) = weak.upgrade() {
                 refresh_panes(
@@ -1007,16 +1010,24 @@ pub fn run() -> Result<()> {
                     lay.add_tab("welcome".into());
                 }
             }
-            if let Some(w) = weak.upgrade() {
-                refresh_panes(
-                    &w,
-                    &layout.borrow(),
-                    content_size.get(),
-                    &tabs_model,
-                    &panes_model,
-                    &splitters_model,
-                );
-            }
+            let weak_refresh = weak.clone();
+            let layout_refresh = layout.clone();
+            let content_size_refresh = content_size.clone();
+            let tabs_model_refresh = tabs_model.clone();
+            let panes_model_refresh = panes_model.clone();
+            let splitters_model_refresh = splitters_model.clone();
+            slint::Timer::single_shot(std::time::Duration::from_millis(0), move || {
+                if let Some(w) = weak_refresh.upgrade() {
+                    refresh_panes(
+                        &w,
+                        &layout_refresh.borrow(),
+                        content_size_refresh.get(),
+                        &tabs_model_refresh,
+                        &panes_model_refresh,
+                        &splitters_model_refresh,
+                    );
+                }
+            });
         });
     }
     // Per-session SFTP state: collapse + sizes live in each tab's TerminalState so
@@ -7955,8 +7966,8 @@ fn key_to_pty_bytes(key: &str, ctrl: bool, alt: bool, app_cursor: bool) -> Vec<u
         "\u{F701}" => Some(if app_cursor { b"\x1bOB" } else { b"\x1b[B" }), // Down
         "\u{F702}" => Some(if app_cursor { b"\x1bOD" } else { b"\x1b[D" }), // Left
         "\u{F703}" => Some(if app_cursor { b"\x1bOC" } else { b"\x1b[C" }), // Right
-        "\u{F729}" => Some(b"\x1b[H"),                                      // Home
-        "\u{F72B}" => Some(b"\x1b[F"),                                      // End
+        "\u{F729}" => Some(if app_cursor { b"\x1bOH" } else { b"\x1b[H" }), // Home
+        "\u{F72B}" => Some(if app_cursor { b"\x1bOF" } else { b"\x1b[F" }), // End
         "\u{F72C}" => Some(b"\x1b[5~"),                                     // PageUp
         "\u{F72D}" => Some(b"\x1b[6~"),                                     // PageDown
         // Forward-Delete. Slint's canonical key code for the Delete key is
@@ -9013,6 +9024,26 @@ mod key_tests {
                 cp
             );
         }
+    }
+
+    #[test]
+    fn home_end_respect_application_cursor_mode() {
+        assert_eq!(
+            key_to_pty_bytes("\u{F729}", false, false, false),
+            b"\x1b[H".to_vec()
+        );
+        assert_eq!(
+            key_to_pty_bytes("\u{F729}", false, false, true),
+            b"\x1bOH".to_vec()
+        );
+        assert_eq!(
+            key_to_pty_bytes("\u{F72B}", false, false, false),
+            b"\x1b[F".to_vec()
+        );
+        assert_eq!(
+            key_to_pty_bytes("\u{F72B}", false, false, true),
+            b"\x1bOF".to_vec()
+        );
     }
 
     #[test]

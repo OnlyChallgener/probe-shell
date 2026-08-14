@@ -4616,7 +4616,7 @@ dependencies = [
 
 [[package]]
 name = "probe-shell"
-version = "0.7.3"
+version = "0.7.5"
 dependencies = [
  "anyhow",
  "arboard",
