@@ -6,8 +6,8 @@
     $(var.Version)            package version from Cargo.toml
     $(var.CargoTargetBinDir)  compiled target release directory
 
-  IMPORTANT: UpgradeCode is the identity already shipped by Probe Shell
-  v0.7.0-v0.7.3. Do not change it.
+  IMPORTANT: UpgradeCode is the identity already shipped by the real Probe Shell
+  MSI releases starting with v0.7.0. Do not change it.
 -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
     <Product
@@ -19,7 +19,8 @@
         Codepage="1252"
         Version="$(var.Version)">
 
-        <Package Id="*"
+        <Package
+            Id="*"
             Keywords="Installer"
             Description="Probe Shell - lightweight SSH/SFTP terminal client"
             Manufacturer="OnlyChallgener"
@@ -38,23 +39,53 @@
 
         <Icon Id="ProductICO" SourceFile="assets\probe-shell.ico"/>
         <Property Id="ARPPRODUCTICON" Value="ProductICO"/>
+        <Property Id="ARPURLINFOABOUT" Value="https://github.com/OnlyChallgener/probe-shell"/>
+        <Property Id="ARPHELPLINK" Value="https://github.com/OnlyChallgener/probe-shell/issues"/>
+        <Property Id="ARPCONTACT" Value="OnlyChallgener"/>
+        <Property Id="ARPCOMMENTS" Value="Probe Shell SSH/SFTP terminal client"/>
 
         <Directory Id="TARGETDIR" Name="SourceDir">
             <Directory Id="ProgramFiles64Folder">
-                <Directory Id="APPLICATIONFOLDER" Name="Probe Shell">
-                    <Component Id="MainExecutable" Guid="*" Win64="yes">
-                        <File Id="ProbeShellEXE"
-                              Name="probe-shell.exe"
-                              Source="$(var.CargoTargetBinDir)\probe-shell.exe"
-                              KeyPath="yes"/>
-                    </Component>
-                </Directory>
+                <Directory Id="APPLICATIONFOLDER" Name="Probe Shell"/>
+            </Directory>
+            <Directory Id="ProgramMenuFolder">
+                <Directory Id="ProgramMenuDir" Name="Probe Shell"/>
             </Directory>
         </Directory>
+
+        <DirectoryRef Id="APPLICATIONFOLDER">
+            <Component Id="MainExecutable" Guid="*" Win64="yes">
+                <File
+                    Id="ProbeShellEXE"
+                    Name="probe-shell.exe"
+                    Source="$(var.CargoTargetBinDir)\probe-shell.exe"
+                    KeyPath="yes">
+                    <Shortcut
+                        Id="StartMenuShortcut"
+                        Directory="ProgramMenuDir"
+                        Name="Probe Shell"
+                        Description="Probe Shell SSH/SFTP terminal client"
+                        WorkingDirectory="APPLICATIONFOLDER"
+                        Advertise="yes"/>
+                </File>
+                <RemoveFolder
+                    Id="RemoveProgramMenuDir"
+                    Directory="ProgramMenuDir"
+                    On="uninstall"/>
+            </Component>
+        </DirectoryRef>
 
         <Feature Id="MainProgram" Title="Probe Shell" Level="1">
             <ComponentRef Id="MainExecutable"/>
         </Feature>
+
+        <CustomAction
+            Id="SetARPInstallLocation"
+            Property="ARPINSTALLLOCATION"
+            Value="[APPLICATIONFOLDER]"/>
+        <InstallExecuteSequence>
+            <Custom Action="SetARPInstallLocation" After="CostFinalize">NOT REMOVE</Custom>
+        </InstallExecuteSequence>
 
         <Property Id="WIXUI_INSTALLDIR" Value="APPLICATIONFOLDER"/>
         <UIRef Id="WixUI_InstallDir"/>
