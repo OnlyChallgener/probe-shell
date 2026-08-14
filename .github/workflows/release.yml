@@ -113,8 +113,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $label = '${{ needs.check.outputs.label }}'
           $version = '${{ needs.check.outputs.version }}'
-          $exe = (Resolve-Path "target/${{ matrix.target }}/release/probe-shell.exe").Path
-          $escapedExe = [System.Security.SecurityElement]::Escape($exe)
+          $targetBinDir = (Resolve-Path "target/${{ matrix.target }}/release").Path
 
           choco install wixtoolset -y --no-progress
           $candle = Get-ChildItem 'C:\Program Files (x86)' -Filter candle.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -122,33 +121,11 @@ jobs:
           $light = Join-Path $candle.Directory.FullName 'light.exe'
           if (-not (Test-Path $light)) { throw 'light.exe was not found after installing WiX Toolset' }
 
-          @"
-          <?xml version="1.0" encoding="UTF-8"?>
-          <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
-            <Product Id="*" Name="Probe Shell" Language="1033" Version="$version" Manufacturer="OnlyChallgener" UpgradeCode="BDBCF0D4-8911-49BD-8C74-B1130B7B10A7">
-              <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Platform="x64" />
-              <MajorUpgrade DowngradeErrorMessage="A newer version of Probe Shell is already installed." />
-              <MediaTemplate EmbedCab="yes" />
-              <Feature Id="ProductFeature" Title="Probe Shell" Level="1">
-                <ComponentRef Id="ProbeShellExecutable" />
-              </Feature>
-              <Directory Id="TARGETDIR" Name="SourceDir">
-                <Directory Id="ProgramFiles64Folder">
-                  <Directory Id="INSTALLFOLDER" Name="Probe Shell" />
-                </Directory>
-              </Directory>
-              <DirectoryRef Id="INSTALLFOLDER">
-                <Component Id="ProbeShellExecutable" Guid="*" Win64="yes">
-                  <File Id="ProbeShellExe" Source="$escapedExe" KeyPath="yes" />
-                </Component>
-              </DirectoryRef>
-            </Product>
-          </Wix>
-          "@ | Set-Content -Path probe-shell.wxs -Encoding UTF8
-
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          & $candle.FullName -nologo -arch x64 -out dist/probe-shell.wixobj probe-shell.wxs
-          & $light -nologo -out "dist/probe-shell-$label-windows-x86_64.msi" dist/probe-shell.wixobj
+          & $candle.FullName -nologo -arch x64 "-dVersion=$version" "-dCargoTargetBinDir=$targetBinDir" -out dist/probe-shell.wixobj wix/main.wxs
+          if ($LASTEXITCODE -ne 0) { throw "candle failed: $LASTEXITCODE" }
+          & $light -nologo -ext WixUIExtension -out "dist/probe-shell-$label-windows-x86_64.msi" dist/probe-shell.wixobj
+          if ($LASTEXITCODE -ne 0) { throw "light failed: $LASTEXITCODE" }
           Remove-Item dist/probe-shell.wixobj -Force
 
       - name: Package Linux tar.gz and AppImage
