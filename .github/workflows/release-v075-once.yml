@@ -1,0 +1,220 @@
+name: Publish validated v0.7.5 once
+
+"on":
+  push:
+    branches:
+      - release/v0.7.5
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-probe-shell-v0.7.5-once
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v0.7.5
+      - name: Verify validated tag version
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import tomllib
+          from pathlib import Path
+          version = tomllib.loads(Path('Cargo.toml').read_text(encoding='utf-8'))['package']['version']
+          if version != '0.7.5':
+              raise SystemExit(f'Expected 0.7.5, got {version}')
+          PY
+
+  build:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x86_64
+            os: windows-2025
+            target: x86_64-pc-windows-msvc
+          - name: linux-x86_64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - name: macos-aarch64
+            os: macos-15
+            target: aarch64-apple-darwin
+          - name: macos-x86_64
+            os: macos-15-intel
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v0.7.5
+
+      - name: Install Linux GUI dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config cmake file wget \
+            libfontconfig1-dev libfreetype6-dev \
+            libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
+            libgl1-mesa-dev libegl1-mesa-dev libgtk-3-dev libudev-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-v075-${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package Windows portable ZIP
+        if: matrix.name == 'windows-x86_64'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = 'probe-shell-v0.7.5-windows-x86_64'
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/probe-shell.exe" $stage
+          Copy-Item README.md, README.en.md, CHANGELOG.md $stage -ErrorAction SilentlyContinue
+          Compress-Archive -Path $stage -DestinationPath "dist/$stage-portable.zip" -Force
+
+      - name: Build Windows MSI
+        if: matrix.name == 'windows-x86_64'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $targetBinDir = (Resolve-Path "target/${{ matrix.target }}/release").Path
+          choco install wixtoolset -y --no-progress
+          $candle = Get-ChildItem 'C:\Program Files (x86)' -Filter candle.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $candle) { throw 'candle.exe was not found after installing WiX Toolset' }
+          $light = Join-Path $candle.Directory.FullName 'light.exe'
+          if (-not (Test-Path $light)) { throw 'light.exe was not found after installing WiX Toolset' }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          & $candle.FullName -nologo -arch x64 '-dVersion=0.7.5' "-dCargoTargetBinDir=$targetBinDir" -out dist/probe-shell.wixobj wix/main.wxs
+          if ($LASTEXITCODE -ne 0) { throw "candle failed: $LASTEXITCODE" }
+          & $light -nologo -ext WixUIExtension -out 'dist/probe-shell-v0.7.5-windows-x86_64.msi' dist/probe-shell.wixobj
+          if ($LASTEXITCODE -ne 0) { throw "light failed: $LASTEXITCODE" }
+          Remove-Item dist/probe-shell.wixobj -Force
+
+      - name: Package Linux tar.gz and AppImage
+        if: matrix.name == 'linux-x86_64'
+        shell: bash
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          set -euo pipefail
+          stage='probe-shell-v0.7.5-linux-x86_64'
+          mkdir -p "$stage" dist AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/512x512/apps
+          cp "target/${{ matrix.target }}/release/probe-shell" "$stage/"
+          cp README.md README.en.md CHANGELOG.md "$stage/" 2>/dev/null || true
+          tar -czf "dist/${stage}.tar.gz" "$stage"
+          install -m755 "target/${{ matrix.target }}/release/probe-shell" AppDir/usr/bin/probe-shell
+          install -m644 assets/icon@512.png AppDir/usr/share/icons/hicolor/512x512/apps/probe-shell.png
+          cat > AppDir/usr/share/applications/probe-shell.desktop <<'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=Probe Shell
+          Comment=SSH terminal and router-friendly file browser
+          Exec=probe-shell
+          Icon=probe-shell
+          Categories=Network;RemoteAccess;System;
+          Terminal=false
+          EOF
+          wget -q -O linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          wget -q -O linuxdeploy-plugin-appimage https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-x86_64.AppImage
+          chmod +x linuxdeploy linuxdeploy-plugin-appimage
+          ./linuxdeploy \
+            --appdir AppDir \
+            --desktop-file AppDir/usr/share/applications/probe-shell.desktop \
+            --icon-file AppDir/usr/share/icons/hicolor/512x512/apps/probe-shell.png \
+            --output appimage
+          appimage="$(find . -maxdepth 1 -name '*.AppImage' -print -quit)"
+          test -n "$appimage"
+          mv "$appimage" 'dist/probe-shell-v0.7.5-linux-x86_64.AppImage'
+
+      - name: Package macOS application ZIP
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          app='Probe Shell.app'
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" dist probe-shell.iconset
+          cp "target/${{ matrix.target }}/release/probe-shell" "$app/Contents/MacOS/probe-shell"
+          chmod +x "$app/Contents/MacOS/probe-shell"
+          sips -z 16 16 assets/icon@512.png --out probe-shell.iconset/icon_16x16.png >/dev/null
+          sips -z 32 32 assets/icon@512.png --out probe-shell.iconset/icon_16x16@2x.png >/dev/null
+          sips -z 32 32 assets/icon@512.png --out probe-shell.iconset/icon_32x32.png >/dev/null
+          sips -z 64 64 assets/icon@512.png --out probe-shell.iconset/icon_32x32@2x.png >/dev/null
+          sips -z 128 128 assets/icon@512.png --out probe-shell.iconset/icon_128x128.png >/dev/null
+          sips -z 256 256 assets/icon@512.png --out probe-shell.iconset/icon_128x128@2x.png >/dev/null
+          sips -z 256 256 assets/icon@512.png --out probe-shell.iconset/icon_256x256.png >/dev/null
+          sips -z 512 512 assets/icon@512.png --out probe-shell.iconset/icon_256x256@2x.png >/dev/null
+          sips -z 512 512 assets/icon@512.png --out probe-shell.iconset/icon_512x512.png >/dev/null
+          sips -z 1024 1024 assets/icon@512.png --out probe-shell.iconset/icon_512x512@2x.png >/dev/null
+          iconutil -c icns probe-shell.iconset -o "$app/Contents/Resources/probe-shell.icns"
+          cat > "$app/Contents/Info.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleName</key><string>Probe Shell</string>
+            <key>CFBundleDisplayName</key><string>Probe Shell</string>
+            <key>CFBundleIdentifier</key><string>dev.onlychallgener.probe-shell</string>
+            <key>CFBundleExecutable</key><string>probe-shell</string>
+            <key>CFBundleIconFile</key><string>probe-shell</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>0.7.5</string>
+            <key>CFBundleVersion</key><string>0.7.5</string>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict></plist>
+          EOF
+          codesign --force --deep --sign - "$app"
+          codesign --verify --deep --strict "$app"
+          ditto -c -k --keepParent "$app" "dist/probe-shell-v0.7.5-${{ matrix.name }}.app.zip"
+
+      - name: Upload platform artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs:
+      - verify
+      - build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Generate SHA-256 checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%f\n' | sort | xargs sha256sum > SHA256SUMS.txt
+      - name: Publish v0.7.5 release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.7.5
+          name: Probe Shell v0.7.5
+          files: dist/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true
