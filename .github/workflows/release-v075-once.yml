@@ -23,13 +23,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import tomllib
-          from pathlib import Path
-          version = tomllib.loads(Path('Cargo.toml').read_text(encoding='utf-8'))['package']['version']
-          if version != '0.7.5':
-              raise SystemExit(f'Expected 0.7.5, got {version}')
-          PY
+          version="$(awk '/^\[package\]/{in_package=1; next} in_package && /^version = /{gsub(/\"/, "", $3); print $3; exit}' Cargo.toml)"
+          test "$version" = '0.7.5'
 
   build:
     needs: verify
