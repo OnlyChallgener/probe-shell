@@ -28,21 +28,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import os
-          import tomllib
-          from pathlib import Path
-
-          version = tomllib.loads(Path("Cargo.toml").read_text(encoding="utf-8"))["package"]["version"]
-          ref_type = os.environ.get("GITHUB_REF_TYPE", "")
-          ref_name = os.environ.get("GITHUB_REF_NAME", "")
-          if ref_type == "tag" and ref_name != f"v{version}":
-              raise SystemExit(f"Tag {ref_name} does not match Cargo version {version}")
-          label = ref_name if ref_type == "tag" else f"dev-{os.environ['GITHUB_RUN_NUMBER']}"
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"version={version}\n")
-              output.write(f"label={label}\n")
-          PY
+          version="$(sed -n '/^\[package\]/,/^\[/ s/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)"
+          test -n "$version"
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${GITHUB_REF_NAME:-}" != "v${version}" ]]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match Cargo version ${version}" >&2
+            exit 1
+          fi
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            label="${GITHUB_REF_NAME}"
+          else
+            label="dev-${GITHUB_RUN_NUMBER}"
+          fi
+          printf 'version=%s\nlabel=%s\n' "$version" "$label" >> "$GITHUB_OUTPUT"
 
   build:
     name: ${{ matrix.name }}
@@ -106,50 +103,30 @@ jobs:
           Copy-Item README.md, README.en.md, CHANGELOG.md $stage -ErrorAction SilentlyContinue
           Compress-Archive -Path $stage -DestinationPath "dist/$stage-portable.zip" -Force
 
-      - name: Build Windows MSI
+      - name: Build and inspect Windows MSI
         if: matrix.name == 'windows-x86_64'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $label = '${{ needs.check.outputs.label }}'
           $version = '${{ needs.check.outputs.version }}'
-          $exe = (Resolve-Path "target/${{ matrix.target }}/release/probe-shell.exe").Path
-          $escapedExe = [System.Security.SecurityElement]::Escape($exe)
+          $targetBinDir = (Resolve-Path "target/${{ matrix.target }}/release").Path
+          ./scripts/build-windows-msi.ps1 `
+            -Version $version `
+            -CargoTargetBinDir $targetBinDir `
+            -OutputMsi "dist/probe-shell-$label-windows-x86_64.msi"
 
-          choco install wixtoolset -y --no-progress
-          $candle = Get-ChildItem 'C:\Program Files (x86)' -Filter candle.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $candle) { throw 'candle.exe was not found after installing WiX Toolset' }
-          $light = Join-Path $candle.Directory.FullName 'light.exe'
-          if (-not (Test-Path $light)) { throw 'light.exe was not found after installing WiX Toolset' }
-
-          @"
-          <?xml version="1.0" encoding="UTF-8"?>
-          <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
-            <Product Id="*" Name="Probe Shell" Language="1033" Version="$version" Manufacturer="OnlyChallgener" UpgradeCode="BDBCF0D4-8911-49BD-8C74-B1130B7B10A7">
-              <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Platform="x64" />
-              <MajorUpgrade DowngradeErrorMessage="A newer version of Probe Shell is already installed." />
-              <MediaTemplate EmbedCab="yes" />
-              <Feature Id="ProductFeature" Title="Probe Shell" Level="1">
-                <ComponentRef Id="ProbeShellExecutable" />
-              </Feature>
-              <Directory Id="TARGETDIR" Name="SourceDir">
-                <Directory Id="ProgramFiles64Folder">
-                  <Directory Id="INSTALLFOLDER" Name="Probe Shell" />
-                </Directory>
-              </Directory>
-              <DirectoryRef Id="INSTALLFOLDER">
-                <Component Id="ProbeShellExecutable" Guid="*" Win64="yes">
-                  <File Id="ProbeShellExe" Source="$escapedExe" KeyPath="yes" />
-                </Component>
-              </DirectoryRef>
-            </Product>
-          </Wix>
-          "@ | Set-Content -Path probe-shell.wxs -Encoding UTF8
-
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          & $candle.FullName -nologo -arch x64 -out dist/probe-shell.wixobj probe-shell.wxs
-          & $light -nologo -out "dist/probe-shell-$label-windows-x86_64.msi" dist/probe-shell.wixobj
-          Remove-Item dist/probe-shell.wixobj -Force
+      - name: Verify Windows MSI install, upgrade and uninstall
+        if: matrix.name == 'windows-x86_64'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $label = '${{ needs.check.outputs.label }}'
+          $version = '${{ needs.check.outputs.version }}'
+          ./scripts/verify-windows-msi.ps1 `
+            -CandidateMsi "dist/probe-shell-$label-windows-x86_64.msi" `
+            -SourceExe "target/${{ matrix.target }}/release/probe-shell.exe" `
+            -CandidateVersion $version
 
       - name: Package Linux tar.gz and AppImage
         if: matrix.name == 'linux-x86_64'

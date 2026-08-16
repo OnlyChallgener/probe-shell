@@ -3034,14 +3034,23 @@ async fn read_text_guarded(
         )
         .into());
     }
-    let mut f = sftp
+    let f = sftp
         .open(remote)
         .await
         .map_err(|e| format!("{}: {e}", t("打开失败", "Open failed")))?;
+    let mut limited = f.take(MAX_EDIT_BYTES + 1);
     let mut bytes = Vec::new();
-    f.read_to_end(&mut bytes)
+    limited
+        .read_to_end(&mut bytes)
         .await
         .map_err(|e| format!("{}: {e}", t("读取失败", "Read failed")))?;
+    if bytes.len() as u64 > MAX_EDIT_BYTES {
+        return Err(t(
+            "文件过大,无法在内置编辑器中打开(上限 2 MB),请下载查看",
+            "Too large for the built-in editor (2 MB limit); download it instead",
+        )
+        .into());
+    }
     // Control characters (beyond tab/newline/CR) have no glyph — they render as
     // tofu boxes — and round-tripping them through the editor risks corrupting
     // the file (e.g. .viminfo). Treat such files as binary (#70).
