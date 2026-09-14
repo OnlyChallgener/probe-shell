@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$CandidateMsi,
     [Parameter(Mandatory = $true)][string]$SourceExe,
-    [string]$CandidateVersion = '0.7.7'
+    [string]$CandidateVersion = '0.7.8'
 )
 
 $ErrorActionPreference = 'Stop'
