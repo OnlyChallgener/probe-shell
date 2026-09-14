@@ -135,8 +135,8 @@ msgstr "Directory tree"
 msgid "Size"
 msgstr "Size"
 
-msgid "Modified"
-msgstr "Modified"
+msgid "Unsaved changes"
+msgstr "Unsaved changes"
 
 msgid "Loading..."
 msgstr "Loading..."
@@ -395,3 +395,63 @@ msgstr "Duplicate connection"
 
 msgid "Copied"
 msgstr "Copied"
+
+msgid "Cut"
+msgstr "Cut"
+
+msgid "Show password"
+msgstr "Show password"
+
+msgid "Hide password"
+msgstr "Hide password"
+
+msgid "Select All"
+msgstr "Select All"
+
+msgid "e.g. Production / Database"
+msgstr "e.g. Production / Database"
+
+msgid "Note (optional)"
+msgstr "Note (optional)"
+
+msgid "Anything to remember about this host"
+msgstr "Anything to remember about this host"
+
+msgid "Please enter a host / IP address."
+msgstr "Please enter a host / IP address."
+
+msgid "Prompted on connect if blank"
+msgstr "Prompted on connect if blank"
+
+msgid "Proxy address"
+msgstr "Proxy address"
+
+msgid "No proxy — use $ALL_PROXY or connect directly"
+msgstr "No proxy — use $ALL_PROXY or connect directly"
+
+msgid "Format: host:port  (with auth: user:pass@host:port)"
+msgstr "Format: host:port  (with auth: user:pass@host:port)"
+
+msgid "Name (optional)"
+msgstr "Name (optional)"
+
+msgid "Search history"
+msgstr "Search history"
+
+msgid "Search sessions, host, user..."
+msgstr "Search sessions, host, user..."
+
+msgid "No match"
+msgstr "No match"
+
+msgid "Group (optional)"
+msgstr "Group (optional)"
+
+msgid "Rename group"
+msgstr "Rename group"
+
+msgid "Disable shell integration (Windows / pwsh server)"
+msgstr "Disable shell integration (Windows / pwsh server)"
+
+msgid "Turn on for Windows servers: skips the cwd-follow hook and monitor that assume a POSIX shell and otherwise break the shell."
+msgstr "Turn on for Windows servers: skips the cwd-follow hook and monitor that assume a POSIX shell and otherwise break the shell."

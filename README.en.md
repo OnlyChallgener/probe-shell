@@ -46,11 +46,28 @@ It remains licensed as `MIT OR Apache-2.0`; original license and contributor cre
 
 ## Download & install
 
-The current Probe Shell preview workflow builds **Windows x86_64** by default and publishes artifacts to the [Releases](https://github.com/OnlyChallenger/probe-shell/releases) page. Manual `Release` workflow runs produce the portable ZIP by default; enable `build_msi` when you also need the installer.
+The `Release` workflow publishes artifacts to the [Releases](https://github.com/OnlyChallgener/probe-shell/releases) page: Windows x86_64 provides both a portable ZIP and an MSI, Linux x86_64 provides tar.gz and AppImage packages, and macOS provides application ZIPs for Apple Silicon (aarch64) and Intel (x86_64).
 
 ### Windows
 
-Download `probe-shell-*-windows-x86_64.zip`, unzip, and run `probe-shell.exe`.
+Windows provides two release formats:
+
+- `probe-shell-*-windows-x86_64-portable.zip`: the portable build. Unzip it
+  and run `probe-shell.exe` directly; it does not install anything.
+- `probe-shell-*-windows-x86_64.msi`: a standard Windows Installer package.
+  Double-click the `.msi` to open the installation wizard, or run
+  `msiexec /i "probe-shell-*-windows-x86_64.msi"`.
+
+After MSI installation, seeing only one `probe-shell.exe` in the install
+directory is expected. Probe Shell is a native single-file application built
+with Rust + Slint; the MSI provides installation, uninstallation, shortcuts,
+and Windows Installer registration. It is not a portable ZIP wrapped in an
+installer.
+
+If double-clicking the MSI only opens an extraction screen or file listing,
+the `.msi` file association has likely been taken over by an archive utility;
+that is not the installer's own behavior. Open it with Windows Installer or
+use the `msiexec /i` command above to launch the system installation wizard.
 
 ### Linux
 
@@ -200,7 +217,9 @@ Dual-licensed under MIT OR Apache-2.0.
 
 ## Probe Shell preview release note
 
-The current preview Release workflow intentionally builds only the Windows x86_64 portable ZIP. AUR publishing, MSI, Linux, and macOS packaging are disabled for now to keep releases stable while the project is being customized.
+The current `Release` workflow publishes Windows x86_64 portable ZIP and MSI
+artifacts, Linux x86_64 tar.gz and AppImage artifacts, and macOS application
+ZIPs for both Apple Silicon (aarch64) and Intel (x86_64).
 
 ## v0.6 SFTP / file-browser fix
 

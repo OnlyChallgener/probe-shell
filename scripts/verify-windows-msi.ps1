@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$CandidateMsi,
     [Parameter(Mandatory = $true)][string]$SourceExe,
-    [string]$CandidateVersion = '0.7.6'
+    [string]$CandidateVersion = '0.7.7'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -53,6 +53,39 @@ function Invoke-Msi([string]$Arguments, [string]$LogName) {
         if (Test-Path $log) { Get-Content $log -Tail 200 }
         throw "msiexec failed with exit code $($p.ExitCode): $Arguments"
     }
+}
+
+function Get-MsiQueryValues([string]$MsiPath, [string]$Query, [int]$FieldIndex = 1) {
+    $installer = New-Object -ComObject WindowsInstaller.Installer
+    $database = $installer.OpenDatabase($MsiPath, 0)
+    $view = $database.OpenView($Query)
+    $view.Execute()
+
+    $values = @()
+    while ($record = $view.Fetch()) {
+        $values += $record.StringData($FieldIndex)
+    }
+    return $values
+}
+
+function Assert-InteractiveInstallerUi([string]$MsiPath) {
+    # Silent install tests prove that the package can copy/register/uninstall,
+    # but they do not catch an accidentally stripped interactive wizard. A user
+    # double-clicking the MSI must see the normal InstallDir flow rather than a
+    # package that behaves like an opaque self-extractor.
+    $dialogs = @(Get-MsiQueryValues $MsiPath 'SELECT `Dialog` FROM `Dialog`')
+    $requiredDialogs = @('WelcomeDlg', 'InstallDirDlg', 'VerifyReadyDlg', 'ProgressDlg', 'ExitDialog')
+    $missingDialogs = @($requiredDialogs | Where-Object { $_ -notin $dialogs })
+    if ($missingDialogs.Count -ne 0) {
+        throw "MSI interactive UI is incomplete; missing dialogs: $($missingDialogs -join ', ')"
+    }
+
+    $uiActions = @(Get-MsiQueryValues $MsiPath 'SELECT `Action` FROM `InstallUISequence`')
+    if ($uiActions.Count -eq 0) {
+        throw 'MSI has no InstallUISequence actions; double-click installation would have no wizard'
+    }
+
+    Write-Host "Interactive MSI UI verified: $($dialogs.Count) dialogs, $($uiActions.Count) UI actions"
 }
 
 function Get-ProbeEntries {
@@ -161,6 +194,7 @@ function Remove-AnyProbeShell {
     }
 }
 
+Assert-InteractiveInstallerUi $CandidateMsi
 Remove-AnyProbeShell
 Assert-Clean $defaultDir
 

@@ -46,13 +46,28 @@ Probe Shell 基于原开源项目重命名和改造，继续遵循 `MIT OR Apach
 
 ## 下载与安装
 
-当前 Probe Shell 预览版的 GitHub Actions 默认只构建 **Windows x86_64**。
-发布到 [Releases](https://github.com/OnlyChallgener/probe-shell/releases) 页面。
-手动运行 `Release` workflow 时默认只生成 ZIP；需要安装包时勾选 `build_msi`。
+GitHub Actions 的 `Release` workflow 会将各平台发布物上传到
+[Releases](https://github.com/OnlyChallgener/probe-shell/releases) 页面：
+Windows x86_64 同时提供 portable ZIP 和 MSI，Linux x86_64 提供 tar.gz 与
+AppImage，macOS 提供 Apple Silicon（aarch64）和 Intel（x86_64）应用 ZIP。
 
 ### Windows
 
-下载 `probe-shell-*-windows-x86_64.zip`，解压后双击 `probe-shell.exe`。
+Windows 提供两种发布物：
+
+- `probe-shell-*-windows-x86_64-portable.zip`：便携版，解压后直接双击其中的
+  `probe-shell.exe` 即可使用，不写入安装程序信息。
+- `probe-shell-*-windows-x86_64.msi`：标准 Windows Installer 安装包。双击
+  `.msi` 按向导安装；也可以运行
+  `msiexec /i "probe-shell-*-windows-x86_64.msi"`。
+
+MSI 安装后目录中只有一个 `probe-shell.exe` 是正常设计：Probe Shell 是
+Rust + Slint 编译的单文件原生应用，MSI 只负责安装、卸载、快捷方式和
+Windows Installer 注册信息。它不是把 portable ZIP 套在安装器外面。
+
+如果双击 MSI 后只出现“解压”界面或文件列表，通常是 `.msi` 文件关联被压缩软件
+接管了，并非安装包自身的行为。请右键选择 Windows Installer 打开，或使用上面的
+`msiexec /i` 命令启动系统安装向导。
 
 ### Linux
 
@@ -199,7 +214,9 @@ MIT OR Apache-2.0（双许可）。
 
 ## Probe Shell preview release note
 
-The current preview Release workflow intentionally builds only the Windows x86_64 portable ZIP. AUR publishing, MSI, Linux, and macOS packaging are disabled for now to keep releases stable while the project is being customized.
+The current `Release` workflow publishes Windows x86_64 portable ZIP and MSI
+artifacts, Linux x86_64 tar.gz and AppImage artifacts, and macOS application
+ZIPs for both Apple Silicon (aarch64) and Intel (x86_64).
 
 ## v0.6 SFTP / 文件浏览修复
 

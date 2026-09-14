@@ -1,5 +1,5 @@
 import { Theme } from "theme.slint";
-import { IconButton, PrimaryButton, GhostButton } from "widgets.slint";
+import { EditableInput, IconButton, PrimaryButton, GhostButton } from "widgets.slint";
 import { ScrollView } from "std-widgets.slint";
 
 export struct SessionInfo {
@@ -384,7 +384,7 @@ export component Welcome inherits Rectangle {
                         font-size: Theme.fs-sm;
                         vertical-alignment: center;
                     }
-                    search-input := TextInput {
+                    search-input := EditableInput {
                         x: 32px;
                         y: 0px;
                         width: parent.width - 42px;

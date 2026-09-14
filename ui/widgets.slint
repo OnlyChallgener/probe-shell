@@ -1,5 +1,58 @@
 import { Theme } from "theme.slint";
 
+// A TextInput with the shared editing menu. Inherit the primitive itself so
+// bindings, sizing, IME, selection APIs and per-field callbacks stay intact.
+export component EditableInput inherits TextInput {
+    // Credential sensitivity is independent of whether the text is masked.
+    in property <bool> sensitive: false;
+    private property <bool> copy-protected: root.sensitive || root.input-type == InputType.password;
+    // Slint 1.16's TextInput.copy()/cut() can export password text. Fields that
+    // override key-pressed must also call this guard before their own handler.
+    public pure function password-copy-shortcut(e: KeyEvent) -> bool {
+        return root.copy-protected && (
+            ((e.modifiers.control || e.modifiers.meta)
+                && (e.text == "c" || e.text == "C" || e.text == "\u{0003}"
+                    || e.text == "x" || e.text == "X" || e.text == "\u{0018}"
+                    || e.text == Key.Insert))
+            || (e.modifiers.shift && e.text == Key.Delete));
+    }
+
+    key-pressed(e) => {
+        if (root.password-copy-shortcut(e)) { accept } else { reject }
+    }
+
+    // This non-visual child only handles the context-menu gesture; normal
+    // mouse input continues to the TextInput without moving its selection.
+    ContextMenuArea {
+        width: root.width;
+        height: root.height;
+        enabled: root.enabled;
+        Menu {
+            MenuItem {
+                title: @tr("Cut");
+                enabled: root.enabled && !root.read-only
+                    && !root.copy-protected && root.text != "";
+                activated => { root.focus(); root.cut(); }
+            }
+            MenuItem {
+                title: @tr("Copy");
+                enabled: root.enabled && !root.copy-protected && root.text != "";
+                activated => { root.focus(); root.copy(); }
+            }
+            MenuItem {
+                title: @tr("Paste");
+                enabled: root.enabled && !root.read-only;
+                activated => { root.focus(); root.paste(); }
+            }
+            MenuItem {
+                title: @tr("Select All");
+                enabled: root.enabled && root.text != "";
+                activated => { root.focus(); root.select-all(); }
+            }
+        }
+    }
+}
+
 // --- IconButton ------------------------------------------------------------
 // A small square action button that accepts a single-character glyph (or short text).
 // Keeps visual language consistent across the app.
@@ -123,11 +176,13 @@ export component LabeledInput inherits VerticalLayout {
     in property <string> placeholder;
     in-out property <string> value;
     in property <bool> password: false;
+    private property <bool> password-visible: false;
     in property <bool> auto-focus: false;   // grab focus when shown (dialog fields)
     callback accepted();   // Enter pressed in the field
     callback canceled();   // Esc pressed in the field (#140-3)
     spacing: 4px;
     public function focus-input() { input.focus(); }
+    changed password => { root.password-visible = false; }
 
     Text {
         text: label;
@@ -142,10 +197,10 @@ export component LabeledInput inherits VerticalLayout {
         border-color: input.has-focus ? Theme.accent : Theme.border-subtle;
         background: Theme.bg-root;
 
-        input := TextInput {
+        input := EditableInput {
             x: 10px;
             y: 0px;
-            width: parent.width - 20px;
+            width: parent.width - (root.password ? 48px : 20px);
             height: parent.height;
             text <=> root.value;
             color: Theme.text-primary;
@@ -156,11 +211,16 @@ export component LabeledInput inherits VerticalLayout {
             font-size: Theme.fs-md;
             vertical-alignment: center;
             single-line: true;
-            input-type: root.password ? InputType.password : InputType.text;
+            sensitive: root.password;
+            input-type: root.password && !root.password-visible ? InputType.password : InputType.text;
             init => { if (root.auto-focus) { self.focus(); } }
+            changed has-focus => {
+                if (!self.has-focus) { root.password-visible = false; }
+            }
             accepted => { root.accepted(); }
             key-pressed(e) => {
-                if (e.text == Key.Escape) { root.canceled(); accept }
+                if (self.password-copy-shortcut(e)) { accept }
+                else if (e.text == Key.Escape) { root.canceled(); accept }
                 else { reject }   // let TextInput handle normal typing
             }
         }
@@ -171,11 +231,40 @@ export component LabeledInput inherits VerticalLayout {
         if input.text == "" : Text {
             x: 10px;
             y: 0px;
+            width: parent.width - (root.password ? 48px : 20px);
             height: parent.height;
             text: placeholder;
+            overflow: elide;
             color: Theme.text-muted;
             font-size: Theme.fs-md;
             vertical-alignment: center;
+        }
+
+        if root.password : Rectangle {
+            x: parent.width - 32px;
+            y: 2px;
+            width: 28px;
+            height: 28px;
+            border-radius: Theme.radius-sm;
+            background: eye-touch.has-hover ? Theme.bg-hover : transparent;
+            accessible-role: button;
+            accessible-label: root.password-visible ? @tr("Hide password") : @tr("Show password");
+            accessible-action-default => { root.password-visible = !root.password-visible; }
+
+            Text {
+                text: root.password-visible ? "\u{E8F5}" : "\u{E8F4}";
+                font-family: "Material Icons";
+                font-size: Theme.fs-md;
+                color: eye-touch.has-hover ? Theme.text-primary : Theme.text-secondary;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            // TouchArea doesn't take keyboard focus. Only the masking changes;
+            // keep the existing TextInput, text binding, cursor and selection.
+            eye-touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.password-visible = !root.password-visible; }
+            }
         }
     }
 }

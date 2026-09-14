@@ -1866,6 +1866,39 @@ fn handle_file_drop(_win: &AppWindow, _sftp_handles: &SftpHandles, _path: String
 // Model helpers
 // ---------------------------------------------------------------------------
 
+/// Normalize a network host before persisting it.  Keeping this separate makes
+/// the dialog validation and the stored value agree about whitespace-only input.
+fn normalized_session_host(host: &str) -> String {
+    host.trim().to_string()
+}
+
+/// Convert a dialog port to a valid network port without lossy integer casts.
+/// Invalid values use the transport's protocol default.
+fn session_port_or_default(port: i32, default_port: u16) -> u16 {
+    u16::try_from(port)
+        .ok()
+        .filter(|&port| port > 0)
+        .unwrap_or(default_port)
+}
+
+/// Resolve the credential saved by the session dialog.  A hidden, empty edit
+/// field means "keep" only for the same auth method; credentials must not cross
+/// from password to key authentication (or vice versa).
+fn saved_session_password(
+    auth: AuthMethod,
+    typed_password: &str,
+    previous: Option<&Session>,
+) -> Secret {
+    if !typed_password.is_empty() {
+        Secret::new(typed_password.to_string())
+    } else {
+        match previous.filter(|session| session.auth == auth) {
+            Some(session) => session.password.clone(),
+            None => Secret::default(),
+        }
+    }
+}
+
 /// Parse the batch-import textarea (#150). Each non-empty, non-`#` line is
 /// `host|port|user|password|name`; trailing fields are optional (port → 22,
 /// user → root, password → none, name → user@host). A leading header row such as
@@ -2273,7 +2306,7 @@ fn wire_session_callbacks(
             w.set_dialog_stop_bits("1".into());
             w.set_dialog_parity("none".into());
             w.set_dialog_flow("none".into());
-            w.set_dialog_disable_shell_integration(false);
+            w.set_dialog_disable_shell_integration(empty.disable_shell_integration);
             w.set_dialog_note("".into());
             w.set_dialog_editing(false);
             w.set_dialog_open(true);
@@ -2645,27 +2678,32 @@ fn wire_session_callbacks(
         let edit_forwards = edit_forwards.clone();
         window.on_session_dialog_submit(move |draft: SessionDraft| {
             let id = draft.id.to_string();
-            // The edit dialog never echoes the real password (issue #10): a blank
-            // field while editing means "keep the existing password" rather than
-            // "clear it".  Only overwrite when the user actually typed something.
-            let password = if draft.password.is_empty() {
-                store
-                    .borrow()
-                    .get(&id)
-                    .map(|s| s.password.clone())
-                    .unwrap_or_default()
-            } else {
-                Secret::new(draft.password.to_string())
-            };
             let kind = crate::config::SessionKind::from_str(&draft.kind.to_string());
+            let host = normalized_session_host(draft.host.as_str());
+            // Slint only rejects an exactly empty host.  Treat whitespace-only
+            // SSH/Telnet hosts the same way and clear the field so its existing
+            // inline `host-missing` message is shown.
+            if kind != crate::config::SessionKind::Serial && host.is_empty() {
+                if let Some(w) = weak.upgrade() {
+                    w.set_dialog_host("".into());
+                    w.set_host_missing(true);
+                }
+                return;
+            }
+            let auth = AuthMethod::from_str(&draft.auth.to_string());
+            // The edit dialog deliberately does not echo credentials.  An empty
+            // field preserves an existing credential only when its auth method is
+            // unchanged; switching methods must never carry it across.
+            let password =
+                saved_session_password(auth, draft.password.as_str(), store.borrow().get(&id));
             // Auto-name: serial → port label; otherwise user@host, or just the
             // host when no username was given (#110).
             let auto_name = match kind {
                 crate::config::SessionKind::Serial => {
                     format!("{} @{}", draft.serial_port, draft.baud_rate)
                 }
-                _ if draft.user.trim().is_empty() => draft.host.to_string(),
-                _ => format!("{}@{}", draft.user, draft.host),
+                _ if draft.user.trim().is_empty() => host.clone(),
+                _ => format!("{}@{}", draft.user, host),
             };
             // Telnet defaults to port 23, SSH to 22; serial ignores port.
             let default_port = if kind == crate::config::SessionKind::Telnet {
@@ -2680,14 +2718,10 @@ fn wire_session_callbacks(
                 } else {
                     draft.name.to_string()
                 },
-                host: draft.host.to_string(),
-                port: if draft.port <= 0 {
-                    default_port
-                } else {
-                    draft.port as u16
-                },
+                host,
+                port: session_port_or_default(draft.port, default_port),
                 user: draft.user.to_string(),
-                auth: AuthMethod::from_str(&draft.auth.to_string()),
+                auth,
                 password,
                 // Store the key path with forward slashes uniformly.
                 private_key_path: draft.private_key_path.to_string().replace('\\', "/"),
@@ -4006,6 +4040,16 @@ fn refresh_sidebar(
         win.set_mem_detail("".into());
         win.set_swap_detail("".into());
     };
+    let clear_remote_res = |win: &AppWindow| {
+        clear_stats(win);
+        win.set_net_top_up("--".into());
+        win.set_net_top_down("--".into());
+        win.set_net_top_history(normalized_model(&[]));
+        win.set_net_show_selector(false);
+        win.set_net_selected("".into());
+        win.set_net_ifaces(ModelRc::from(Rc::new(VecModel::<SharedString>::default())));
+        win.set_disks(disk_model(&[]));
+    };
 
     // Process monitor (#23) lives in a shared model (the AppWindow and the
     // detachable ProcWindow point at the same VecModel), so mutate it in place
@@ -4062,9 +4106,8 @@ fn refresh_sidebar(
             win.set_conn_state(2);
             win.set_connection_state(format!("{} {}", st.host, t("已断开", "disconnected")).into());
             win.set_conn_host(conn_ip(&st.host).into());
-            win.set_resource_title(t("服务器资源", "Server resources").into());
-            clear_stats(win);
-            set_top_local(win);
+            win.set_resource_title(t("服务器资源不可用", "Server resources unavailable").into());
+            clear_remote_res(win);
         }
         // Still connecting.
         Some(st) => {
@@ -4072,8 +4115,7 @@ fn refresh_sidebar(
             win.set_connection_state(format!("{} {}", t("连接中", "Connecting"), st.host).into());
             win.set_conn_host(conn_ip(&st.host).into());
             win.set_resource_title(t("服务器资源", "Server resources").into());
-            clear_stats(win);
-            set_top_local(win);
+            clear_remote_res(win);
         }
         // Welcome tab (or unknown) → local machine top + bottom.
         None => {
@@ -9001,6 +9043,36 @@ fn parent_path(path: &str) -> String {
 #[cfg(test)]
 mod key_tests {
     use super::*;
+
+    #[test]
+    fn session_save_normalizes_network_inputs() {
+        assert_eq!(normalized_session_host("  example.test \t"), "example.test");
+        assert!(normalized_session_host(" \r\n ").is_empty());
+
+        assert_eq!(session_port_or_default(22, 22), 22);
+        assert_eq!(session_port_or_default(0, 22), 22);
+        assert_eq!(session_port_or_default(-1, 22), 22);
+        assert_eq!(session_port_or_default(65_536, 22), 22);
+        assert_eq!(session_port_or_default(i32::MAX, 23), 23);
+        assert_eq!(session_port_or_default(23, 23), 23);
+    }
+
+    #[test]
+    fn session_save_keeps_credentials_only_for_unchanged_auth() {
+        let mut previous = Session::new_empty();
+        previous.auth = AuthMethod::Password;
+        previous.password = Secret::new("stored-password");
+
+        assert_eq!(
+            saved_session_password(AuthMethod::Password, "", Some(&previous)).as_str(),
+            "stored-password"
+        );
+        assert!(saved_session_password(AuthMethod::Key, "", Some(&previous)).is_empty());
+        assert_eq!(
+            saved_session_password(AuthMethod::Key, "new-key-passphrase", Some(&previous)).as_str(),
+            "new-key-passphrase"
+        );
+    }
 
     #[test]
     fn bare_alt_is_not_forwarded() {

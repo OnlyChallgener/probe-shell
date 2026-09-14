@@ -1,4 +1,5 @@
 import { Theme } from "theme.slint";
+import { EditableInput } from "widgets.slint";
 import { ScrollView } from "std-widgets.slint";
 
 export struct SftpEntry {
@@ -615,7 +616,7 @@ export component SftpPanel inherits Rectangle {
                     background: Theme.bg-root;
                     border-width: 1px;
                     border-color: path-input.has-focus ? Theme.accent : Theme.border-subtle;
-                    path-input := TextInput {
+                    path-input := EditableInput {
                         x: 6px;
                         width: parent.width - 12px;
                         height: parent.height;
@@ -635,7 +636,7 @@ export component SftpPanel inherits Rectangle {
                     background: Theme.bg-root;
                     border-width: 1px;
                     border-color: file-search.has-focus ? Theme.accent : Theme.border-subtle;
-                    file-search := TextInput {
+                    file-search := EditableInput {
                         x: 24px;
                         width: parent.width - (root.search-mode || self.text != "" ? 48px : 30px);
                         height: parent.height;
@@ -854,7 +855,7 @@ export component SftpPanel inherits Rectangle {
                                         border-width: 1px;
                                         border-color: qa-path-input.has-focus ? Theme.accent : Theme.border-subtle;
                                         background: Theme.bg-root;
-                                        qa-path-input := TextInput { x: 9px; width: parent.width - 18px; height: parent.height; text <=> root.qa-manual-path; single-line: true; font-size: Theme.fs-sm; color: Theme.text-primary; vertical-alignment: center; }
+                                        qa-path-input := EditableInput { x: 9px; width: parent.width - 18px; height: parent.height; text <=> root.qa-manual-path; single-line: true; font-size: Theme.fs-sm; color: Theme.text-primary; vertical-alignment: center; }
                                     }
                                 }
                                 HorizontalLayout {
@@ -863,12 +864,12 @@ export component SftpPanel inherits Rectangle {
                                     Text { width: 54px; text: @tr("备注"); color: Theme.text-secondary; font-size: Theme.fs-xs; vertical-alignment: center; }
                                     Rectangle {
                                         horizontal-stretch: 1; min-width: 120px; border-radius: Theme.radius-sm; border-width: 1px; border-color: qa-label-input.has-focus ? Theme.accent : Theme.border-subtle; background: Theme.bg-root;
-                                        qa-label-input := TextInput { x: 9px; width: parent.width - 18px; height: parent.height; text <=> root.qa-manual-label; single-line: true; font-size: Theme.fs-sm; color: Theme.text-primary; vertical-alignment: center; }
+                                        qa-label-input := EditableInput { x: 9px; width: parent.width - 18px; height: parent.height; text <=> root.qa-manual-label; single-line: true; font-size: Theme.fs-sm; color: Theme.text-primary; vertical-alignment: center; }
                                     }
                                     Text { width: 54px; text: @tr("分组"); color: Theme.text-secondary; font-size: Theme.fs-xs; vertical-alignment: center; }
                                     Rectangle {
                                         horizontal-stretch: 1; min-width: 120px; border-radius: Theme.radius-sm; border-width: 1px; border-color: qa-group-input.has-focus ? Theme.accent : Theme.border-subtle; background: Theme.bg-root;
-                                        qa-group-input := TextInput { x: 9px; width: parent.width - 18px; height: parent.height; text <=> root.qa-manual-group; single-line: true; font-size: Theme.fs-sm; color: Theme.text-primary; vertical-alignment: center; }
+                                        qa-group-input := EditableInput { x: 9px; width: parent.width - 18px; height: parent.height; text <=> root.qa-manual-group; single-line: true; font-size: Theme.fs-sm; color: Theme.text-primary; vertical-alignment: center; }
                                     }
                                     if root.qa-edit-index >= 0 : Rectangle {
                                         width: 54px; border-radius: Theme.radius-sm; background: cancel-edit-ta.has-hover ? Theme.bg-hover : Theme.bg-elevated;

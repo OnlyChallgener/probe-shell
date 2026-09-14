@@ -1,6 +1,6 @@
 import { Theme } from "theme.slint";
 import { SftpPanel, SftpEntry, SftpTreeNode } from "sftp_panel.slint";
-import { DockExpandButton, ToolStrip } from "widgets.slint";
+import { EditableInput, DockExpandButton, ToolStrip } from "widgets.slint";
 
 // Embed the terminal fonts here too so the cell-probe Text below measures
 // with the CORRECT font (the built-in Meatshell Mono), not a system fallback.
@@ -870,7 +870,7 @@ export component TerminalView inherits Rectangle {
                         background: Theme.bg-root;
                         border-radius: 3px;
                         horizontal-stretch: 1;
-                        find-input := TextInput {
+                        find-input := EditableInput {
                             x: 6px;
                             width: parent.width - 12px;
                             height: parent.height;
@@ -964,7 +964,7 @@ export component TerminalView inherits Rectangle {
                     border-width: 1px;
                     border-color: cmd-input.has-focus ? Theme.accent : Theme.border-subtle;
                     background: Theme.bg-root;
-                    cmd-input := TextInput {
+                    cmd-input := EditableInput {
                         x: 8px;
                         width: parent.width - 16px;
                         height: parent.height;
@@ -1418,7 +1418,7 @@ export component TerminalView inherits Rectangle {
                                    vertical-alignment: center; }
                             Rectangle {
                                 horizontal-stretch: 1;
-                                hist-search := TextInput {
+                                hist-search := EditableInput {
                                     width: 100%; height: 100%;
                                     vertical-alignment: center;
                                     color: Theme.text-primary;

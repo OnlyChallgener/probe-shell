@@ -1,5 +1,5 @@
 import { Theme } from "theme.slint";
-import { LabeledInput, PrimaryButton, GhostButton } from "widgets.slint";
+import { EditableInput, LabeledInput, PrimaryButton, GhostButton } from "widgets.slint";
 
 // One SSH port-forward row shown in the session dialog (#56). `summary` is a
 // ready-to-display line like "-L 127.0.0.1:8080 → host:80".
@@ -69,7 +69,7 @@ component MiniInput inherits Rectangle {
     border-width: 1px;
     border-color: mi.has-focus ? Theme.accent : Theme.border-subtle;
     background: Theme.bg-root;
-    mi := TextInput {
+    mi := EditableInput {
         x: 8px;
         width: parent.width - 16px;
         height: parent.height;
@@ -112,7 +112,7 @@ component GroupCombo inherits VerticalLayout {
         border-color: ginput.has-focus ? Theme.accent : Theme.border-subtle;
         background: Theme.bg-root;
 
-        ginput := TextInput {
+        ginput := EditableInput {
             x: 10px;
             width: parent.width - 44px;     // room for the ▾ button
             height: parent.height;
@@ -421,7 +421,7 @@ export component SessionDialog inherits Rectangle {
                         border-width: 1px;
                         border-color: keyin.has-focus ? Theme.accent : Theme.border-subtle;
                         background: Theme.bg-root;
-                        keyin := TextInput {
+                        keyin := EditableInput {
                             x: 10px; y: 0px;
                             width: parent.width - 20px;
                             height: parent.height;
