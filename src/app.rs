@@ -2686,7 +2686,7 @@ fn wire_session_callbacks(
             if kind != crate::config::SessionKind::Serial && host.is_empty() {
                 if let Some(w) = weak.upgrade() {
                     w.set_dialog_host("".into());
-                    w.set_host_missing(true);
+                    w.set_dialog_host_missing(true);
                 }
                 return;
             }
