@@ -1,6 +1,6 @@
 [package]
 name = "probe-shell"
-version = "0.7.8"
+version = "0.7.9"
 edition = "2021"
 authors = ["Probe Shell contributors"]
 description = "Probe Shell: a lightweight SSH terminal and router-friendly file browser written in Rust + Slint"
@@ -44,13 +44,13 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rand = "0.8"
 async-trait = "0.1"
 futures = "0.3"
-vt100 = "0.15"
+vt100 = "0.16.2"
 # Native ConPTY on Windows (and a PTY on Unix) for the built-in local shells.
 portable-pty = "0.8"
 # East Asian width detection for terminal copy/find column math. Pinned to the
 # same version vt100 uses so "is this glyph 2 cells wide?" agrees with how vt100
 # lays CJK glyphs on the grid — otherwise selection/find columns drift (#132).
-unicode-width = "0.1.14"
+unicode-width = "0.2.2"
 russh-sftp = "2"
 rfd = "0.15"
 arboard = "3"
