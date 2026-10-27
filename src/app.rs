@@ -44,8 +44,9 @@ struct TermBuffer {
     /// Plain text of the rows currently displayed (drives find + selection).
     displayed_text: Vec<String>,
     /// CSI-scanner state for rewriting HVP (`ESC [ … f`) into CUP (`ESC [ … H`).
-    /// vt100 0.15 only implements the `H` final byte, not the equivalent `f`
-    /// that btop/htop use for cursor positioning — without this rewrite their
+    /// Normalize HVP (`f`) to CUP (`H`) for cursor positioning compatibility;
+    /// some terminal parsers do not support both forms, while btop/htop use HVP.
+    /// Without this rewrite their
     /// absolute-positioned full-screen output collapses into a scrolling mess.
     /// Kept here so a sequence split across read chunks is still translated.
     csi_state: CsiState,
@@ -8482,8 +8483,8 @@ impl TermBuffer {
     /// and nothing is lost.  (Splitting only on `\n` is safe: VT escape
     /// sequences never contain a newline.)
     fn ingest(&mut self, input: &[u8]) {
-        // Rewrite HVP (`ESC [ … f`) → CUP (`ESC [ … H`) so vt100 (which only
-        // implements `H`) honours btop/htop's absolute cursor positioning.
+        // Normalize HVP (`ESC [ … f`) → CUP (`ESC [ … H`) to preserve
+        // absolute cursor positioning across terminal parser versions.
         let bytes = self.rewrite_hvp(input);
         // Retain the (post-rewrite) stream, capped, so a resize can replay it at
         // the new width and reflow already-printed output (#169).
@@ -9316,4 +9317,50 @@ mod selection_tests {
         assert_eq!(m2[0].col, 0);
         assert_eq!(m2[0].len, 4, "two wide glyphs span four grid cells");
     }
+
+    // Regression for vt100 0.15.x: leaving vim/htop after a window shrink
+    // could restore a saved cursor beyond the new grid and panic.
+    #[test]
+    fn alt_screen_shrink_then_exit_keeps_cursor_in_bounds() {
+        let mut buf = make_buf(24, 80, &[], &[], 0);
+        buf.ingest(b"\x1b[24;80H\x1b[?1049h\x1b[20;70Hvim-screen");
+        assert!(buf.parser.screen().alternate_screen());
+
+        let buffers: TermBuffers = Arc::new(Mutex::new(HashMap::from([
+            ("test-tab".to_string(), buf),
+        ])));
+        let handles: Rc<RefCell<HashMap<String, SessionHandle>>> =
+            Rc::new(RefCell::new(HashMap::new()));
+        let last_size = Arc::new(Mutex::new((80, 24)));
+
+        // This is the same path as the real terminal resize callback, not
+        // merely a direct call to the third-party parser.
+        assert!(apply_terminal_resize(
+            &handles, &buffers, &last_size, "test-tab", 18, 5
+        ));
+
+        let mut guard = buffers.lock().unwrap();
+        let buf = guard.get_mut("test-tab").unwrap();
+        assert_eq!(buf.parser.screen().size(), (5, 18));
+        buf.ingest(b"\x1b[?1049l\r\nshell-ready");
+        assert!(!buf.parser.screen().alternate_screen());
+        let (row, col) = buf.parser.screen().cursor_position();
+        assert!(row < 5 && col < 18, "cursor outside 5x18 grid: ({row},{col})");
+        let _ = buf.render(); // Real cell rendering must also remain safe.
+    }
+
+    #[test]
+    fn cjk_selection_and_find_stay_aligned_after_normal_screen_reflow() {
+        let mut buf = make_buf(8, 40, &[], &[], 0);
+        buf.ingest("提示: 1pctl\r\n".as_bytes());
+        buf.reflow(8, 18);
+        let _ = buf.render();
+
+        let matches = compute_find_matches(&buf.displayed_text, "1pctl");
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].col, 6, "find should count CJK grid cells, not chars");
+        assert_eq!(matches[0].len, 5);
+        assert_eq!(unicode_width::UnicodeWidthChar::width('提'), Some(2));
+    }
+
 }
