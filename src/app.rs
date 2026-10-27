@@ -3848,7 +3848,7 @@ fn apply_terminal_resize(
         // Alt-screen (tmux/vim/btop): the remote redraws the whole screen on
         // SIGWINCH. Row-only changes and incomplete raw streams must also use
         // set_size so valid history is never destroyed by a partial replay.
-        buf.parser.set_size(new_rows, new_cols);
+        buf.parser.screen_mut().set_size(new_rows, new_cols);
     } else {
         // Reflow already-printed output to the new width by replaying the byte
         // stream — vt100's set_size only truncates/pads (#169).
@@ -8241,7 +8241,7 @@ fn cell_attrs(
             } else if s.is_empty() {
                 " ".to_string()
             } else {
-                s
+                s.to_string()
             };
             (s, fg, bg, cell.bold(), cell.is_wide())
         }
